@@ -56,10 +56,10 @@ export async function POST(request: Request) {
       accessToken: token.access_token,
     });
 
-    await supabase
-      .from("agenda_eventos")
-      .update({ google_event_id: googleEvent.id })
-      .eq("id", event.id);
+ await (supabase
+  .from("agenda_eventos")
+  .update({ google_event_id: googleEvent.id as string })
+  .eq("id", event.id) as any);
 
     return NextResponse.json({ googleEvent });
   } catch (error) {
