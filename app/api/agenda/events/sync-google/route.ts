@@ -18,6 +18,7 @@ export async function POST(request: Request) {
 
     const { eventId } = (await request.json()) as { eventId: string };
     const supabase = await createClient();
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
       .from("google_calendar_connections")
       .select("refresh_token")
       .eq("tenant_id", event.tenant_id)
+      .returns<{ refresh_token: string }[]>()
       .maybeSingle();
 
     if (connectionError || !connection) {
@@ -48,6 +50,7 @@ export async function POST(request: Request) {
     }
 
     const token = await refreshGoogleAccessToken(connection.refresh_token);
+
     const googleEvent = await upsertGoogleCalendarEvent({
       event,
       accessToken: token.access_token,
