@@ -1,0 +1,17 @@
+import { NextResponse } from "next/server";
+import { createAgendaEvent } from "@/modules/agenda/services/agenda-server";
+import type { AgendaEventInput } from "@/modules/agenda/types";
+
+export async function POST(request: Request) {
+  try {
+    const payload = (await request.json()) as AgendaEventInput;
+    const event = await createAgendaEvent(payload);
+
+    return NextResponse.json({ event }, { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Erro ao criar evento." },
+      { status: 400 },
+    );
+  }
+}
