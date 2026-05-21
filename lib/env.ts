@@ -8,8 +8,12 @@ export const env = {
   googleCalendarId: process.env.GOOGLE_CALENDAR_ID ?? "primary",
 };
 
+export function hasPublicSupabaseEnv() {
+  return Boolean(env.supabaseUrl && env.supabasePublishableKey);
+}
+
 export function assertPublicSupabaseEnv() {
-  if (!env.supabaseUrl || !env.supabasePublishableKey) {
+  if (!hasPublicSupabaseEnv()) {
     throw new Error(
       "Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.",
     );
