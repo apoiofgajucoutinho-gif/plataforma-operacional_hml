@@ -224,6 +224,63 @@ html[data-theme="dark"] .agenda-metric-icon {
   box-shadow: inset 0 0 0 1px rgba(226, 208, 184, 0.18) !important;
 }
 
+.agenda-type-badge {
+  border: 1px solid transparent;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+}
+
+.agenda-type-paciente {
+  border-color: rgba(13, 58, 78, 0.12);
+  background-color: #eaf6f4;
+  color: #0d3a4e;
+}
+
+.agenda-type-palestra {
+  border-color: rgba(122, 78, 50, 0.14);
+  background-color: #f3e8dd;
+  color: #7a4e32;
+}
+
+.agenda-type-aula {
+  border-color: rgba(13, 58, 78, 0.12);
+  background-color: #eaf2fa;
+  color: #0d3a4e;
+}
+
+.agenda-type-interno {
+  border-color: rgba(13, 58, 78, 0.1);
+  background-color: #f4f1ea;
+  color: #0d3a4e;
+}
+
+html[data-theme="dark"] .agenda-type-badge {
+  box-shadow: inset 0 0 0 1px rgba(244, 241, 234, 0.06), 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+html[data-theme="dark"] .agenda-type-paciente {
+  border-color: rgba(111, 211, 197, 0.56) !important;
+  background-color: rgba(111, 211, 197, 0.2) !important;
+  color: #c9fff4 !important;
+}
+
+html[data-theme="dark"] .agenda-type-palestra {
+  border-color: rgba(226, 208, 184, 0.58) !important;
+  background-color: rgba(226, 208, 184, 0.22) !important;
+  color: #ffe1c7 !important;
+}
+
+html[data-theme="dark"] .agenda-type-aula {
+  border-color: rgba(130, 190, 240, 0.58) !important;
+  background-color: rgba(130, 190, 240, 0.2) !important;
+  color: #d7efff !important;
+}
+
+html[data-theme="dark"] .agenda-type-interno {
+  border-color: rgba(244, 241, 234, 0.34) !important;
+  background-color: rgba(244, 241, 234, 0.14) !important;
+  color: #f4f1ea !important;
+}
+
 html[data-theme="dark"] .combo-chart-bar {
   background-color: rgba(226, 208, 184, 0.22) !important;
 }

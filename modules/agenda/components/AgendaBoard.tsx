@@ -41,10 +41,10 @@ const eventStatuses: Array<{ value: AgendaEventStatus; label: string }> = [
 ];
 
 const typeStyles: Record<AgendaEventType, string> = {
-  paciente: "bg-[#EAF6F4] text-brand-teal",
-  palestra: "bg-[#F3E8DD] text-[#7A4E32]",
-  aula: "bg-[#EAF2FA] text-brand-teal",
-  interno: "bg-brand-cream text-brand-teal",
+  paciente: "agenda-type-badge agenda-type-paciente",
+  palestra: "agenda-type-badge agenda-type-palestra",
+  aula: "agenda-type-badge agenda-type-aula",
+  interno: "agenda-type-badge agenda-type-interno",
 };
 
 const typeMetrics: Array<{
