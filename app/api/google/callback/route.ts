@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { isGoogleCalendarConfigured } from "@/services/google/calendar";
+import {
+  isGoogleCalendarConfigured,
+  upsertGoogleCalendarEvent,
+} from "@/services/google/calendar";
+import type { AgendaEvent } from "@/modules/agenda/types";
 
 type GoogleOAuthTokenResponse = {
   access_token: string;
@@ -55,7 +60,8 @@ export async function GET(request: NextRequest) {
   const userInfo = (await userInfoResponse.json()) as GoogleUserInfo;
 
   const supabase = await createClient();
-  await supabase.from("google_calendar_connections").upsert(
+  const dataClient = createAdminClient() ?? supabase;
+  await dataClient.from("google_calendar_connections").upsert(
     {
       tenant_id: tenantId,
       account_email: userInfo.email,
@@ -64,6 +70,39 @@ export async function GET(request: NextRequest) {
     },
     { onConflict: "tenant_id,account_email" },
   );
+
+  const { data: events } = await dataClient
+    .from("agenda_eventos")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .is("google_event_id", null)
+    .gte("fim", new Date().toISOString())
+    .order("inicio", { ascending: true })
+    .limit(50)
+    .returns<AgendaEvent[]>();
+
+  let synced = 0;
+  for (const event of events ?? []) {
+    try {
+      const googleEvent = await upsertGoogleCalendarEvent({
+        event,
+        accessToken: token.access_token,
+      });
+
+      await dataClient
+        .from("agenda_eventos")
+        .update({ google_event_id: googleEvent.id })
+        .eq("id", event.id);
+
+      synced += 1;
+    } catch {
+      // Keep OAuth connection successful even if a legacy event fails to sync.
+    }
+  }
+
+  if (synced > 0) {
+    return NextResponse.redirect(new URL(`/agenda?google=connected&synced=${synced}`, request.url));
+  }
 
   return NextResponse.redirect(new URL("/agenda?google=connected", request.url));
 }
