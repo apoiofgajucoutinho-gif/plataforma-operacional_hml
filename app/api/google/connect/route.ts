@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isGoogleCalendarConfigured } from "@/services/google/calendar";
 
@@ -20,15 +21,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  const { data: membership } = await supabase
+  const dataClient = createAdminClient() ?? supabase;
+  const { data: membership } = await dataClient
     .from("tenant_members")
-    .select("tenant_id")
+    .select("tenant_id, role")
     .eq("user_id", user.id)
+    .eq("ativo", true)
     .limit(1)
     .maybeSingle();
 
   if (!membership) {
-    return NextResponse.redirect(new URL("/agenda", request.url));
+    return NextResponse.redirect(new URL("/agenda?google=no-tenant", request.url));
+  }
+
+  if (membership.role !== "ADMIN") {
+    return NextResponse.redirect(new URL("/agenda?google=admin-required", request.url));
   }
 
   const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -41,6 +48,7 @@ export async function GET(request: NextRequest) {
   );
   authorizationUrl.searchParams.set("access_type", "offline");
   authorizationUrl.searchParams.set("prompt", "consent");
+  authorizationUrl.searchParams.set("include_granted_scopes", "true");
   authorizationUrl.searchParams.set("state", membership.tenant_id);
 
   return NextResponse.redirect(authorizationUrl);
