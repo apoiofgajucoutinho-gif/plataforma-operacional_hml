@@ -15,7 +15,7 @@ export default function LoginPage() {
         <div className="mt-6 text-center">
           <h1 className="text-2xl font-semibold text-brand-teal">Acesso operacional</h1>
           <p className="mt-2 text-sm text-brand-teal/70">
-            Entre com e-mail para acessar a agenda multiempresa.
+            Entre com e-mail e codigo de validacao para acessar a plataforma.
           </p>
         </div>
         <LoginForm />

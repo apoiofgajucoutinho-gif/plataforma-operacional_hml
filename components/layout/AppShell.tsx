@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -11,6 +12,7 @@ import {
   CircleDollarSign,
   LayoutDashboard,
   LineChart,
+  LogOut,
   MonitorSmartphone,
   Moon,
   PanelLeftClose,
@@ -20,6 +22,8 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import { TrackPageView } from "@/components/adoption/TrackPageView";
+import { readyModules } from "@/lib/auth/modules";
+import { createClient } from "@/lib/supabase/client";
 
 const navigation = [
   { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda" },
@@ -52,10 +56,11 @@ export function AppShell({
   activeItem?: string;
   allowedItems?: string[];
 }) {
+  const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const visibleNavigation = allowedItems
-    ? navigation.filter((item) => allowedItems.includes(item.key))
+    ? navigation.filter((item) => allowedItems.includes(item.key) || allowedItems.includes("admin"))
     : navigation;
 
   useEffect(() => {
@@ -85,6 +90,24 @@ export function AppShell({
     return () => media.removeEventListener("change", applyTheme);
   }, [themeMode]);
 
+  useEffect(() => {
+    let timeoutId: number;
+    const resetTimer = () => {
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        void signOut();
+      }, 10 * 60 * 1000);
+    };
+    const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
+    events.forEach((eventName) => window.addEventListener(eventName, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      events.forEach((eventName) => window.removeEventListener(eventName, resetTimer));
+    };
+  }, []);
+
   function toggleSidebar() {
     setIsCollapsed((current) => {
       window.localStorage.setItem("platform-sidebar-collapsed", String(!current));
@@ -97,6 +120,12 @@ export function AppShell({
     window.localStorage.setItem("platform-theme-mode", nextThemeMode);
   }
 
+  async function signOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
+
   return (
     <div
       className="min-h-screen lg:grid"
@@ -104,20 +133,20 @@ export function AppShell({
     >
       <aside className="app-sidebar flex border-b border-white/70 bg-brand-teal px-4 py-4 text-white transition-[width] lg:min-h-screen lg:flex-col lg:border-b-0 lg:border-r">
         <div className="flex items-center justify-between gap-3 lg:block">
-          <Link href="/agenda" className={clsx("block", isCollapsed && "lg:flex lg:justify-center")}>
+          <Link href="/" className="flex justify-center">
             <Image
               src="/brand/logo-horizontal-fundo-escuro.png"
               alt="Juliana Coutinho"
               width={220}
               height={122}
               priority
-              className={clsx("h-16 w-auto object-contain transition-all lg:h-24", isCollapsed && "lg:h-12")}
+              className={clsx("h-16 w-auto object-contain transition-all lg:h-24", isCollapsed && "lg:h-12 lg:max-w-12")}
             />
           </Link>
           <button
             type="button"
             onClick={toggleSidebar}
-            className="app-sidebar-toggle hidden h-10 w-10 items-center justify-center rounded-md bg-white/10 text-white transition hover:bg-white/20 lg:mt-5 lg:flex"
+            className="app-sidebar-toggle mx-auto hidden h-10 w-10 items-center justify-center rounded-md bg-white/10 text-white transition hover:bg-white/20 lg:mt-5 lg:flex"
             aria-label={isCollapsed ? "Abrir menu lateral" : "Fechar menu lateral"}
             title={isCollapsed ? "Abrir menu" : "Fechar menu"}
           >
@@ -129,16 +158,24 @@ export function AppShell({
           {visibleNavigation.map((item) => {
             const Icon = item.icon;
             const isActive = item.key === activeItem;
+            const isReady = readyModules.includes(item.key);
+            const isDisabled = !isReady;
 
             return (
               <Link
                 key={item.label}
-                href={item.href}
-                title={item.label}
+                href={isDisabled ? "#" : item.href}
+                aria-disabled={isDisabled}
+                onClick={(event) => {
+                  if (isDisabled) event.preventDefault();
+                }}
+                title={isDisabled ? "Modulo em desenvolvimento. Em breve estara disponivel." : item.label}
                 data-active={isActive}
+                data-disabled={isDisabled}
                 className={clsx(
                   "app-nav-item flex min-w-max items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition",
                   isCollapsed && "lg:min-w-0 lg:justify-center lg:px-0",
+                  isDisabled && "cursor-not-allowed opacity-55",
                   isActive
                     ? "bg-white !text-brand-teal shadow-sm hover:bg-white"
                     : "text-brand-cream hover:bg-white/10 hover:text-white",
@@ -150,16 +187,12 @@ export function AppShell({
             );
           })}
         </nav>
+      </aside>
 
-        <div className={clsx("hidden lg:mt-auto lg:flex", isCollapsed ? "lg:justify-center" : "lg:justify-center")}>
-          <div
-            className={clsx(
-              "theme-toggle grid gap-1 rounded-full border border-white/15 bg-black/15 p-1 shadow-sm",
-              isCollapsed ? "grid-cols-1" : "grid-cols-3",
-            )}
-            aria-label="Selecionar tema"
-            role="group"
-          >
+      <TrackPageView activeItem={activeItem} />
+      <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
+        <div className="mb-3 flex justify-end gap-2">
+          <div className="theme-toggle grid grid-cols-3 gap-1 rounded-full border border-brand-sand/50 bg-white/60 p-1 shadow-sm" aria-label="Selecionar tema" role="group">
             {themeOptions.map((option) => {
               const Icon = option.icon;
               const isActive = option.value === themeMode;
@@ -172,8 +205,8 @@ export function AppShell({
                   title={option.label}
                   aria-label={option.label}
                   className={clsx(
-                    "theme-toggle-option flex h-8 w-8 items-center justify-center rounded-full text-white/55 transition hover:bg-white/10 hover:text-white",
-                    isActive && "bg-white/10 text-white ring-1 ring-white/70",
+                    "theme-toggle-option flex h-8 w-8 items-center justify-center rounded-full text-brand-teal/55 transition hover:bg-brand-cream hover:text-brand-teal",
+                    isActive && "bg-white text-brand-teal ring-1 ring-brand-clay/50",
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -181,11 +214,18 @@ export function AppShell({
               );
             })}
           </div>
+          <button
+            type="button"
+            onClick={signOut}
+            title="Sair"
+            aria-label="Sair"
+            className="theme-toggle-option flex h-10 w-10 items-center justify-center rounded-full border border-brand-sand/50 bg-white/60 text-brand-teal/70 shadow-sm transition hover:bg-brand-cream hover:text-brand-teal"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
-      </aside>
-
-      <TrackPageView activeItem={activeItem} />
-      <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-8">{children}</main>
+        {children}
+      </main>
     </div>
   );
 }
