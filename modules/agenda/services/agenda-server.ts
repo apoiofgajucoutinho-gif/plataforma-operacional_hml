@@ -40,6 +40,23 @@ async function getAllowedModules(tenantId: string, role: string) {
   return (data ?? []).map((item) => item.module as string);
 }
 
+function validateAgendaInput(input: AgendaEventInput) {
+  if (!input.titulo?.trim()) {
+    throw new Error("Informe um titulo para o evento.");
+  }
+
+  const inicio = new Date(input.inicio);
+  const fim = new Date(input.fim);
+
+  if (Number.isNaN(inicio.getTime()) || Number.isNaN(fim.getTime())) {
+    throw new Error("Informe data e horario validos.");
+  }
+
+  if (fim <= inicio) {
+    throw new Error("A data/hora final precisa ser depois do inicio.");
+  }
+}
+
 export async function getAgendaContext() {
   const userClient = await createClient();
   const {
@@ -128,6 +145,8 @@ export async function getAgendaContext() {
 }
 
 export async function createAgendaEvent(input: AgendaEventInput) {
+  validateAgendaInput(input);
+
   const userClient = await createClient();
   const {
     data: { user },
@@ -156,6 +175,7 @@ export async function createAgendaEvent(input: AgendaEventInput) {
       titulo: input.titulo,
       descricao: input.descricao ?? null,
       tipo: input.tipo,
+      status: input.status ?? "agendado",
       inicio: input.inicio,
       fim: input.fim,
       local: input.local ?? null,
@@ -173,6 +193,8 @@ export async function createAgendaEvent(input: AgendaEventInput) {
 }
 
 export async function updateAgendaEvent(eventId: string, input: AgendaEventInput) {
+  validateAgendaInput(input);
+
   const userClient = await createClient();
   const {
     data: { user },

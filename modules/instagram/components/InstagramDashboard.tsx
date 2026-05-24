@@ -40,6 +40,8 @@ type SortKey =
   | "compartilhamentos"
   | "engajamento_classificacao";
 
+const RESULTS_PAGE_SIZE = 20;
+
 const postTypes: Array<{ value: TypeFilter; label: string }> = [
   { value: "all", label: "Todos os Tipos" },
   { value: "Reels", label: "Reels" },
@@ -311,6 +313,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
   const [rankMetric, setRankMetric] = useState<RankMetric>("alcance");
   const [sortKey, setSortKey] = useState<SortKey>("data_postagem");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [resultsPage, setResultsPage] = useState(1);
 
   useEffect(() => {
     void fetch("/api/adoption/track", {
@@ -324,6 +327,10 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
       keepalive: true,
     });
   }, [activeTab]);
+
+  useEffect(() => {
+    setResultsPage(1);
+  }, [period, type, year, month, week, sortKey, sortDirection]);
 
   const years = useMemo(
     () => [...new Set(context.posts.map((post) => parseDate(post.data_postagem).getFullYear().toString()))].sort().reverse(),
@@ -414,7 +421,13 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
     total: filteredPosts.filter((post) => post.engajamento_classificacao === item).length,
   }));
   const weeklyAverage = totalPosts / Math.max(postsByWeek(filteredPosts).length, 1);
-  const groupedRows = month !== "all" ? groupedByMonthWeek(sortedPosts) : [];
+  const resultsPageCount = Math.max(Math.ceil(sortedPosts.length / RESULTS_PAGE_SIZE), 1);
+  const currentResultsPage = Math.min(resultsPage, resultsPageCount);
+  const paginatedPosts = sortedPosts.slice(
+    (currentResultsPage - 1) * RESULTS_PAGE_SIZE,
+    currentResultsPage * RESULTS_PAGE_SIZE,
+  );
+  const groupedRows = month !== "all" ? groupedByMonthWeek(paginatedPosts) : [];
 
   function resetPeriodFilters(nextPeriod: PeriodFilter) {
     setPeriod(nextPeriod);
@@ -647,12 +660,19 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
               </div>
             </div>
             <ResultsTable
-              posts={sortedPosts}
+              posts={paginatedPosts}
               groupedRows={groupedRows}
               shouldGroup={month !== "all" && week === "all"}
               sortDirection={sortDirection}
               sortKey={sortKey}
               onSort={changeSort}
+            />
+            <Pagination
+              page={currentResultsPage}
+              pageCount={resultsPageCount}
+              total={sortedPosts.length}
+              pageSize={RESULTS_PAGE_SIZE}
+              onPageChange={setResultsPage}
             />
           </Card>
         </>
@@ -689,6 +709,52 @@ function FilterButton({ children, isActive, onClick }: { children: ReactNode; is
   );
 }
 
+function Pagination({
+  page,
+  pageCount,
+  total,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-[#EFDDE1] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs font-bold text-brand-teal/60">
+        Exibindo {start}-{end} de {numberFormat(total)}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(page - 1, 1))}
+          disabled={page <= 1}
+          className="h-9 rounded-md border border-[#E9CBD1] bg-white px-3 text-xs font-bold text-brand-teal disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Anterior
+        </button>
+        <span className="text-xs font-bold text-brand-teal/60">
+          Pagina {page} de {pageCount}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(page + 1, pageCount))}
+          disabled={page >= pageCount}
+          className="h-9 rounded-md border border-[#E9CBD1] bg-white px-3 text-xs font-bold text-brand-teal disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Proxima
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Select({ children, value, onChange }: { children: ReactNode; value: string; onChange: (value: string) => void }) {
   return (
     <select
@@ -706,6 +772,19 @@ function SectionTitle({ icon, title }: { icon: ReactNode; title: string }) {
     <div className="flex items-center gap-2 border-b border-[#EFDDE1] pb-2">
       <span className="text-brand-clay">{icon}</span>
       <h2 className="text-base font-bold text-brand-teal">{title}</h2>
+    </div>
+  );
+}
+
+function ChartLegend({ items }: { items: Array<{ label: string; color: string }> }) {
+  return (
+    <div className="mt-4 flex flex-wrap gap-3">
+      {items.map((item) => (
+        <span key={item.label} className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-teal/65">
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} />
+          {item.label}
+        </span>
+      ))}
     </div>
   );
 }
@@ -850,6 +929,12 @@ function VerticalBarCard({
       <div className="mt-3 grid grid-cols-4 gap-2 text-center text-[10px] font-semibold text-brand-teal/60">
         {rows.map((row) => <span key={row.label} className="truncate">{row.label}</span>)}
       </div>
+      <ChartLegend
+        items={rows.map((row, index) => ({
+          label: row.label,
+          color: highlightMax && row.value === max && row.value > 0 ? "#9D6F4E" : colors[index % colors.length],
+        }))}
+      />
     </Card>
   );
 }
@@ -882,6 +967,12 @@ function ComboChartCard({ title, rows }: { title: string; rows: Array<{ label: s
       <div className="mt-3 grid grid-cols-7 gap-2 text-center text-[10px] font-semibold text-brand-teal/60">
         {rows.map((row) => <span key={row.label} className="truncate">{row.label.slice(0, 3)}</span>)}
       </div>
+      <ChartLegend
+        items={[
+          { label: "Barras: posts publicados", color: "#F0CBD1" },
+          { label: "Ponto: alcance medio", color: "#9D6F4E" },
+        ]}
+      />
     </Card>
   );
 }
@@ -917,6 +1008,12 @@ function LineChartCard({ title, rows }: { title: string; rows: Array<{ label: st
           ))}
         </div>
       </div>
+      <ChartLegend
+        items={[
+          { label: "Colunas: alcance medio", color: "#9D6F4E" },
+          { label: "Barra lateral: quantidade de posts", color: "#62B483" },
+        ]}
+      />
     </Card>
   );
 }

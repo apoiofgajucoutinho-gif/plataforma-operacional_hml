@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { BarChart3, CalendarDays, Eye, Users } from "lucide-react";
 import { Card } from "@/components/ui/Card";
@@ -8,6 +8,7 @@ import { ExportButtons } from "@/components/ui/ExportButtons";
 import type { ExportColumn } from "@/lib/client/table-export";
 
 type PeriodFilter = "7d" | "15d" | "30d" | "all";
+const ACTIVITY_PAGE_SIZE = 20;
 
 type AdoptionEvent = {
   id: string;
@@ -108,6 +109,7 @@ export function AdocaoDashboard({
   const [period, setPeriod] = useState<PeriodFilter>("all");
   const [moduleFilter, setModuleFilter] = useState("all");
   const [userFilter, setUserFilter] = useState("all");
+  const [activityPage, setActivityPage] = useState(1);
 
   const modules = useMemo(() => {
     return [...new Set(events.map((event) => event.module))].sort();
@@ -129,12 +131,22 @@ export function AdocaoDashboard({
     return nextEvents;
   }, [events, moduleFilter, period, userFilter]);
 
+  useEffect(() => {
+    setActivityPage(1);
+  }, [period, moduleFilter, userFilter]);
+
   const totalViews = filteredEvents.length;
   const activeUsers = new Set(filteredEvents.map(userLabel)).size;
   const today = filteredEvents.filter((event) => new Date(event.created_at).toDateString() === new Date().toDateString()).length;
   const moduleRows = groupCount(filteredEvents.map((event) => moduleLabels[event.module] ?? event.module));
   const pageRows = groupCount(filteredEvents.map(pageLabel));
   const userRows = groupCount(filteredEvents.map(userLabel));
+  const activityPageCount = Math.max(Math.ceil(filteredEvents.length / ACTIVITY_PAGE_SIZE), 1);
+  const currentActivityPage = Math.min(activityPage, activityPageCount);
+  const paginatedEvents = filteredEvents.slice(
+    (currentActivityPage - 1) * ACTIVITY_PAGE_SIZE,
+    currentActivityPage * ACTIVITY_PAGE_SIZE,
+  );
   const activityColumns: ExportColumn<AdoptionEvent>[] = [
     { header: "Data", value: (event) => dateTimeFormat(event.created_at) },
     { header: "Usuario", value: (event) => userLabel(event) },
@@ -234,7 +246,7 @@ export function AdocaoDashboard({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F0DDE1]">
-              {filteredEvents.slice(0, 80).map((event) => (
+              {paginatedEvents.map((event) => (
                 <tr key={event.id} className="hover:bg-[#FFF7F8]">
                   <td className="px-4 py-3 text-brand-teal/70">{dateTimeFormat(event.created_at)}</td>
                   <td className="px-4 py-3 font-semibold text-brand-teal">{userLabel(event)}</td>
@@ -246,6 +258,13 @@ export function AdocaoDashboard({
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={currentActivityPage}
+          pageCount={activityPageCount}
+          total={filteredEvents.length}
+          pageSize={ACTIVITY_PAGE_SIZE}
+          onPageChange={setActivityPage}
+        />
       </Card>
     </div>
   );
@@ -262,6 +281,52 @@ function PillButton({ children, isActive, onClick }: { children: ReactNode; isAc
     >
       {children}
     </button>
+  );
+}
+
+function Pagination({
+  page,
+  pageCount,
+  total,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-[#EFDDE1] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs font-bold text-brand-teal/60">
+        Exibindo {start}-{end} de {numberFormat(total)}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(page - 1, 1))}
+          disabled={page <= 1}
+          className="h-9 rounded-md border border-[#E9CBD1] bg-white px-3 text-xs font-bold text-brand-teal disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Anterior
+        </button>
+        <span className="text-xs font-bold text-brand-teal/60">
+          Pagina {page} de {pageCount}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(page + 1, pageCount))}
+          disabled={page >= pageCount}
+          className="h-9 rounded-md border border-[#E9CBD1] bg-white px-3 text-xs font-bold text-brand-teal disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          Proxima
+        </button>
+      </div>
+    </div>
   );
 }
 

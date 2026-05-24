@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
+  BarChart3,
   BookOpen,
   BriefcaseBusiness,
+  CalendarDays,
   CalendarPlus,
   Clock3,
+  List,
   Lightbulb,
   GraduationCap,
   MapPin,
@@ -77,10 +80,25 @@ const typeMetrics: Array<{
 ];
 
 type TimelineFilter = "today" | "next7" | "month";
+type TimelineView = "calendar" | "list" | "gantt";
 
 function toDateInputValue(date: Date) {
   const timezoneOffset = date.getTimezoneOffset() * 60000;
   return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 16);
+}
+
+function addHours(date: Date, hours: number) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
+function defaultBusinessStart() {
+  const date = new Date();
+  date.setHours(8, 0, 0, 0);
+  return date;
+}
+
+function endAfterStart(startValue: string) {
+  return toDateInputValue(addHours(new Date(startValue), 1));
 }
 
 function formatDateTime(value: string) {
@@ -138,6 +156,14 @@ function isSameMonth(date: Date, monthValue: string) {
   return toMonthInputValue(date) === monthValue;
 }
 
+function monthLabel(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat("pt-BR", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
+}
+
 function sortEvents(events: AgendaEvent[]) {
   return [...events].sort(
     (a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime(),
@@ -179,11 +205,27 @@ export function AgendaBoard({
   const [events, setEvents] = useState(sortEvents(initialEvents));
   const [editingEvent, setEditingEvent] = useState<AgendaEvent | null>(null);
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("next7");
+  const [timelineView, setTimelineView] = useState<TimelineView>("calendar");
   const [selectedMonth, setSelectedMonth] = useState(toMonthInputValue(new Date()));
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const defaultStart = useMemo(() => toDateInputValue(new Date(Date.now() + 3600000)), []);
-  const defaultEnd = useMemo(() => toDateInputValue(new Date(Date.now() + 7200000)), []);
+  const defaultStart = useMemo(() => toDateInputValue(defaultBusinessStart()), []);
+  const defaultEnd = useMemo(() => endAfterStart(defaultStart), [defaultStart]);
+  const [formStart, setFormStart] = useState(defaultStart);
+  const [formEnd, setFormEnd] = useState(defaultEnd);
+
+  useEffect(() => {
+    if (editingEvent) {
+      const nextStart = toDateInputValue(new Date(editingEvent.inicio));
+      const nextEnd = toDateInputValue(new Date(editingEvent.fim));
+      setFormStart(nextStart);
+      setFormEnd(new Date(nextEnd) > new Date(nextStart) ? nextEnd : endAfterStart(nextStart));
+      return;
+    }
+
+    setFormStart(defaultStart);
+    setFormEnd(defaultEnd);
+  }, [defaultEnd, defaultStart, editingEvent]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -197,6 +239,12 @@ export function AgendaBoard({
     setMessage(null);
 
     const payload = getEventFormValues(event.currentTarget);
+    if (new Date(payload.fim) <= new Date(payload.inicio)) {
+      setMessage("A data/hora final precisa ser depois do inicio.");
+      setIsSaving(false);
+      return;
+    }
+
     const endpoint = editingEvent
       ? `/api/agenda/events/${editingEvent.id}`
       : "/api/agenda/events";
@@ -221,7 +269,33 @@ export function AgendaBoard({
         return sortEvents(nextEvents);
       });
       setEditingEvent(null);
-      setMessage(editingEvent ? "Agendamento atualizado." : "Evento salvo no banco.");
+      setFormStart(defaultStart);
+      setFormEnd(defaultEnd);
+      let googleMessage = " Google Agenda sincronizado.";
+
+      try {
+        const syncResponse = await fetch("/api/agenda/events/sync-google", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId: result.event.id }),
+        });
+
+        if (!syncResponse.ok) {
+          const syncResult = (await syncResponse.json()) as { error?: string };
+          googleMessage = ` Salvo no banco; Google Agenda pendente: ${syncResult.error ?? "revise a conexao OAuth."}`;
+        } else {
+          const syncResult = (await syncResponse.json()) as { event?: AgendaEvent };
+          if (syncResult.event) {
+            setEvents((current) =>
+              sortEvents(current.map((item) => (item.id === syncResult.event!.id ? syncResult.event! : item))),
+            );
+          }
+        }
+      } catch {
+        googleMessage = " Salvo no banco; Google Agenda pendente por falha de conexao.";
+      }
+
+      setMessage(`${editingEvent ? "Agendamento atualizado." : "Evento salvo no banco."}${googleMessage}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro ao salvar evento.");
     } finally {
@@ -243,8 +317,8 @@ export function AgendaBoard({
         titulo: "",
         tipo: "paciente" as AgendaEventType,
         status: "agendado" as AgendaEventStatus,
-        inicio: defaultStart,
-        fim: defaultEnd,
+        inicio: formStart,
+        fim: formEnd,
         local: "",
         descricao: "",
       };
@@ -425,8 +499,26 @@ export function AgendaBoard({
               <Field label="Local" name="local" placeholder="Sala, online..." initialValue={formDefaults.local} />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              <Field label="Inicio" name="inicio" type="datetime-local" initialValue={formDefaults.inicio} />
-              <Field label="Fim" name="fim" type="datetime-local" initialValue={formDefaults.fim} />
+              <Field
+                label="Inicio"
+                name="inicio"
+                type="datetime-local"
+                value={formStart}
+                onChange={(value) => {
+                  setFormStart(value);
+                  if (new Date(formEnd) <= new Date(value)) {
+                    setFormEnd(endAfterStart(value));
+                  }
+                }}
+              />
+              <Field
+                label="Fim"
+                name="fim"
+                type="datetime-local"
+                value={formEnd}
+                min={formStart}
+                onChange={(value) => setFormEnd(value)}
+              />
             </div>
             <SelectField
               label="Status"
@@ -476,6 +568,28 @@ export function AgendaBoard({
               <h2 className="text-lg font-semibold text-brand-teal">Linha do tempo</h2>
               <div className="flex flex-wrap items-center gap-2">
                 <FilterButton
+                  isActive={timelineView === "calendar"}
+                  onClick={() => setTimelineView("calendar")}
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  Calendario
+                </FilterButton>
+                <FilterButton
+                  isActive={timelineView === "list"}
+                  onClick={() => setTimelineView("list")}
+                >
+                  <List className="h-4 w-4" />
+                  Lista
+                </FilterButton>
+                <FilterButton
+                  isActive={timelineView === "gantt"}
+                  onClick={() => setTimelineView("gantt")}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  Gantt
+                </FilterButton>
+                <span className="mx-1 hidden h-7 w-px bg-brand-sand/70 sm:block" />
+                <FilterButton
                   isActive={timelineFilter === "today"}
                   onClick={() => setTimelineFilter("today")}
                 >
@@ -505,62 +619,231 @@ export function AgendaBoard({
               </div>
             </div>
           </div>
-          <div className="divide-y divide-brand-sand/60">
-            {visibleTimelineEvents.length === 0 ? (
-              <p className="px-5 py-8 text-sm text-brand-teal/70">
-                Nenhum evento encontrado para este filtro.
-              </p>
-            ) : (
-              visibleTimelineEvents.map((event) => (
-                <article
-                  key={event.id}
-                  className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center"
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`rounded-md px-2.5 py-1 text-xs font-bold ${typeStyles[event.tipo]}`}
-                      >
-                        {event.tipo}
-                      </span>
-                      <span className="text-xs font-semibold uppercase text-brand-teal/50">
-                        {event.status}
-                      </span>
-                    </div>
-                    <h3 className="mt-2 text-base font-semibold text-brand-teal">
-                      {event.titulo}
-                    </h3>
-                    <div className="mt-2 flex flex-wrap gap-3 text-sm text-brand-teal/70">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Clock3 className="h-4 w-4" />
-                        {formatDateTime(event.inicio)}
-                      </span>
-                      {event.local ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <MapPin className="h-4 w-4" />
-                          {event.local}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setEditingEvent(event);
-                      setMessage(null);
-                    }}
-                    className="md:w-32"
-                  >
-                    <Pencil className="h-4 w-4" />
-                    Editar
-                  </Button>
-                </article>
-              ))
-            )}
-          </div>
+          {timelineView === "calendar" ? (
+            <CalendarView
+              events={visibleTimelineEvents}
+              selectedMonth={selectedMonth}
+              onEdit={(event) => {
+                setEditingEvent(event);
+                setMessage(null);
+              }}
+            />
+          ) : timelineView === "gantt" ? (
+            <GanttView events={visibleTimelineEvents} />
+          ) : (
+            <ListView
+              events={visibleTimelineEvents}
+              onEdit={(event) => {
+                setEditingEvent(event);
+                setMessage(null);
+              }}
+            />
+          )}
         </Card>
       </section>
+    </div>
+  );
+}
+
+function ListView({
+  events,
+  onEdit,
+}: {
+  events: AgendaEvent[];
+  onEdit: (event: AgendaEvent) => void;
+}) {
+  if (events.length === 0) {
+    return (
+      <p className="px-5 py-8 text-sm text-brand-teal/70">
+        Nenhum evento encontrado para este filtro.
+      </p>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-brand-sand/60">
+      {events.map((event) => (
+        <article
+          key={event.id}
+          className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center"
+        >
+          <EventSummary event={event} />
+          <Button type="button" variant="secondary" onClick={() => onEdit(event)} className="md:w-32">
+            <Pencil className="h-4 w-4" />
+            Editar
+          </Button>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function EventSummary({ event }: { event: AgendaEvent }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-md px-2.5 py-1 text-xs font-bold ${typeStyles[event.tipo]}`}>
+          {event.tipo}
+        </span>
+        <span className="text-xs font-semibold uppercase text-brand-teal/50">
+          {event.status}
+        </span>
+      </div>
+      <h3 className="mt-2 text-base font-semibold text-brand-teal">{event.titulo}</h3>
+      <div className="mt-2 flex flex-wrap gap-3 text-sm text-brand-teal/70">
+        <span className="inline-flex items-center gap-1.5">
+          <Clock3 className="h-4 w-4" />
+          {formatDateTime(event.inicio)}
+        </span>
+        {event.local ? (
+          <span className="inline-flex items-center gap-1.5">
+            <MapPin className="h-4 w-4" />
+            {event.local}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CalendarView({
+  events,
+  selectedMonth,
+  onEdit,
+}: {
+  events: AgendaEvent[];
+  selectedMonth: string;
+  onEdit: (event: AgendaEvent) => void;
+}) {
+  const [year, month] = selectedMonth.split("-").map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const leadingDays = firstDay.getDay();
+  const cells = Array.from({ length: Math.ceil((leadingDays + daysInMonth) / 7) * 7 }, (_, index) => {
+    const day = index - leadingDays + 1;
+    return day >= 1 && day <= daysInMonth ? day : null;
+  });
+  const today = new Date();
+
+  return (
+    <div className="p-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-bold capitalize text-brand-teal">{monthLabel(selectedMonth)}</h3>
+        <span className="text-xs font-bold text-brand-teal/55">{events.length} eventos no filtro</span>
+      </div>
+      <div className="grid grid-cols-7 overflow-hidden rounded-lg border border-brand-sand/70 text-sm">
+        {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"].map((day) => (
+          <div key={day} className="bg-brand-cream px-2 py-2 text-center text-xs font-black uppercase text-brand-clay">
+            {day}
+          </div>
+        ))}
+        {cells.map((day, index) => {
+          const cellDate = day ? new Date(year, month - 1, day) : null;
+          const dayEvents = cellDate
+            ? events.filter((event) => isSameDay(new Date(event.inicio), cellDate)).slice(0, 3)
+            : [];
+          const isToday = cellDate ? isSameDay(cellDate, today) : false;
+
+          return (
+            <div key={`${day ?? "empty"}-${index}`} className="min-h-[112px] border-t border-brand-sand/70 bg-white/75 p-2">
+              {day ? (
+                <>
+                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${isToday ? "bg-brand-clay text-white" : "text-brand-teal/65"}`}>
+                    {day}
+                  </span>
+                  <div className="mt-2 space-y-1">
+                    {dayEvents.map((event) => (
+                      <button
+                        key={event.id}
+                        type="button"
+                        onClick={() => onEdit(event)}
+                        className={`block w-full truncate rounded-md px-2 py-1 text-left text-xs font-bold ${typeStyles[event.tipo]}`}
+                        title={event.titulo}
+                      >
+                        {event.titulo}
+                      </button>
+                    ))}
+                    {cellDate && events.filter((event) => isSameDay(new Date(event.inicio), cellDate)).length > 3 ? (
+                      <p className="px-2 text-xs font-semibold text-brand-clay">
+                        +{events.filter((event) => isSameDay(new Date(event.inicio), cellDate)).length - 3} mais
+                      </p>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {events.length === 0 ? (
+        <p className="px-1 py-6 text-sm text-brand-teal/70">Nenhum evento encontrado para este filtro.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function GanttView({ events }: { events: AgendaEvent[] }) {
+  if (events.length === 0) {
+    return (
+      <p className="px-5 py-8 text-sm text-brand-teal/70">
+        Nenhum evento encontrado para este filtro.
+      </p>
+    );
+  }
+
+  const sorted = sortEvents(events);
+  const start = new Date(sorted[0].inicio);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(sorted[sorted.length - 1].fim);
+  end.setHours(0, 0, 0, 0);
+  const totalDays = Math.max(Math.round((end.getTime() - start.getTime()) / 86400000) + 1, 1);
+  const days = Array.from({ length: totalDays }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return date;
+  });
+
+  return (
+    <div className="overflow-x-auto p-4">
+      <div className="min-w-[900px] overflow-hidden rounded-lg border border-brand-sand/70">
+        <div className="grid bg-brand-cream text-xs font-black uppercase text-brand-clay" style={{ gridTemplateColumns: `220px repeat(${days.length}, minmax(42px, 1fr))` }}>
+          <div className="border-r border-brand-sand/70 px-3 py-3">Evento</div>
+          {days.map((day) => (
+            <div key={day.toISOString()} className="border-r border-brand-sand/50 px-2 py-3 text-center">
+              {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(day)}
+            </div>
+          ))}
+        </div>
+        {sorted.map((event) => {
+          const eventStart = new Date(event.inicio);
+          eventStart.setHours(0, 0, 0, 0);
+          const eventEnd = new Date(event.fim);
+          eventEnd.setHours(0, 0, 0, 0);
+          const offset = Math.max(Math.round((eventStart.getTime() - start.getTime()) / 86400000), 0);
+          const span = Math.max(Math.round((eventEnd.getTime() - eventStart.getTime()) / 86400000) + 1, 1);
+
+          return (
+            <div key={event.id} className="grid border-t border-brand-sand/70 text-sm" style={{ gridTemplateColumns: `220px repeat(${days.length}, minmax(42px, 1fr))` }}>
+              <div className="truncate border-r border-brand-sand/70 px-3 py-3 font-semibold text-brand-teal" title={event.titulo}>
+                {event.titulo}
+              </div>
+              <div className="relative col-span-full col-start-2 grid min-h-[48px]" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(42px, 1fr))` }}>
+                {days.map((day) => <div key={day.toISOString()} className="border-r border-brand-sand/40" />)}
+                <div
+                  className={`absolute top-3 h-6 rounded-md border px-2 text-xs font-bold leading-6 ${typeStyles[event.tipo]}`}
+                  style={{
+                    left: `${(offset / days.length) * 100}%`,
+                    width: `${(Math.min(span, days.length - offset) / days.length) * 100}%`,
+                  }}
+                  title={`${event.titulo} - ${formatDateTime(event.inicio)}`}
+                >
+                  <span className="block truncate">{event.titulo}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -571,12 +854,18 @@ function Field({
   type = "text",
   placeholder,
   initialValue,
+  value,
+  min,
+  onChange,
 }: {
   label: string;
   name: string;
   type?: string;
   placeholder?: string;
   initialValue?: string;
+  value?: string;
+  min?: string;
+  onChange?: (value: string) => void;
 }) {
   return (
     <label className="space-y-1 text-sm font-semibold text-brand-teal">
@@ -586,7 +875,10 @@ function Field({
         type={type}
         required={name !== "local"}
         placeholder={placeholder}
+        min={min}
         defaultValue={initialValue}
+        value={value}
+        onChange={onChange ? (event) => onChange(event.target.value) : undefined}
         className="h-11 w-full rounded-md border border-brand-sand bg-white px-3 outline-none transition focus:border-brand-sky focus:ring-2 focus:ring-brand-sky/30"
       />
     </label>
@@ -635,7 +927,7 @@ function FilterButton({
     <button
       type="button"
       onClick={onClick}
-      className={`h-10 rounded-md px-3 text-sm font-semibold transition ${
+      className={`inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-sm font-semibold transition ${
         isActive
           ? "bg-brand-teal text-white"
           : "border border-brand-sand bg-white text-brand-teal hover:bg-brand-cream"

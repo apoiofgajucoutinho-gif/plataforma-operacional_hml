@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   isGoogleCalendarConfigured,
@@ -18,6 +19,7 @@ export async function POST(request: Request) {
 
     const { eventId } = (await request.json()) as { eventId: string };
     const supabase = await createClient();
+    const dataClient = createAdminClient() ?? supabase;
 
     const {
       data: { user },
@@ -27,10 +29,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const { data: event, error: eventError } = await supabase
+    const { data: membership, error: membershipError } = await dataClient
+      .from("tenant_members")
+      .select("tenant_id")
+      .eq("user_id", user.id)
+      .eq("ativo", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (membershipError || !membership) {
+      throw membershipError ?? new Error("Usuario sem tenant vinculado.");
+    }
+
+    const { data: event, error: eventError } = await dataClient
       .from("agenda_eventos")
       .select("*")
       .eq("id", eventId)
+      .eq("tenant_id", membership.tenant_id)
       .returns<AgendaEvent[]>()
       .single();
 
@@ -38,11 +53,11 @@ export async function POST(request: Request) {
       throw eventError ?? new Error("Evento nao encontrado.");
     }
 
-    const { data: connection, error: connectionError } = await supabase
+    const { data: connection, error: connectionError } = await dataClient
       .from("google_calendar_connections")
-      .select("refresh_token")
+      .select("account_email, refresh_token")
       .eq("tenant_id", event.tenant_id)
-      .returns<{ refresh_token: string }[]>()
+      .returns<{ account_email: string; refresh_token: string }[]>()
       .maybeSingle();
 
     if (connectionError || !connection) {
@@ -56,12 +71,20 @@ export async function POST(request: Request) {
       accessToken: token.access_token,
     });
 
- await (supabase
-  .from("agenda_eventos")
-  .update({ google_event_id: googleEvent.id as string })
-  .eq("id", event.id) as any);
+    const { data: updatedEvent } = await dataClient
+      .from("agenda_eventos")
+      .update({ google_event_id: googleEvent.id as string })
+      .eq("id", event.id)
+      .select("*")
+      .returns<AgendaEvent[]>()
+      .single();
 
-    return NextResponse.json({ googleEvent });
+    return NextResponse.json({
+      googleEvent,
+      googleEventId: googleEvent.id,
+      accountEmail: connection.account_email,
+      event: updatedEvent ?? { ...event, google_event_id: googleEvent.id },
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao sincronizar." },

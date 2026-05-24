@@ -6,7 +6,7 @@ export const env = {
   googleClientId: process.env.GOOGLE_CLIENT_ID,
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI,
-  googleCalendarId: process.env.GOOGLE_CALENDAR_ID ?? "primary",
+  googleCalendarId: process.env.GOOGLE_CALENDAR_ID ?? "fga.jucoutinho@gmail.com",
 };
 
 export function hasPublicSupabaseEnv() {
