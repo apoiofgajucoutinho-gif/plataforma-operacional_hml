@@ -21,6 +21,7 @@ export type AgendaEventInput = {
   titulo: string;
   descricao?: string;
   tipo: AgendaEventType;
+  status?: AgendaEventStatus;
   inicio: string;
   fim: string;
   local?: string;

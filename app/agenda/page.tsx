@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function AgendaPage() {
   if (!hasPublicSupabaseEnv()) {
     return (
-      <AppShell>
+      <AppShell activeItem="agenda">
         <div className="mx-auto max-w-3xl">
           <Card className="p-6">
             <p className="text-sm font-semibold uppercase text-brand-clay">
@@ -36,11 +36,17 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000`}
   const context = await getAgendaContext();
 
   return (
-    <AppShell>
+    <AppShell activeItem="agenda" allowedItems={context.allowedModules}>
       <AgendaBoard
         initialEvents={context.events}
         tenantName={context.tenant?.nome ?? "Sem tenant vinculado"}
         isTenantReady={Boolean(context.tenant)}
+        currentUser={{
+          id: context.user.id,
+          email: context.user.email ?? null,
+        }}
+        diagnostic={context.diagnostic}
+        updatedAt={context.updatedAt}
       />
     </AppShell>
   );
