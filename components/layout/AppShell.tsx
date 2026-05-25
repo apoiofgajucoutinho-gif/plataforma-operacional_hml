@@ -29,7 +29,7 @@ const navigation = [
   { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda" },
   { label: "Instagram", href: "/instagram", icon: BarChart3, key: "instagram" },
   { label: "Adocao", href: "/adocao", icon: LineChart, key: "adocao" },
-  { label: "Financeiro", href: "#", icon: CircleDollarSign, key: "financeiro" },
+  { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro" },
   { label: "Atividades", href: "#", icon: Activity, key: "atividades" },
   { label: "Relatorios", href: "#", icon: LayoutDashboard, key: "relatorios" },
   { label: "Admin", href: "#", icon: Settings, key: "admin" },
