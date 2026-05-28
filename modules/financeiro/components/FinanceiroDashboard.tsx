@@ -39,6 +39,7 @@ import type {
 
 const tabs = ["inicio", "diagnostico", "lancar", "consultar", "dre", "marketing", "cadastro"] as const;
 type Tab = (typeof tabs)[number];
+const FINANCEIRO_PAGE_SIZE = 20;
 
 const tabLabels: Record<Tab, string> = {
   inicio: "Início",
@@ -157,12 +158,13 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
   const [centroFilter, setCentroFilter] = useState("todos");
   const [statusFilter, setStatusFilter] = useState("todos");
   const [query, setQuery] = useState("");
+  const [consultarPage, setConsultarPage] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const isAdmin = context.perfil === "admin";
   const visibleTabs = useMemo(() => {
     if (context.perfil === "marketing") {
-      return ["inicio", "dre", "marketing"] as Tab[];
+      return ["marketing"] as Tab[];
     }
 
     return tabs.filter((tab) => tab !== "cadastro" || isAdmin);
@@ -249,6 +251,10 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
     }
   }, [activeTab, visibleTabs]);
 
+  useEffect(() => {
+    setConsultarPage(1);
+  }, [centroFilter, period, query, statusFilter]);
+
   function notify(text: string) {
     setMessage(text);
     window.setTimeout(() => setMessage(null), 4500);
@@ -327,6 +333,8 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
           setStatusFilter={setStatusFilter}
           query={query}
           setQuery={setQuery}
+          page={consultarPage}
+          setPage={setConsultarPage}
           maps={{ centroById, categoriaById, subcategoriaById, bancoById, cartaoById, cursoById }}
         />
       ) : null}
@@ -763,6 +771,8 @@ function ConsultarTab({
   setStatusFilter,
   query,
   setQuery,
+  page,
+  setPage,
   maps,
 }: {
   rows: FinLancamento[];
@@ -775,6 +785,8 @@ function ConsultarTab({
   setStatusFilter: (value: string) => void;
   query: string;
   setQuery: (value: string) => void;
+  page: number;
+  setPage: (value: number) => void;
   maps: {
     centroById: Map<string, FinCentroResultado>;
     categoriaById: Map<string, FinCategoria>;
@@ -784,6 +796,12 @@ function ConsultarTab({
     cursoById: Map<string, FinCurso>;
   };
 }) {
+  const pageCount = Math.max(Math.ceil(rows.length / FINANCEIRO_PAGE_SIZE), 1);
+  const currentPage = Math.min(page, pageCount);
+  const paginatedRows = rows.slice(
+    (currentPage - 1) * FINANCEIRO_PAGE_SIZE,
+    currentPage * FINANCEIRO_PAGE_SIZE,
+  );
   const exportRows = rows.map((row) => ({
     data: dateLabel(row.data_pagamento),
     competencia: monthLabel(row.mes_competencia),
@@ -842,7 +860,7 @@ function ConsultarTab({
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-sand/60">
-            {rows.slice(0, 80).map((row) => (
+            {paginatedRows.map((row) => (
               <tr key={row.id}>
                 <td className="px-5 py-3 font-semibold text-brand-teal/70">{dateLabel(row.data_pagamento)}</td>
                 <td className="px-5 py-3 font-bold text-brand-teal">{maps.centroById.get(row.centro_resultado_id)?.nome}</td>
@@ -854,6 +872,29 @@ function ConsultarTab({
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="flex flex-col gap-3 border-t border-brand-sand/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm font-semibold text-brand-teal/60">
+          {rows.length} registros · página {currentPage} de {pageCount}
+        </p>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={currentPage <= 1}
+            onClick={() => setPage(Math.max(currentPage - 1, 1))}
+          >
+            Voltar
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={currentPage >= pageCount}
+            onClick={() => setPage(Math.min(currentPage + 1, pageCount))}
+          >
+            Avançar
+          </Button>
+        </div>
       </div>
     </Card>
   );
@@ -958,6 +999,19 @@ function MarketingTab({ context }: { context: FinanceiroContext }) {
       <DreTable rows={infoproduto} />
     </Card>
   );
+}
+
+function cardLastFour(card: FinCartao) {
+  const digits = card.nome.replace(/\D/g, "");
+  return digits.length >= 4 ? digits.slice(-4) : "xxxx";
+}
+
+function bankBalanceLabel(bank: FinBanco, lancamentos: FinLancamento[]) {
+  const saldoMovimentos = lancamentos
+    .filter((row) => row.banco_id === bank.id && row.status === "realizado")
+    .reduce((sum, row) => sum + signedValue(row), 0);
+
+  return decimalMoney((bank.saldo_inicial ?? 0) + saldoMovimentos);
 }
 
 function CadastroTab({
@@ -1065,14 +1119,28 @@ function CadastroTab({
           </div>
         </div>
         <h3 className="mt-6 text-base font-bold text-brand-teal">Meus Bancos</h3>
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {context.bancos.map((item) => (
-            <div key={item.id} className="rounded-md border border-brand-sand/70 bg-white/50 p-3">
-              <p className="font-bold text-brand-teal">{item.nome}</p>
+            <div key={item.id} className="relative overflow-hidden rounded-lg border border-brand-sand/70 bg-white/75 p-4 shadow-sm">
+              <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-brand-clay/10" />
+              <div className="relative flex items-start justify-between gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-clay text-white shadow-sm">
+                  <Banknote className="h-5 w-5" />
+                </span>
+                <span className={clsx("rounded-full px-2 py-1 text-[10px] font-black uppercase", item.ativo ? "bg-emerald-50 text-emerald-700" : "bg-brand-cream text-brand-teal/55")}>
+                  {item.ativo ? "Ativo" : "Inativo"}
+                </span>
+              </div>
+              <div className="relative mt-5">
+                <p className="text-sm font-bold text-brand-teal/65">{item.apelido ?? "Conta"}</p>
+                <p className="mt-1 truncate text-lg font-black text-brand-teal">{item.nome}</p>
+                <p className="mt-3 text-xs font-bold uppercase tracking-wide text-brand-teal/45">Saldo estimado</p>
+                <p className="text-2xl font-black text-brand-teal">{bankBalanceLabel(item, context.lancamentos)}</p>
+              </div>
               <Button
                 type="button"
                 variant="secondary"
-                className="mt-3"
+                className="relative mt-4 w-full"
                 onClick={() => {
                   setEditingBankId(item.id);
                   setBank({
@@ -1082,9 +1150,8 @@ function CadastroTab({
                   });
                 }}
               >
-                Editar
+                Editar banco
               </Button>
-              <p className="text-sm text-brand-teal/60">{item.apelido ?? "Sem apelido"} · saldo inicial {decimalMoney(item.saldo_inicial)}</p>
             </div>
           ))}
         </div>
@@ -1139,16 +1206,46 @@ function CadastroTab({
           </div>
         </div>
         <h3 className="mt-6 text-base font-bold text-brand-teal">Meus Cartões</h3>
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {context.cartoes.filter((item) => item.ativo).map((item) => {
             const nextInvoice = context.faturas.find((fatura) => fatura.cartao_id === item.id);
             return (
-              <div key={item.id} className="rounded-md border border-brand-sand/70 bg-white/50 p-3">
-                <p className="font-bold text-brand-teal">{item.nome}</p>
+              <div
+                key={item.id}
+                className="relative overflow-hidden rounded-xl border border-brand-sand/70 bg-gradient-to-br from-brand-teal to-[#082D38] p-4 text-white shadow-soft"
+              >
+                <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-brand-sky/20" />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase text-white/65">Cartão ativo</p>
+                    <p className="mt-1 truncate text-lg font-black">{item.nome}</p>
+                  </div>
+                  <CreditCard className="h-6 w-6 text-brand-sky" />
+                </div>
+
+                <p className="relative mt-7 font-mono text-lg font-black tracking-[0.18em]">
+                  xxxx xxxx xxxx {cardLastFour(item)}
+                </p>
+
+                <div className="relative mt-5 grid grid-cols-2 gap-3 text-xs font-semibold text-white/70">
+                  <p>
+                    Fecha dia
+                    <span className="block text-base font-black text-white">{item.dia_fechamento}</span>
+                  </p>
+                  <p>
+                    Vence dia
+                    <span className="block text-base font-black text-white">{item.dia_vencimento}</span>
+                  </p>
+                </div>
+
+                <p className="relative mt-4 rounded-md bg-white/10 px-3 py-2 text-sm font-bold text-white">
+                  Próxima fatura: {nextInvoice ? `${money(nextInvoice.valor_estimado)} em ${monthLabel(nextInvoice.mes_vencimento)}` : "sem lançamentos"}
+                </p>
+
                 <Button
                   type="button"
-                  variant="secondary"
-                  className="mt-3"
+                  variant="primary"
+                  className="relative mt-4 w-full border-white/30 bg-white/10 text-white hover:bg-white/20"
                   onClick={() => {
                     setEditingCardId(item.id);
                     setCard({
@@ -1160,10 +1257,8 @@ function CadastroTab({
                     });
                   }}
                 >
-                  Editar
+                  Editar cartão
                 </Button>
-                <p className="text-sm text-brand-teal/60">Fecha dia {item.dia_fechamento} · vence dia {item.dia_vencimento}</p>
-                <p className="mt-1 text-sm font-bold text-brand-clay">Próxima fatura: {nextInvoice ? `${money(nextInvoice.valor_estimado)} em ${monthLabel(nextInvoice.mes_vencimento)}` : "sem lançamentos"}</p>
               </div>
             );
           })}

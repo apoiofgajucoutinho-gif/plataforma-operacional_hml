@@ -170,6 +170,17 @@ function sortEvents(events: AgendaEvent[]) {
   );
 }
 
+function overlapsAgendaEvent(event: AgendaEvent, payload: AgendaEventInput) {
+  if (event.status === "cancelado") return false;
+
+  const existingStart = new Date(event.inicio).getTime();
+  const existingEnd = new Date(event.fim).getTime();
+  const nextStart = new Date(payload.inicio).getTime();
+  const nextEnd = new Date(payload.fim).getTime();
+
+  return existingStart < nextEnd && existingEnd > nextStart;
+}
+
 function getEventFormValues(form: HTMLFormElement): AgendaEventInput {
   const formData = new FormData(form);
 
@@ -241,6 +252,16 @@ export function AgendaBoard({
     const payload = getEventFormValues(event.currentTarget);
     if (new Date(payload.fim) <= new Date(payload.inicio)) {
       setMessage("A data/hora final precisa ser depois do inicio.");
+      setIsSaving(false);
+      return;
+    }
+
+    const conflict = events.find(
+      (item) => item.id !== editingEvent?.id && overlapsAgendaEvent(item, payload),
+    );
+
+    if (conflict) {
+      setMessage(`Já existe um agendamento nesse horário: ${conflict.titulo} em ${formatDateTime(conflict.inicio)}.`);
       setIsSaving(false);
       return;
     }

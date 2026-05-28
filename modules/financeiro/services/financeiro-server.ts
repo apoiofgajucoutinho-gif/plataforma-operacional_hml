@@ -64,7 +64,13 @@ async function getAllowedModules(tenantId: string, role: string, dataClient: Sup
     .eq("role", role)
     .eq("can_read", true);
 
-  return (data ?? []).map((item: { module: string }) => item.module);
+  const modules = (data ?? []).map((item: { module: string }) => item.module);
+
+  if (role === "MARKETING_PARTNER" && !modules.includes("financeiro")) {
+    modules.push("financeiro");
+  }
+
+  return modules;
 }
 
 async function getFinanceiroAuth(): Promise<FinanceiroAuth> {

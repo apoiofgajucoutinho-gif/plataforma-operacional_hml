@@ -16,6 +16,7 @@ import {
   Star,
   Trophy,
 } from "lucide-react";
+import { clsx } from "clsx";
 import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
 import type { ExportColumn } from "@/lib/client/table-export";
@@ -614,13 +615,18 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
             />
           </Card>
 
-          <section className="grid gap-4 lg:grid-cols-[0.8fr_1.4fr]">
+          <section className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
             <DonutChartCard
               title="Bom / Medio / Ruim"
               rows={engagementDistribution.filter((item) => item.total > 0).map((item) => ({ label: item.label, value: item.total }))}
               center={`${engagementPosts.length}`}
             />
-            <VerticalBarCard title="Quantidade de Posts por Semana" rows={postsByWeek(filteredPosts).map((item) => ({ label: item.label, value: item.total }))} />
+            <VerticalBarCard
+              title="Quantidade de Posts por Semana"
+              rows={postsByWeek(filteredPosts).map((item) => ({ label: item.label, value: item.total }))}
+              showLegend={false}
+              compactXAxis
+            />
           </section>
         </>
       ) : (
@@ -893,25 +899,30 @@ function VerticalBarCard({
   suffix = "",
   valueFormatter = numberFormat,
   highlightMax = false,
+  showLegend = true,
+  compactXAxis = false,
 }: {
   title: string;
   rows: Array<{ label: string; value: number }>;
   suffix?: string;
   valueFormatter?: (value: number) => string;
   highlightMax?: boolean;
+  showLegend?: boolean;
+  compactXAxis?: boolean;
 }) {
   const max = Math.max(...rows.map((row) => row.value), 1);
   const colors = ["#6AA7E8", "#B578CF", "#52C084", "#D88991"];
+  const labelEvery = compactXAxis && rows.length > 12 ? Math.ceil(rows.length / 6) : 1;
 
   return (
     <Card className="border-[#E9CBD1] bg-white/95 p-5 shadow-sm">
       <h3 className="text-sm font-bold text-brand-teal">{title}</h3>
-      <div className="mt-5 flex h-44 items-end gap-3 border-b border-[#EFDDE1] px-2">
+      <div className="mt-5 flex h-44 items-end gap-2 overflow-x-auto border-b border-[#EFDDE1] px-2">
         {rows.map((row, index) => {
           const isPeak = highlightMax && row.value === max && row.value > 0;
 
           return (
-          <div key={row.label} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+          <div key={row.label} className={clsx("flex flex-1 flex-col items-center gap-2", compactXAxis ? "min-w-8" : "min-w-0")}>
             <span className={`text-[10px] font-black ${isPeak ? "rounded-full bg-brand-clay px-2 py-0.5 text-white" : "text-brand-teal/60"}`}>
               {row.value ? `${valueFormatter(row.value)}${suffix}` : "-"}
             </span>
@@ -926,15 +937,28 @@ function VerticalBarCard({
           );
         })}
       </div>
-      <div className="mt-3 grid grid-cols-4 gap-2 text-center text-[10px] font-semibold text-brand-teal/60">
-        {rows.map((row) => <span key={row.label} className="truncate">{row.label}</span>)}
+      <div
+        className="mt-3 grid gap-2 text-center text-[10px] font-semibold text-brand-teal/60"
+        style={{ gridTemplateColumns: `repeat(${rows.length}, minmax(${compactXAxis ? "32px" : "0"}, 1fr))` }}
+      >
+        {rows.map((row, index) => (
+          <span key={row.label} className="truncate">
+            {!compactXAxis || index % labelEvery === 0 || index === rows.length - 1 ? row.label : ""}
+          </span>
+        ))}
       </div>
-      <ChartLegend
-        items={rows.map((row, index) => ({
-          label: row.label,
-          color: highlightMax && row.value === max && row.value > 0 ? "#9D6F4E" : colors[index % colors.length],
-        }))}
-      />
+      {showLegend ? (
+        <ChartLegend
+          items={rows.map((row, index) => ({
+            label: row.label,
+            color: highlightMax && row.value === max && row.value > 0 ? "#9D6F4E" : colors[index % colors.length],
+          }))}
+        />
+      ) : (
+        <p className="mt-3 text-xs font-semibold text-brand-teal/55">
+          Rótulos reduzidos para preservar a leitura das semanas.
+        </p>
+      )}
     </Card>
   );
 }

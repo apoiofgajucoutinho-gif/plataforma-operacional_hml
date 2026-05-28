@@ -62,6 +62,49 @@ function validateAgendaInput(input: AgendaEventInput) {
   }
 }
 
+async function assertNoAgendaConflict({
+  dataClient,
+  tenantId,
+  input,
+  ignoreEventId,
+}: {
+  dataClient: any;
+  tenantId: string;
+  input: AgendaEventInput;
+  ignoreEventId?: string;
+}) {
+  let query = dataClient
+    .from("agenda_eventos")
+    .select("id, titulo, inicio")
+    .eq("tenant_id", tenantId)
+    .neq("status", "cancelado")
+    .lt("inicio", input.fim)
+    .gt("fim", input.inicio)
+    .limit(1);
+
+  if (ignoreEventId) {
+    query = query.neq("id", ignoreEventId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  const conflict = data?.[0] as Pick<AgendaEvent, "id" | "titulo" | "inicio"> | undefined;
+  if (conflict) {
+    const horario = new Intl.DateTimeFormat("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(conflict.inicio));
+
+    throw new Error(`Já existe um agendamento nesse horário: ${conflict.titulo} em ${horario}.`);
+  }
+}
+
 export async function getAgendaContext() {
   const userClient = await createClient();
   const {
@@ -172,6 +215,12 @@ export async function createAgendaEvent(input: AgendaEventInput) {
   }
 
   const dataClient = createAdminClient() ?? userClient;
+
+  await assertNoAgendaConflict({
+    dataClient,
+    tenantId: membership.tenant_id,
+    input,
+  });
 
   const { data, error } = await dataClient
     .from("agenda_eventos")
@@ -286,6 +335,13 @@ export async function updateAgendaEvent(eventId: string, input: AgendaEventInput
   }
 
   const dataClient = createAdminClient() ?? userClient;
+
+  await assertNoAgendaConflict({
+    dataClient,
+    tenantId: membership.tenant_id,
+    input,
+    ignoreEventId: eventId,
+  });
 
   const { data, error } = await dataClient
     .from("agenda_eventos")
