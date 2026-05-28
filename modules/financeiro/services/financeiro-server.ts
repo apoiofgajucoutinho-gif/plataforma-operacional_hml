@@ -21,6 +21,7 @@ import type {
 } from "@/modules/financeiro/types";
 
 type SupabaseAny = any;
+type FinanceiroCadastroTipo = "centro" | "categoria" | "subcategoria" | "curso";
 
 type FinanceiroAuth = {
   userId: string;
@@ -461,4 +462,163 @@ export async function updateFinanceiroCartao(input: {
   }
 
   return data;
+}
+
+function cadastroTable(tipo: FinanceiroCadastroTipo) {
+  if (tipo === "centro") return "fin_centros_resultado";
+  if (tipo === "categoria") return "fin_categorias";
+  if (tipo === "subcategoria") return "fin_subcategorias";
+  return "fin_cursos";
+}
+
+function cadastroLinkColumn(tipo: FinanceiroCadastroTipo) {
+  if (tipo === "centro") return "centro_resultado_id";
+  if (tipo === "categoria") return "categoria_id";
+  if (tipo === "subcategoria") return "subcategoria_id";
+  return "curso_id";
+}
+
+function cadastroPayload(tipo: FinanceiroCadastroTipo, tenantId: string, input: Record<string, unknown>) {
+  const nome = String(input.nome ?? "").trim();
+  if (!nome) {
+    throw new Error("Informe o nome do cadastro.");
+  }
+
+  if (tipo === "centro") {
+    return { tenant_id: tenantId, nome, ativo: input.ativo ?? true };
+  }
+
+  if (tipo === "curso") {
+    return { tenant_id: tenantId, nome, ativo: input.ativo ?? true };
+  }
+
+  if (tipo === "categoria") {
+    return {
+      tenant_id: tenantId,
+      nome,
+      tipo: input.tipo,
+      natureza_id: input.natureza_id || null,
+      dre_grupo: input.dre_grupo || "despesas_operacionais",
+      ativo: input.ativo ?? true,
+    };
+  }
+
+  return {
+    tenant_id: tenantId,
+    nome,
+    categoria_id: input.categoria_id,
+    dre_grupo: input.dre_grupo || null,
+    ativo: input.ativo ?? true,
+  };
+}
+
+async function ensureFinanceiroAdmin() {
+  const auth = await getFinanceiroAuth();
+  if (auth.perfil !== "admin") {
+    throw new Error("Apenas admin financeiro pode alterar cadastros.");
+  }
+
+  return auth;
+}
+
+export async function createFinanceiroCadastro(input: Record<string, unknown>) {
+  const tipo = input.tipo_cadastro as FinanceiroCadastroTipo;
+  const table = cadastroTable(tipo);
+  const auth = await ensureFinanceiroAdmin();
+  const payload = cadastroPayload(tipo, auth.tenantId, input);
+
+  const { data, error } = await auth.dataClient
+    .from(table)
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+export async function updateFinanceiroCadastro(input: Record<string, unknown>) {
+  const tipo = input.tipo_cadastro as FinanceiroCadastroTipo;
+  const id = String(input.id ?? "");
+  const table = cadastroTable(tipo);
+  const auth = await ensureFinanceiroAdmin();
+  const payload = cadastroPayload(tipo, auth.tenantId, input);
+
+  const { data, error } = await auth.dataClient
+    .from(table)
+    .update(payload)
+    .eq("id", id)
+    .eq("tenant_id", auth.tenantId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+export async function deleteFinanceiroCadastro(input: Record<string, unknown>) {
+  const tipo = input.tipo_cadastro as FinanceiroCadastroTipo;
+  const id = String(input.id ?? "");
+  const table = cadastroTable(tipo);
+  const linkColumn = cadastroLinkColumn(tipo);
+  const auth = await ensureFinanceiroAdmin();
+
+  const { count: lancamentosCount, error: countError } = await auth.dataClient
+    .from("fin_lancamentos")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", auth.tenantId)
+    .eq(linkColumn, id);
+
+  if (countError) {
+    throw new Error(countError.message);
+  }
+
+  let relatedCount = lancamentosCount ?? 0;
+  if (tipo === "categoria") {
+    const { count: subCount, error: subError } = await auth.dataClient
+      .from("fin_subcategorias")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", auth.tenantId)
+      .eq("categoria_id", id);
+
+    if (subError) {
+      throw new Error(subError.message);
+    }
+
+    relatedCount += subCount ?? 0;
+  }
+
+  if (relatedCount > 0) {
+    const { data, error } = await auth.dataClient
+      .from(table)
+      .update({ ativo: false })
+      .eq("id", id)
+      .eq("tenant_id", auth.tenantId)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { data, softDeleted: true, relatedCount };
+  }
+
+  const { error } = await auth.dataClient
+    .from(table)
+    .delete()
+    .eq("id", id)
+    .eq("tenant_id", auth.tenantId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return { data: null, softDeleted: false, relatedCount: 0 };
 }

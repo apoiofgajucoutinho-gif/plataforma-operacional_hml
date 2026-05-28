@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import type { InputHTMLAttributes } from "react";
+import type { InputHTMLAttributes, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   BadgeDollarSign,
@@ -51,6 +51,7 @@ const tabLabels: Record<Tab, string> = {
 };
 
 type PeriodFilter = "30d" | "90d" | "ano" | "tudo";
+type CadastroKind = "centro" | "categoria" | "subcategoria" | "curso";
 
 function money(value: number) {
   return new Intl.NumberFormat("pt-BR", {
@@ -840,6 +841,28 @@ function CadastroTab({
     });
   }
 
+  async function removeCadastro(body: { tipo_cadastro: CadastroKind; id: string }) {
+    startTransition(async () => {
+      const response = await fetch("/api/financeiro/cadastros", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        notify(payload.error ?? "Falha ao excluir.");
+        return;
+      }
+
+      notify(
+        payload.softDeleted
+          ? `Cadastro inativado porque possui ${payload.relatedCount} vinculo(s).`
+          : "Cadastro excluido.",
+      );
+      router.refresh();
+    });
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-2">
       <Card className="p-5">
@@ -957,8 +980,9 @@ function CadastroTab({
             ) : null}
           </div>
         </div>
+        <h3 className="mt-6 text-base font-bold text-brand-teal">Meus Cartoes</h3>
         <div className="mt-6 space-y-2">
-          {context.cartoes.map((item) => {
+          {context.cartoes.filter((item) => item.ativo).map((item) => {
             const nextInvoice = context.faturas.find((fatura) => fatura.cartao_id === item.id);
             return (
               <div key={item.id} className="rounded-md border border-brand-sand/70 bg-white/50 p-3">
@@ -993,13 +1017,270 @@ function CadastroTab({
           <Settings2 className="h-5 w-5 text-brand-clay" />
           <h2 className="text-xl font-bold text-brand-teal">Admin financeiro</h2>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <AdminList title="Centros" items={context.centros.map((item) => item.nome)} />
-          <AdminList title="Categorias" items={context.categorias.map((item) => item.nome)} />
-          <AdminList title="Subcategorias" items={context.subcategorias.map((item) => item.nome)} />
-          <AdminList title="Cursos" items={context.cursos.map((item) => item.nome)} />
-        </div>
+        <AdminCadastroSections
+          context={context}
+          isPending={isPending}
+          onSave={(body, method, success) => save("/api/financeiro/cadastros", body, success, method)}
+          onDelete={removeCadastro}
+        />
       </Card>
+    </div>
+  );
+}
+
+function AdminCadastroSections({
+  context,
+  isPending,
+  onSave,
+  onDelete,
+}: {
+  context: FinanceiroContext;
+  isPending: boolean;
+  onSave: (body: Record<string, unknown>, method: "POST" | "PATCH", success: string) => void;
+  onDelete: (body: { tipo_cadastro: CadastroKind; id: string }) => void;
+}) {
+  const [centro, setCentro] = useState({ id: "", nome: "" });
+  const [curso, setCurso] = useState({ id: "", nome: "" });
+  const [categoria, setCategoria] = useState({
+    id: "",
+    nome: "",
+    tipo: "saida" as FinTipo,
+    natureza_id: context.naturezas[0]?.id ?? "",
+    dre_grupo: "despesas_operacionais",
+  });
+  const [subcategoria, setSubcategoria] = useState({
+    id: "",
+    nome: "",
+    categoria_id: context.categorias[0]?.id ?? "",
+    dre_grupo: "",
+  });
+
+  function resetCentro() {
+    setCentro({ id: "", nome: "" });
+  }
+
+  function resetCurso() {
+    setCurso({ id: "", nome: "" });
+  }
+
+  function resetCategoria() {
+    setCategoria({
+      id: "",
+      nome: "",
+      tipo: "saida",
+      natureza_id: context.naturezas[0]?.id ?? "",
+      dre_grupo: "despesas_operacionais",
+    });
+  }
+
+  function resetSubcategoria() {
+    setSubcategoria({
+      id: "",
+      nome: "",
+      categoria_id: context.categorias[0]?.id ?? "",
+      dre_grupo: "",
+    });
+  }
+
+  return (
+    <div className="mt-5 grid gap-4 xl:grid-cols-2">
+      <CadastroPanel
+        title="Centros de resultado"
+        isPending={isPending}
+        isEditing={Boolean(centro.id)}
+        onSave={() => {
+          onSave(
+            { tipo_cadastro: "centro", ...centro, ativo: true },
+            centro.id ? "PATCH" : "POST",
+            centro.id ? "Centro atualizado." : "Centro cadastrado.",
+          );
+          resetCentro();
+        }}
+        onCancel={resetCentro}
+      >
+        <Field label="Nome" value={centro.nome} onChange={(value) => setCentro({ ...centro, nome: value })} />
+        <CadastroList
+          items={context.centros}
+          label={(item) => item.nome}
+          onEdit={(item) => setCentro({ id: item.id, nome: item.nome })}
+          onDelete={(item) => onDelete({ tipo_cadastro: "centro", id: item.id })}
+        />
+      </CadastroPanel>
+
+      <CadastroPanel
+        title="Cursos"
+        isPending={isPending}
+        isEditing={Boolean(curso.id)}
+        onSave={() => {
+          onSave(
+            { tipo_cadastro: "curso", ...curso, ativo: true },
+            curso.id ? "PATCH" : "POST",
+            curso.id ? "Curso atualizado." : "Curso cadastrado.",
+          );
+          resetCurso();
+        }}
+        onCancel={resetCurso}
+      >
+        <Field label="Nome" value={curso.nome} onChange={(value) => setCurso({ ...curso, nome: value })} />
+        <CadastroList
+          items={context.cursos}
+          label={(item) => item.nome}
+          onEdit={(item) => setCurso({ id: item.id, nome: item.nome })}
+          onDelete={(item) => onDelete({ tipo_cadastro: "curso", id: item.id })}
+        />
+      </CadastroPanel>
+
+      <CadastroPanel
+        title="Categorias"
+        isPending={isPending}
+        isEditing={Boolean(categoria.id)}
+        onSave={() => {
+          onSave(
+            { tipo_cadastro: "categoria", ...categoria, ativo: true },
+            categoria.id ? "PATCH" : "POST",
+            categoria.id ? "Categoria atualizada." : "Categoria cadastrada.",
+          );
+          resetCategoria();
+        }}
+        onCancel={resetCategoria}
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="Nome" value={categoria.nome} onChange={(value) => setCategoria({ ...categoria, nome: value })} />
+          <Select label="Tipo" value={categoria.tipo} onChange={(value) => setCategoria({ ...categoria, tipo: value as FinTipo })} options={[["entrada", "Entrada"], ["saida", "Saida"]]} />
+          <Select label="Natureza" value={categoria.natureza_id} onChange={(value) => setCategoria({ ...categoria, natureza_id: value })} options={context.naturezas.map((item) => [item.id, item.nome] as [string, string])} />
+          <Select label="Grupo DRE" value={categoria.dre_grupo} onChange={(value) => setCategoria({ ...categoria, dre_grupo: value })} options={dreGroupOptions} />
+        </div>
+        <CadastroList
+          items={context.categorias}
+          label={(item) => `${item.nome} - ${item.tipo}`}
+          onEdit={(item) =>
+            setCategoria({
+              id: item.id,
+              nome: item.nome,
+              tipo: item.tipo,
+              natureza_id: item.natureza_id,
+              dre_grupo: item.dre_grupo,
+            })
+          }
+          onDelete={(item) => onDelete({ tipo_cadastro: "categoria", id: item.id })}
+        />
+      </CadastroPanel>
+
+      <CadastroPanel
+        title="Subcategorias"
+        isPending={isPending}
+        isEditing={Boolean(subcategoria.id)}
+        onSave={() => {
+          onSave(
+            { tipo_cadastro: "subcategoria", ...subcategoria, ativo: true },
+            subcategoria.id ? "PATCH" : "POST",
+            subcategoria.id ? "Subcategoria atualizada." : "Subcategoria cadastrada.",
+          );
+          resetSubcategoria();
+        }}
+        onCancel={resetSubcategoria}
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="Nome" value={subcategoria.nome} onChange={(value) => setSubcategoria({ ...subcategoria, nome: value })} />
+          <Select label="Categoria" value={subcategoria.categoria_id} onChange={(value) => setSubcategoria({ ...subcategoria, categoria_id: value })} options={context.categorias.map((item) => [item.id, item.nome] as [string, string])} />
+          <Select label="Grupo DRE" value={subcategoria.dre_grupo} onChange={(value) => setSubcategoria({ ...subcategoria, dre_grupo: value })} options={[["", "Herdar da categoria"], ...dreGroupOptions]} />
+        </div>
+        <CadastroList
+          items={context.subcategorias}
+          label={(item) => item.nome}
+          onEdit={(item) =>
+            setSubcategoria({
+              id: item.id,
+              nome: item.nome,
+              categoria_id: item.categoria_id,
+              dre_grupo: item.dre_grupo ?? "",
+            })
+          }
+          onDelete={(item) => onDelete({ tipo_cadastro: "subcategoria", id: item.id })}
+        />
+      </CadastroPanel>
+    </div>
+  );
+}
+
+const dreGroupOptions: Array<[string, string]> = [
+  ["receita_bruta", "Receita Bruta"],
+  ["deducoes", "Deducoes"],
+  ["taxas_plataforma", "Taxas de plataforma"],
+  ["coproducao", "Coproducao"],
+  ["comissoes_afiliados", "Comissoes afiliados"],
+  ["custos_diretos", "Custos diretos"],
+  ["vendas_marketing", "Vendas e marketing"],
+  ["despesas_operacionais", "Despesas operacionais"],
+  ["despesas_administrativas", "Despesas administrativas"],
+  ["despesas_pessoal", "Despesas pessoal"],
+  ["depreciacao", "Depreciacao"],
+  ["resultado_financeiro", "Resultado financeiro"],
+  ["irpj_csll", "IRPJ/CSLL"],
+];
+
+function CadastroPanel({
+  title,
+  children,
+  isPending,
+  isEditing,
+  onSave,
+  onCancel,
+}: {
+  title: string;
+  children: ReactNode;
+  isPending: boolean;
+  isEditing: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-brand-sand/70 bg-white/50 p-4">
+      <h3 className="font-bold text-brand-teal">{title}</h3>
+      <div className="mt-4 space-y-3">{children}</div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button type="button" disabled={isPending} onClick={onSave}>
+          {isEditing ? "Salvar alteracoes" : "Incluir"}
+        </Button>
+        {isEditing ? (
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            Cancelar
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CadastroList<T extends { id: string; ativo: boolean }>({
+  items,
+  label,
+  onEdit,
+  onDelete,
+}: {
+  items: T[];
+  label: (item: T) => string;
+  onEdit: (item: T) => void;
+  onDelete: (item: T) => void;
+}) {
+  return (
+    <div className="mt-4 max-h-64 space-y-2 overflow-auto">
+      {items.map((item) => (
+        <div key={item.id} className="grid gap-2 rounded-md border border-brand-sand/70 bg-white/60 p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div>
+            <p className="text-sm font-bold text-brand-teal">{label(item)}</p>
+            <p className="text-xs font-semibold text-brand-teal/55">{item.ativo ? "Ativo" : "Inativo"}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={() => onEdit(item)}>
+              Editar
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => onDelete(item)}>
+              Excluir
+            </Button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
