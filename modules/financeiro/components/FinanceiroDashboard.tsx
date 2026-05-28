@@ -41,9 +41,9 @@ const tabs = ["inicio", "diagnostico", "lancar", "consultar", "dre", "marketing"
 type Tab = (typeof tabs)[number];
 
 const tabLabels: Record<Tab, string> = {
-  inicio: "Inicio",
-  diagnostico: "Diagnostico",
-  lancar: "Lancar",
+  inicio: "Início",
+  diagnostico: "Diagnóstico",
+  lancar: "Lançar",
   consultar: "Consultar",
   dre: "DRE",
   marketing: "Marketing",
@@ -86,7 +86,7 @@ function monthLabel(value: string) {
 }
 
 function updatedAtLabel(value: string | null) {
-  if (!value) return "Base sem atualizacao registrada";
+  if (!value) return "Base sem atualização registrada";
   return `Base atualizada em ${new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "2-digit",
@@ -197,11 +197,15 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
 
     const realized = context.lancamentos.filter((row) => row.status === "realizado");
     const saldo = realized.reduce((sum, row) => sum + signedValue(row), 0);
+    const realizedSaidas = realized.filter((row) => row.tipo === "saida");
+    const mesesSaida = new Set(realizedSaidas.map((row) => row.mes_competencia.slice(0, 7)));
+    const totalSaidas = realizedSaidas.reduce((sum, row) => sum + row.valor, 0);
+    const mediaSaidasMes = mesesSaida.size > 0 ? totalSaidas / mesesSaida.size : 0;
     const receber = context.lancamentos
-      .filter((row) => row.status === "previsto" && row.tipo === "entrada" && row.data_pagamento <= next30Iso)
+      .filter((row) => row.status === "previsto" && row.tipo === "entrada" && row.data_pagamento >= todayIso && row.data_pagamento <= next30Iso)
       .reduce((sum, row) => sum + row.valor, 0);
     const pagar = context.lancamentos
-      .filter((row) => row.status === "previsto" && row.tipo === "saida" && row.data_pagamento <= next30Iso)
+      .filter((row) => row.status === "previsto" && row.tipo === "saida" && row.data_pagamento >= todayIso && row.data_pagamento <= next30Iso)
       .reduce((sum, row) => sum + row.valor, 0);
     const vencendo = context.lancamentos.filter(
       (row) => row.status === "previsto" && row.tipo === "saida" && row.data_pagamento >= todayIso && row.data_pagamento <= next30Iso,
@@ -211,6 +215,12 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
       saldo,
       receber,
       pagar,
+      saldoProjetado: saldo + receber - pagar,
+      mediaSaidasMes,
+      reservaMinimaMeta: mediaSaidasMes * 3,
+      reservaEmergenciaMeta: mediaSaidasMes * 6,
+      reservaInvestida: Math.max(saldo, 0),
+      saldoLivreInvestir: saldo - mediaSaidasMes * 3,
       vencendo,
       receitaMes: context.dre[0]?.receita_bruta ?? 0,
       ebitdaMes: context.dre[0]?.ebitda ?? 0,
@@ -248,7 +258,7 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
     return (
       <Card className="mx-auto max-w-3xl p-6">
         <p className="text-sm font-bold uppercase text-brand-clay">Financeiro</p>
-        <h1 className="mt-2 text-3xl font-semibold text-brand-teal">Acesso ainda nao disponivel</h1>
+        <h1 className="mt-2 text-3xl font-semibold text-brand-teal">Acesso ainda não disponível</h1>
         <p className="mt-3 text-sm leading-6 text-brand-teal/70">{context.diagnostic}</p>
       </Card>
     );
@@ -259,9 +269,9 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
       <header className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div>
           <p className="text-sm font-bold uppercase tracking-wide text-brand-clay">Financeiro</p>
-          <h1 className="mt-2 text-4xl font-semibold text-brand-teal">Gestao financeira</h1>
+          <h1 className="mt-2 text-4xl font-semibold text-brand-teal">Gestão financeira</h1>
           <p className="mt-2 max-w-3xl text-base leading-7 text-brand-teal/70">
-            Fluxo de caixa, DRE, faturas e lancamentos com base multiempresa e regras gerenciais.
+            Fluxo de caixa, DRE, faturas e lançamentos com base multiempresa e regras gerenciais.
           </p>
         </div>
         <div className="text-sm font-semibold text-brand-teal/60">{updatedAtLabel(context.updatedAt)}</div>
@@ -366,6 +376,12 @@ type InicioMetrics = {
   saldo: number;
   receber: number;
   pagar: number;
+  saldoProjetado: number;
+  mediaSaidasMes: number;
+  reservaMinimaMeta: number;
+  reservaEmergenciaMeta: number;
+  reservaInvestida: number;
+  saldoLivreInvestir: number;
   vencendo: FinLancamento[];
   receitaMes: number;
   ebitdaMes: number;
@@ -373,22 +389,79 @@ type InicioMetrics = {
 
 function InicioTab({ metrics, context }: { metrics: InicioMetrics; context: FinanceiroContext }) {
   const latestDre = context.dre[0];
+  const reservaMinimaPercent = progressPercent(metrics.reservaInvestida, metrics.reservaMinimaMeta);
+  const reservaEmergenciaPercent = progressPercent(metrics.reservaInvestida, metrics.reservaEmergenciaMeta);
 
   return (
     <div className="space-y-6">
+      <section className="space-y-4">
+        <SectionTitle label="Próximos 30 dias" />
+        <div className="grid gap-4 md:grid-cols-2">
+          <FinanceFocusCard
+            title="A Receber"
+            value={decimalMoney(metrics.receber)}
+            detail="Previsto"
+            tone="positive"
+          />
+          <FinanceFocusCard
+            title="A Pagar"
+            value={decimalMoney(metrics.pagar)}
+            detail="Previsto"
+            tone="negative"
+          />
+        </div>
+        <Card className="p-5">
+          <p className="text-sm font-bold text-brand-teal/70">Saldo Projetado</p>
+          <p className="mt-2 text-4xl font-black text-emerald-700">{decimalMoney(metrics.saldoProjetado)}</p>
+          <p className="mt-1 text-sm font-semibold text-brand-teal/60">Conta + receber - pagar</p>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <SectionTitle label="Reservas" />
+        <ReserveCard
+          title="Reserva Mínima (3x fixos/mês)"
+          percent={reservaMinimaPercent}
+          invested={metrics.reservaInvestida}
+          target={metrics.reservaMinimaMeta}
+          tone="danger"
+        />
+        <ReserveCard
+          title="Reserva Emergência (6x saídas/mês)"
+          percent={reservaEmergenciaPercent}
+          invested={metrics.reservaInvestida}
+          target={metrics.reservaEmergenciaMeta}
+          tone="warning"
+        />
+        <div className="grid gap-4 md:grid-cols-2">
+          <FinanceFocusCard
+            title="Saldo Livre p/ Investir"
+            value={decimalMoney(metrics.saldoLivreInvestir)}
+            detail="Conta - reserva mínima"
+            tone={metrics.saldoLivreInvestir >= 0 ? "positive" : "negative"}
+          />
+          <FinanceFocusCard
+            title="Média Fixos/mês"
+            value={decimalMoney(metrics.mediaSaidasMes)}
+            detail="Base realizada importada"
+            tone="neutral"
+          />
+        </div>
+      </section>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Saldo realizado" value={money(metrics.saldo)} detail="Entradas menos saidas realizadas" icon={Landmark} />
-        <MetricCard label="A receber 30d" value={money(metrics.receber)} detail="Lancamentos previstos" icon={BadgeDollarSign} />
+        <MetricCard label="Saldo realizado" value={money(metrics.saldo)} detail="Entradas menos saídas realizadas" icon={Landmark} />
+        <MetricCard label="A receber 30d" value={money(metrics.receber)} detail="Lançamentos previstos" icon={BadgeDollarSign} />
         <MetricCard label="A pagar 30d" value={money(metrics.pagar)} detail="Contas e compromissos" icon={ReceiptText} />
-        <MetricCard label="EBITDA mes" value={money(metrics.ebitdaMes)} detail={latestDre ? monthLabel(latestDre.mes_competencia) : "Sem DRE"} icon={LineChart} />
+        <MetricCard label="EBITDA mês" value={money(metrics.ebitdaMes)} detail={latestDre ? monthLabel(latestDre.mes_competencia) : "Sem DRE"} icon={LineChart} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <Card className="p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold text-brand-teal">Proximos vencimentos</h2>
-              <p className="mt-1 text-sm text-brand-teal/60">Alertas dos proximos 30 dias.</p>
+              <h2 className="text-xl font-bold text-brand-teal">Próximos vencimentos</h2>
+              <p className="mt-1 text-sm text-brand-teal/60">Alertas dos próximos 30 dias.</p>
             </div>
             <span className="rounded-md bg-brand-cream px-3 py-2 text-sm font-black text-brand-teal">
               {metrics.vencendo.length}
@@ -409,7 +482,7 @@ function InicioTab({ metrics, context }: { metrics: InicioMetrics; context: Fina
         </Card>
 
         <Card className="p-5">
-          <h2 className="text-xl font-bold text-brand-teal">Proximas faturas</h2>
+          <h2 className="text-xl font-bold text-brand-teal">Próximas faturas</h2>
           <div className="mt-5 space-y-3">
             {context.faturas.slice(0, 5).map((fatura) => (
               <div key={`${fatura.cartao_id}-${fatura.mes_vencimento}`} className="rounded-md border border-brand-sand/70 bg-white/50 p-4">
@@ -418,7 +491,7 @@ function InicioTab({ metrics, context }: { metrics: InicioMetrics; context: Fina
                   <p className="font-black text-brand-clay">{money(fatura.valor_estimado)}</p>
                 </div>
                 <p className="mt-1 text-sm text-brand-teal/60">
-                  {monthLabel(fatura.mes_vencimento)} · {fatura.qtd_lancamentos} lancamentos
+                  {monthLabel(fatura.mes_vencimento)} · {fatura.qtd_lancamentos} lançamentos
                 </p>
               </div>
             ))}
@@ -439,7 +512,7 @@ function DiagnosticoTab({ context }: { context: FinanceiroContext }) {
   return (
     <div className="grid gap-5 lg:grid-cols-3">
       <BenchmarkCard label="Margem EBITDA" value={`${marginEbitda.toFixed(1)}%`} good={marginEbitda >= 20} warn={marginEbitda >= 10} />
-      <BenchmarkCard label="% fixos / receita liquida" value={`${despesaRatio.toFixed(1)}%`} good={despesaRatio <= 35} warn={despesaRatio <= 50} />
+      <BenchmarkCard label="% fixos / receita líquida" value={`${despesaRatio.toFixed(1)}%`} good={despesaRatio <= 35} warn={despesaRatio <= 50} />
       <BenchmarkCard label="Lucro liquido" value={money(latest?.lucro_liquido ?? 0)} good={(latest?.lucro_liquido ?? 0) > 0} warn={(latest?.lucro_liquido ?? 0) === 0} />
       <Card className="p-5 lg:col-span-3">
         <h2 className="text-xl font-bold text-brand-teal">Resultado por centro</h2>
@@ -470,8 +543,92 @@ function BenchmarkCard({ label, value, good, warn }: { label: string; value: str
           !good && !warn && "bg-rose-100 text-rose-700",
         )}
       >
-        {good ? "Saudavel" : warn ? "Atencao" : "Critico"}
+        {good ? "Saudável" : warn ? "Atenção" : "Crítico"}
       </span>
+    </Card>
+  );
+}
+
+function progressPercent(value: number, target: number) {
+  if (!target || target <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((value / target) * 100)));
+}
+
+function SectionTitle({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <p className="text-sm font-black uppercase tracking-wide text-brand-clay">{label}</p>
+      <div className="h-px flex-1 bg-brand-sand" />
+    </div>
+  );
+}
+
+function FinanceFocusCard({
+  title,
+  value,
+  detail,
+  tone,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  tone: "positive" | "negative" | "neutral";
+}) {
+  return (
+    <Card
+      className={clsx(
+        "p-5",
+        tone === "positive" && "border-emerald-200 bg-emerald-50/45",
+        tone === "negative" && "border-rose-200 bg-rose-50/45",
+      )}
+    >
+      <p className="text-base font-bold text-brand-teal/70">{title}</p>
+      <p
+        className={clsx(
+          "mt-2 text-3xl font-black",
+          tone === "positive" && "text-emerald-700",
+          tone === "negative" && "text-brand-clay",
+          tone === "neutral" && "text-brand-teal",
+        )}
+      >
+        {value}
+      </p>
+      <p className="mt-1 text-sm font-semibold text-brand-teal/60">{detail}</p>
+    </Card>
+  );
+}
+
+function ReserveCard({
+  title,
+  percent,
+  invested,
+  target,
+  tone,
+}: {
+  title: string;
+  percent: number;
+  invested: number;
+  target: number;
+  tone: "danger" | "warning";
+}) {
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-base font-bold text-brand-teal/75">{title}</p>
+        <p className={clsx("text-lg font-black", tone === "danger" ? "text-brand-clay" : "text-[#9D6F4E]")}>
+          {percent}%
+        </p>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-brand-cream">
+        <div
+          className={clsx("h-full rounded-full", tone === "danger" ? "bg-brand-clay" : "bg-[#9D6F4E]")}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <div className="mt-3 grid gap-1 text-sm font-semibold text-brand-teal/70 sm:grid-cols-2">
+        <p>Investido: {decimalMoney(invested)}</p>
+        <p className="sm:text-right">Meta: {decimalMoney(target)}</p>
+      </div>
     </Card>
   );
 }
@@ -518,7 +675,7 @@ function LancarTab({
         notify(payload.error ?? "Falha ao salvar.");
         return;
       }
-      notify("Lancamento salvo com sucesso.");
+      notify("Lançamento salvo com sucesso.");
       setForm(emptyLancamentoForm(context));
       router.refresh();
     });
@@ -529,8 +686,8 @@ function LancarTab({
       <div className="flex items-center gap-3">
         <span className="rounded-md bg-brand-teal p-3 text-white"><Plus className="h-5 w-5" /></span>
         <div>
-          <h2 className="text-xl font-bold text-brand-teal">Novo lancamento</h2>
-          <p className="text-sm text-brand-teal/60">Regras de banco, cartao, curso e competencia sao validadas no banco.</p>
+          <h2 className="text-xl font-bold text-brand-teal">Novo lançamento</h2>
+          <p className="text-sm text-brand-teal/60">Regras de banco, cartão, curso e competência são validadas no banco.</p>
         </div>
       </div>
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -545,7 +702,7 @@ function LancarTab({
           )}
         >
           <p className="text-sm font-black uppercase">Entrada</p>
-          <p className="mt-1 text-xs font-semibold opacity-70">Recebimentos, cursos, clinica e palestras.</p>
+          <p className="mt-1 text-xs font-semibold opacity-70">Recebimentos, cursos, clínica e palestras.</p>
         </button>
         <button
           type="button"
@@ -557,39 +714,39 @@ function LancarTab({
               : "border-brand-sand bg-white/70 text-brand-teal hover:bg-white",
           )}
         >
-          <p className="text-sm font-black uppercase">Saida</p>
-          <p className="mt-1 text-xs font-semibold opacity-70">Custos, despesas, impostos e cartao.</p>
+          <p className="text-sm font-black uppercase">Saída</p>
+          <p className="mt-1 text-xs font-semibold opacity-70">Custos, despesas, impostos e cartão.</p>
         </button>
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Select label="Status" value={form.status} onChange={(value) => setForm({ ...form, status: value as FinStatus })} options={[["realizado", "Realizado"], ["previsto", "Previsto"]]} />
         <Field label="Data pagamento" type="date" value={form.data_pagamento} onChange={(value) => setForm({ ...form, data_pagamento: value, mes_competencia: form.mes_competencia || `${value.slice(0, 7)}-01` })} />
-        <Field label="Mes competencia" type="month" value={form.mes_competencia.slice(0, 7)} onChange={(value) => setForm({ ...form, mes_competencia: `${value}-01` })} />
+        <Field label="Mês competência" type="month" value={form.mes_competencia.slice(0, 7)} onChange={(value) => setForm({ ...form, mes_competencia: `${value}-01` })} />
         <Select label="Centro" value={form.centro_resultado_id} onChange={(value) => setForm({ ...form, centro_resultado_id: value })} options={context.centros.filter((item) => item.ativo).map((item) => [item.id, item.nome])} />
         <Select label="Categoria" value={form.categoria_id} onChange={(value) => setForm({ ...form, categoria_id: value, subcategoria_id: null })} options={categorias.map((item) => [item.id, item.nome])} />
         <Select label="Subcategoria" value={form.subcategoria_id ?? ""} onChange={(value) => setForm({ ...form, subcategoria_id: value || null })} options={[["", "Selecionar"], ...subcategorias.map((item) => [item.id, item.nome] as [string, string])]} />
         {needsCurso ? (
           <Select label="Curso" value={form.curso_id ?? ""} onChange={(value) => setForm({ ...form, curso_id: value })} options={context.cursos.filter((item) => item.ativo).map((item) => [item.id, item.nome])} />
         ) : (
-          <Select label="Forma" value={form.forma_pagamento} onChange={(value) => setForm({ ...form, forma_pagamento: value as FinFormaPagamento })} options={[["conta_bancaria", "Conta"], ["cartao_credito", "Cartao"], ["pix", "PIX"], ["boleto", "Boleto"], ["dinheiro", "Dinheiro"]]} />
+          <Select label="Forma" value={form.forma_pagamento} onChange={(value) => setForm({ ...form, forma_pagamento: value as FinFormaPagamento })} options={[["conta_bancaria", "Conta"], ["cartao_credito", "Cartão"], ["pix", "PIX"], ["boleto", "Boleto"], ["dinheiro", "Dinheiro"]]} />
         )}
         {needsCurso ? (
-          <Select label="Forma" value={form.forma_pagamento} onChange={(value) => setForm({ ...form, forma_pagamento: value as FinFormaPagamento })} options={[["conta_bancaria", "Conta"], ["cartao_credito", "Cartao"], ["pix", "PIX"], ["boleto", "Boleto"], ["dinheiro", "Dinheiro"]]} />
+          <Select label="Forma" value={form.forma_pagamento} onChange={(value) => setForm({ ...form, forma_pagamento: value as FinFormaPagamento })} options={[["conta_bancaria", "Conta"], ["cartao_credito", "Cartão"], ["pix", "PIX"], ["boleto", "Boleto"], ["dinheiro", "Dinheiro"]]} />
         ) : null}
         {form.forma_pagamento === "cartao_credito" ? (
           <>
-            <Select label="Cartao" value={form.cartao_id ?? ""} onChange={(value) => setForm({ ...form, cartao_id: value, banco_id: null })} options={context.cartoes.filter((item) => item.ativo).map((item) => [item.id, `${item.nome} · venc. dia ${item.dia_vencimento}`])} />
+            <Select label="Cartão" value={form.cartao_id ?? ""} onChange={(value) => setForm({ ...form, cartao_id: value, banco_id: null })} options={context.cartoes.filter((item) => item.ativo).map((item) => [item.id, `${item.nome} · venc. dia ${item.dia_vencimento}`])} />
             <Field label="Parcelas" type="number" min="1" value={String(form.qtd_parcelas ?? 1)} onChange={(value) => setForm({ ...form, qtd_parcelas: Number(value) || 1 })} />
           </>
         ) : (
           <Select label="Banco" value={form.banco_id ?? ""} onChange={(value) => setForm({ ...form, banco_id: value, cartao_id: null })} options={context.bancos.filter((item) => item.ativo).map((item) => [item.id, item.apelido || item.nome])} />
         )}
         <Field label="Valor" type="number" step="0.01" value={String(form.valor || "")} onChange={(value) => setForm({ ...form, valor: Number(value) })} />
-        <Field label="Descricao" className="xl:col-span-2" value={form.descricao} onChange={(value) => setForm({ ...form, descricao: value })} />
-        <Field label="Observacao" className="xl:col-span-2" value={form.observacao ?? ""} onChange={(value) => setForm({ ...form, observacao: value })} />
+        <Field label="Descrição" className="xl:col-span-2" value={form.descricao} onChange={(value) => setForm({ ...form, descricao: value })} />
+        <Field label="Observação" className="xl:col-span-2" value={form.observacao ?? ""} onChange={(value) => setForm({ ...form, observacao: value })} />
       </div>
       <div className="mt-6">
-        <Button onClick={submit} disabled={isPending}>{isPending ? "Salvando..." : "Salvar lancamento"}</Button>
+        <Button onClick={submit} disabled={isPending}>{isPending ? "Salvando..." : "Salvar lançamento"}</Button>
       </div>
     </Card>
   );
@@ -653,20 +810,20 @@ function ConsultarTab({
         <Select compact value={statusFilter} onChange={setStatusFilter} options={[["todos", "Todos status"], ["realizado", "Realizado"], ["previsto", "Previsto"], ["cancelado", "Cancelado"]]} />
         <label className="relative min-w-[240px] flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-teal/50" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar descricao..." className="h-11 w-full rounded-md border border-brand-sand bg-white/70 pl-9 pr-3 text-sm font-semibold text-brand-teal" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar descrição..." className="h-11 w-full rounded-md border border-brand-sand bg-white/70 pl-9 pr-3 text-sm font-semibold text-brand-teal" />
         </label>
         <ExportButtons
-          label="Lancamentos financeiros"
+          label="Lançamentos financeiros"
           filename="financeiro_lancamentos"
           rows={exportRows}
           columns={[
             { header: "Data", value: (row) => row.data },
-            { header: "Competencia", value: (row) => row.competencia },
+            { header: "Competência", value: (row) => row.competencia },
             { header: "Tipo", value: (row) => row.tipo },
             { header: "Status", value: (row) => row.status },
             { header: "Centro", value: (row) => row.centro },
             { header: "Categoria", value: (row) => row.categoria },
-            { header: "Descricao", value: (row) => row.descricao },
+            { header: "Descrição", value: (row) => row.descricao },
             { header: "Forma", value: (row) => row.forma },
             { header: "Valor", value: (row) => row.valor },
           ]}
@@ -679,7 +836,7 @@ function ConsultarTab({
               <th className="px-5 py-3">Data</th>
               <th className="px-5 py-3">Centro</th>
               <th className="px-5 py-3">Categoria</th>
-              <th className="px-5 py-3">Descricao</th>
+              <th className="px-5 py-3">Descrição</th>
               <th className="px-5 py-3">Forma</th>
               <th className="px-5 py-3 text-right">Valor</th>
             </tr>
@@ -715,16 +872,16 @@ function DreTab({ context }: { context: FinanceiroContext }) {
       <Card className="overflow-hidden">
         <div className="p-5">
           <h2 className="text-xl font-bold text-brand-teal">DRE por curso</h2>
-          <p className="mt-1 text-sm text-brand-teal/60">Infoproduto com margem de contribuicao por curso.</p>
+          <p className="mt-1 text-sm text-brand-teal/60">Infoproduto com margem de contribuição por curso.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="bg-[#F0D6DB] text-xs font-black uppercase text-brand-clay">
               <tr>
-                <th className="px-5 py-3">Mes</th>
+                <th className="px-5 py-3">Mês</th>
                 <th className="px-5 py-3">Curso</th>
                 <th className="px-5 py-3 text-right">Receita</th>
-                <th className="px-5 py-3 text-right">Deducoes</th>
+                <th className="px-5 py-3 text-right">Deduções</th>
                 <th className="px-5 py-3 text-right">Margem</th>
               </tr>
             </thead>
@@ -749,18 +906,18 @@ function DreTab({ context }: { context: FinanceiroContext }) {
 function DreTable({ rows }: { rows: FinanceiroContext["dre"] }) {
   const lines: Array<[keyof (typeof rows)[number], string]> = [
     ["receita_bruta", "Receita Bruta"],
-    ["deducoes", "(-) Deducoes"],
-    ["receita_liquida", "Receita Liquida"],
+    ["deducoes", "(-) Deduções"],
+    ["receita_liquida", "Receita Líquida"],
     ["custos_diretos", "(-) Custos Diretos"],
     ["lucro_bruto", "Lucro Bruto"],
     ["despesas_administrativas", "(-) Desp. Administrativas"],
     ["despesas_pessoal", "(-) Desp. Pessoal"],
     ["ebitda", "EBITDA"],
-    ["depreciacao", "(-) Depreciacao"],
+    ["depreciacao", "(-) Depreciação"],
     ["ebit", "EBIT"],
     ["resultado_financeiro", "Resultado Financeiro"],
     ["irpj_csll", "IRPJ/CSLL"],
-    ["lucro_liquido", "Lucro Liquido"],
+    ["lucro_liquido", "Lucro Líquido"],
   ];
   const visibleRows = rows.slice(0, 6).reverse();
 
@@ -795,7 +952,7 @@ function MarketingTab({ context }: { context: FinanceiroContext }) {
   return (
     <Card className="overflow-hidden">
       <div className="p-5">
-        <h2 className="text-xl font-bold text-brand-teal">Visao marketing</h2>
+        <h2 className="text-xl font-bold text-brand-teal">Visão marketing</h2>
         <p className="mt-1 text-sm text-brand-teal/60">Resumo simplificado apenas do centro Infoproduto.</p>
       </div>
       <DreTable rows={infoproduto} />
@@ -856,8 +1013,8 @@ function CadastroTab({
 
       notify(
         payload.softDeleted
-          ? `Cadastro inativado porque possui ${payload.relatedCount} vinculo(s).`
-          : "Cadastro excluido.",
+          ? `Cadastro inativado porque possui ${payload.relatedCount} vínculo(s).`
+          : "Cadastro excluído.",
       );
       router.refresh();
     });
@@ -868,7 +1025,7 @@ function CadastroTab({
       <Card className="p-5">
         <div className="flex items-center gap-3">
           <Landmark className="h-5 w-5 text-brand-clay" />
-          <h2 className="text-xl font-bold text-brand-teal">Meus bancos</h2>
+          <h2 className="text-xl font-bold text-brand-teal">Bancos</h2>
         </div>
         <div className="mt-5 grid gap-3">
           <Field label="Nome" value={bank.nome} onChange={(value) => setBank({ ...bank, nome: value })} />
@@ -907,7 +1064,8 @@ function CadastroTab({
             ) : null}
           </div>
         </div>
-        <div className="mt-6 space-y-2">
+        <h3 className="mt-6 text-base font-bold text-brand-teal">Meus Bancos</h3>
+        <div className="mt-3 space-y-2">
           {context.bancos.map((item) => (
             <div key={item.id} className="rounded-md border border-brand-sand/70 bg-white/50 p-3">
               <p className="font-bold text-brand-teal">{item.nome}</p>
@@ -935,7 +1093,7 @@ function CadastroTab({
       <Card className="p-5">
         <div className="flex items-center gap-3">
           <CreditCard className="h-5 w-5 text-brand-clay" />
-          <h2 className="text-xl font-bold text-brand-teal">Cartoes</h2>
+          <h2 className="text-xl font-bold text-brand-teal">Cartões</h2>
         </div>
         <div className="mt-5 grid gap-3">
           <Field label="Nome" value={card.nome} onChange={(value) => setCard({ ...card, nome: value })} />
@@ -959,12 +1117,12 @@ function CadastroTab({
                     limite: card.limite ? Number(card.limite) : null,
                     ativo: true,
                   },
-                  editingCardId ? "Cartao atualizado." : "Cartao cadastrado.",
+                  editingCardId ? "Cartão atualizado." : "Cartão cadastrado.",
                   editingCardId ? "PATCH" : "POST",
                 )
               }
             >
-              {editingCardId ? "Salvar cartao" : "Cadastrar cartao"}
+              {editingCardId ? "Salvar cartão" : "Cadastrar cartão"}
             </Button>
             {editingCardId ? (
               <Button
@@ -980,8 +1138,8 @@ function CadastroTab({
             ) : null}
           </div>
         </div>
-        <h3 className="mt-6 text-base font-bold text-brand-teal">Meus Cartoes</h3>
-        <div className="mt-6 space-y-2">
+        <h3 className="mt-6 text-base font-bold text-brand-teal">Meus Cartões</h3>
+        <div className="mt-3 space-y-2">
           {context.cartoes.filter((item) => item.ativo).map((item) => {
             const nextInvoice = context.faturas.find((fatura) => fatura.cartao_id === item.id);
             return (
@@ -1005,7 +1163,7 @@ function CadastroTab({
                   Editar
                 </Button>
                 <p className="text-sm text-brand-teal/60">Fecha dia {item.dia_fechamento} · vence dia {item.dia_vencimento}</p>
-                <p className="mt-1 text-sm font-bold text-brand-clay">Proxima fatura: {nextInvoice ? `${money(nextInvoice.valor_estimado)} em ${monthLabel(nextInvoice.mes_vencimento)}` : "sem lancamentos"}</p>
+                <p className="mt-1 text-sm font-bold text-brand-clay">Próxima fatura: {nextInvoice ? `${money(nextInvoice.valor_estimado)} em ${monthLabel(nextInvoice.mes_vencimento)}` : "sem lançamentos"}</p>
               </div>
             );
           })}
@@ -1146,7 +1304,7 @@ function AdminCadastroSections({
       >
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="Nome" value={categoria.nome} onChange={(value) => setCategoria({ ...categoria, nome: value })} />
-          <Select label="Tipo" value={categoria.tipo} onChange={(value) => setCategoria({ ...categoria, tipo: value as FinTipo })} options={[["entrada", "Entrada"], ["saida", "Saida"]]} />
+          <Select label="Tipo" value={categoria.tipo} onChange={(value) => setCategoria({ ...categoria, tipo: value as FinTipo })} options={[["entrada", "Entrada"], ["saida", "Saída"]]} />
           <Select label="Natureza" value={categoria.natureza_id} onChange={(value) => setCategoria({ ...categoria, natureza_id: value })} options={context.naturezas.map((item) => [item.id, item.nome] as [string, string])} />
           <Select label="Grupo DRE" value={categoria.dre_grupo} onChange={(value) => setCategoria({ ...categoria, dre_grupo: value })} options={dreGroupOptions} />
         </div>
@@ -1205,16 +1363,16 @@ function AdminCadastroSections({
 
 const dreGroupOptions: Array<[string, string]> = [
   ["receita_bruta", "Receita Bruta"],
-  ["deducoes", "Deducoes"],
+  ["deducoes", "Deduções"],
   ["taxas_plataforma", "Taxas de plataforma"],
-  ["coproducao", "Coproducao"],
-  ["comissoes_afiliados", "Comissoes afiliados"],
+  ["coproducao", "Coprodução"],
+  ["comissoes_afiliados", "Comissões de afiliados"],
   ["custos_diretos", "Custos diretos"],
   ["vendas_marketing", "Vendas e marketing"],
   ["despesas_operacionais", "Despesas operacionais"],
   ["despesas_administrativas", "Despesas administrativas"],
   ["despesas_pessoal", "Despesas pessoal"],
-  ["depreciacao", "Depreciacao"],
+  ["depreciacao", "Depreciação"],
   ["resultado_financeiro", "Resultado financeiro"],
   ["irpj_csll", "IRPJ/CSLL"],
 ];
@@ -1240,7 +1398,7 @@ function CadastroPanel({
       <div className="mt-4 space-y-3">{children}</div>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button type="button" disabled={isPending} onClick={onSave}>
-          {isEditing ? "Salvar alteracoes" : "Incluir"}
+          {isEditing ? "Salvar alterações" : "Incluir"}
         </Button>
         {isEditing ? (
           <Button type="button" variant="secondary" onClick={onCancel}>
