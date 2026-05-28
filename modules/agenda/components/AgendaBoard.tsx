@@ -255,7 +255,16 @@ export function AgendaBoard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const result = (await response.json()) as { event?: AgendaEvent; error?: string };
+      const result = (await response.json()) as {
+        event?: AgendaEvent;
+        error?: string;
+        googleSync?: {
+          ok: boolean;
+          error?: string | null;
+          googleEventId?: string | null;
+          accountEmail?: string | null;
+        };
+      };
 
       if (!response.ok || !result.event) {
         throw new Error(result.error ?? "Nao foi possivel salvar o evento.");
@@ -271,29 +280,9 @@ export function AgendaBoard({
       setEditingEvent(null);
       setFormStart(defaultStart);
       setFormEnd(defaultEnd);
-      let googleMessage = " Google Agenda sincronizado.";
-
-      try {
-        const syncResponse = await fetch("/api/agenda/events/sync-google", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ eventId: result.event.id }),
-        });
-
-        if (!syncResponse.ok) {
-          const syncResult = (await syncResponse.json()) as { error?: string };
-          googleMessage = ` Salvo no banco; Google Agenda pendente: ${syncResult.error ?? "revise a conexao OAuth."}`;
-        } else {
-          const syncResult = (await syncResponse.json()) as { event?: AgendaEvent };
-          if (syncResult.event) {
-            setEvents((current) =>
-              sortEvents(current.map((item) => (item.id === syncResult.event!.id ? syncResult.event! : item))),
-            );
-          }
-        }
-      } catch {
-        googleMessage = " Salvo no banco; Google Agenda pendente por falha de conexao.";
-      }
+      const googleMessage = result.googleSync?.ok
+        ? " Google Agenda sincronizado."
+        : ` Google Agenda pendente: ${result.googleSync?.error ?? "revise a conexao OAuth."}`;
 
       setMessage(`${editingEvent ? "Agendamento atualizado." : "Evento salvo no banco."}${googleMessage}`);
     } catch (error) {

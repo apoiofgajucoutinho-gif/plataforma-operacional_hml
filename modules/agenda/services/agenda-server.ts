@@ -1,6 +1,11 @@
 import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import {
+  isGoogleCalendarConfigured,
+  refreshGoogleAccessToken,
+  upsertGoogleCalendarEvent,
+} from "@/services/google/calendar";
 import type { AgendaEvent, AgendaEventInput } from "@/modules/agenda/types";
 
 const allModules = ["agenda", "instagram", "adocao", "financeiro", "atividades", "relatorios", "admin"];
@@ -190,6 +195,72 @@ export async function createAgendaEvent(input: AgendaEventInput) {
   }
 
   return data;
+}
+
+export async function syncAgendaEventWithGoogle(event: AgendaEvent) {
+  if (!isGoogleCalendarConfigured()) {
+    return {
+      ok: false,
+      error: "Google Calendar OAuth ainda nao configurado.",
+      event,
+    };
+  }
+
+  const userClient = await createClient();
+  const dataClient = createAdminClient() ?? userClient;
+
+  const { data: connection, error: connectionError } = await dataClient
+    .from("google_calendar_connections")
+    .select("account_email, refresh_token")
+    .eq("tenant_id", event.tenant_id)
+    .returns<{ account_email: string; refresh_token: string }[]>()
+    .maybeSingle();
+
+  if (connectionError || !connection) {
+    return {
+      ok: false,
+      error: connectionError?.message ?? "Tenant sem conexao Google Calendar.",
+      event,
+    };
+  }
+
+  try {
+    const token = await refreshGoogleAccessToken(connection.refresh_token);
+    const googleEvent = await upsertGoogleCalendarEvent({
+      event,
+      accessToken: token.access_token,
+    });
+
+    const { data: updatedEvent, error: updateError } = await dataClient
+      .from("agenda_eventos")
+      .update({ google_event_id: googleEvent.id as string })
+      .eq("id", event.id)
+      .select("*")
+      .returns<AgendaEvent[]>()
+      .single();
+
+    if (updateError) {
+      return {
+        ok: false,
+        error: updateError.message,
+        event,
+      };
+    }
+
+    return {
+      ok: true,
+      error: null,
+      googleEventId: googleEvent.id as string,
+      accountEmail: connection.account_email,
+      event: updatedEvent ?? { ...event, google_event_id: googleEvent.id as string },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Falha ao sincronizar evento com Google Calendar.",
+      event,
+    };
+  }
 }
 
 export async function updateAgendaEvent(eventId: string, input: AgendaEventInput) {

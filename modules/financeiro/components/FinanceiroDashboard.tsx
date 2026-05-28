@@ -494,6 +494,17 @@ function LancarTab({
   const subcategorias = context.subcategorias.filter((item) => item.ativo && item.categoria_id === form.categoria_id);
   const needsCurso = selectedCentro?.nome === "Infoproduto" && form.tipo === "entrada";
 
+  function setTipo(tipo: FinTipo) {
+    const nextCategoria = context.categorias.find((item) => item.ativo && item.tipo === tipo)?.id ?? "";
+    setForm({
+      ...form,
+      tipo,
+      categoria_id: nextCategoria,
+      subcategoria_id: null,
+      curso_id: tipo === "entrada" ? form.curso_id : null,
+    });
+  }
+
   async function submit() {
     startTransition(async () => {
       const response = await fetch("/api/financeiro/lancamentos", {
@@ -521,8 +532,35 @@ function LancarTab({
           <p className="text-sm text-brand-teal/60">Regras de banco, cartao, curso e competencia sao validadas no banco.</p>
         </div>
       </div>
+      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setTipo("entrada")}
+          className={clsx(
+            "rounded-md border p-4 text-left transition",
+            form.tipo === "entrada"
+              ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+              : "border-brand-sand bg-white/70 text-brand-teal hover:bg-white",
+          )}
+        >
+          <p className="text-sm font-black uppercase">Entrada</p>
+          <p className="mt-1 text-xs font-semibold opacity-70">Recebimentos, cursos, clinica e palestras.</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTipo("saida")}
+          className={clsx(
+            "rounded-md border p-4 text-left transition",
+            form.tipo === "saida"
+              ? "border-brand-clay bg-[#FFF0F2] text-brand-clay"
+              : "border-brand-sand bg-white/70 text-brand-teal hover:bg-white",
+          )}
+        >
+          <p className="text-sm font-black uppercase">Saida</p>
+          <p className="mt-1 text-xs font-semibold opacity-70">Custos, despesas, impostos e cartao.</p>
+        </button>
+      </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Select label="Tipo" value={form.tipo} onChange={(value) => setForm({ ...form, tipo: value as FinTipo, categoria_id: "" })} options={[["entrada", "Entrada"], ["saida", "Saida"]]} />
         <Select label="Status" value={form.status} onChange={(value) => setForm({ ...form, status: value as FinStatus })} options={[["realizado", "Realizado"], ["previsto", "Previsto"]]} />
         <Field label="Data pagamento" type="date" value={form.data_pagamento} onChange={(value) => setForm({ ...form, data_pagamento: value, mes_competencia: form.mes_competencia || `${value.slice(0, 7)}-01` })} />
         <Field label="Mes competencia" type="month" value={form.mes_competencia.slice(0, 7)} onChange={(value) => setForm({ ...form, mes_competencia: `${value}-01` })} />
@@ -778,16 +816,26 @@ function CadastroTab({
   const router = useRouter();
   const [bank, setBank] = useState({ nome: "", apelido: "", saldo_inicial: "0" });
   const [card, setCard] = useState({ nome: "", banco_id: context.bancos[0]?.id ?? "", dia_fechamento: "3", dia_vencimento: "10", limite: "" });
+  const [editingBankId, setEditingBankId] = useState<string | null>(null);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
 
-  async function post(url: string, body: unknown, success: string) {
+  async function save(url: string, body: unknown, success: string, method: "POST" | "PATCH" = "POST") {
     startTransition(async () => {
-      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const response = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const payload = await response.json();
       if (!response.ok) {
         notify(payload.error ?? "Falha ao salvar.");
         return;
       }
       notify(success);
+      if (url.endsWith("/bancos")) {
+        setEditingBankId(null);
+        setBank({ nome: "", apelido: "", saldo_inicial: "0" });
+      }
+      if (url.endsWith("/cartoes")) {
+        setEditingCardId(null);
+        setCard({ nome: "", banco_id: context.bancos[0]?.id ?? "", dia_fechamento: "3", dia_vencimento: "10", limite: "" });
+      }
       router.refresh();
     });
   }
@@ -803,12 +851,58 @@ function CadastroTab({
           <Field label="Nome" value={bank.nome} onChange={(value) => setBank({ ...bank, nome: value })} />
           <Field label="Apelido" value={bank.apelido} onChange={(value) => setBank({ ...bank, apelido: value })} />
           <Field label="Saldo inicial" type="number" step="0.01" value={bank.saldo_inicial} onChange={(value) => setBank({ ...bank, saldo_inicial: value })} />
-          <Button disabled={isPending} onClick={() => post("/api/financeiro/bancos", { ...bank, saldo_inicial: Number(bank.saldo_inicial) }, "Banco cadastrado.")}>Cadastrar banco</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={isPending}
+              onClick={() =>
+                save(
+                  "/api/financeiro/bancos",
+                  {
+                    id: editingBankId ?? undefined,
+                    ...bank,
+                    saldo_inicial: Number(bank.saldo_inicial),
+                    ativo: true,
+                  },
+                  editingBankId ? "Banco atualizado." : "Banco cadastrado.",
+                  editingBankId ? "PATCH" : "POST",
+                )
+              }
+            >
+              {editingBankId ? "Salvar banco" : "Cadastrar banco"}
+            </Button>
+            {editingBankId ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setEditingBankId(null);
+                  setBank({ nome: "", apelido: "", saldo_inicial: "0" });
+                }}
+              >
+                Cancelar
+              </Button>
+            ) : null}
+          </div>
         </div>
         <div className="mt-6 space-y-2">
           {context.bancos.map((item) => (
             <div key={item.id} className="rounded-md border border-brand-sand/70 bg-white/50 p-3">
               <p className="font-bold text-brand-teal">{item.nome}</p>
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-3"
+                onClick={() => {
+                  setEditingBankId(item.id);
+                  setBank({
+                    nome: item.nome,
+                    apelido: item.apelido ?? "",
+                    saldo_inicial: String(item.saldo_inicial ?? 0),
+                  });
+                }}
+              >
+                Editar
+              </Button>
               <p className="text-sm text-brand-teal/60">{item.apelido ?? "Sem apelido"} · saldo inicial {decimalMoney(item.saldo_inicial)}</p>
             </div>
           ))}
@@ -828,7 +922,40 @@ function CadastroTab({
             <Field label="Vence dia" type="number" value={card.dia_vencimento} onChange={(value) => setCard({ ...card, dia_vencimento: value })} />
             <Field label="Limite" type="number" value={card.limite} onChange={(value) => setCard({ ...card, limite: value })} />
           </div>
-          <Button disabled={isPending} onClick={() => post("/api/financeiro/cartoes", { ...card, dia_fechamento: Number(card.dia_fechamento), dia_vencimento: Number(card.dia_vencimento), limite: card.limite ? Number(card.limite) : null }, "Cartao cadastrado.")}>Cadastrar cartao</Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={isPending}
+              onClick={() =>
+                save(
+                  "/api/financeiro/cartoes",
+                  {
+                    id: editingCardId ?? undefined,
+                    ...card,
+                    dia_fechamento: Number(card.dia_fechamento),
+                    dia_vencimento: Number(card.dia_vencimento),
+                    limite: card.limite ? Number(card.limite) : null,
+                    ativo: true,
+                  },
+                  editingCardId ? "Cartao atualizado." : "Cartao cadastrado.",
+                  editingCardId ? "PATCH" : "POST",
+                )
+              }
+            >
+              {editingCardId ? "Salvar cartao" : "Cadastrar cartao"}
+            </Button>
+            {editingCardId ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setEditingCardId(null);
+                  setCard({ nome: "", banco_id: context.bancos[0]?.id ?? "", dia_fechamento: "3", dia_vencimento: "10", limite: "" });
+                }}
+              >
+                Cancelar
+              </Button>
+            ) : null}
+          </div>
         </div>
         <div className="mt-6 space-y-2">
           {context.cartoes.map((item) => {
@@ -836,6 +963,23 @@ function CadastroTab({
             return (
               <div key={item.id} className="rounded-md border border-brand-sand/70 bg-white/50 p-3">
                 <p className="font-bold text-brand-teal">{item.nome}</p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="mt-3"
+                  onClick={() => {
+                    setEditingCardId(item.id);
+                    setCard({
+                      nome: item.nome,
+                      banco_id: item.banco_id,
+                      dia_fechamento: String(item.dia_fechamento),
+                      dia_vencimento: String(item.dia_vencimento),
+                      limite: item.limite ? String(item.limite) : "",
+                    });
+                  }}
+                >
+                  Editar
+                </Button>
                 <p className="text-sm text-brand-teal/60">Fecha dia {item.dia_fechamento} · vence dia {item.dia_vencimento}</p>
                 <p className="mt-1 text-sm font-bold text-brand-clay">Proxima fatura: {nextInvoice ? `${money(nextInvoice.valor_estimado)} em ${monthLabel(nextInvoice.mes_vencimento)}` : "sem lancamentos"}</p>
               </div>

@@ -362,6 +362,38 @@ export async function createFinanceiroBanco(input: {
   return data;
 }
 
+export async function updateFinanceiroBanco(input: {
+  id: string;
+  nome: string;
+  apelido?: string | null;
+  saldo_inicial?: number;
+  ativo?: boolean;
+}) {
+  const auth = await getFinanceiroAuth();
+  if (auth.perfil !== "admin") {
+    throw new Error("Apenas admin financeiro pode editar bancos.");
+  }
+
+  const { data, error } = await auth.dataClient
+    .from("fin_bancos")
+    .update({
+      nome: input.nome.trim(),
+      apelido: input.apelido?.trim() || null,
+      saldo_inicial: input.saldo_inicial || 0,
+      ativo: input.ativo ?? true,
+    })
+    .eq("id", input.id)
+    .eq("tenant_id", auth.tenantId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
 export async function createFinanceiroCartao(input: {
   nome: string;
   banco_id: string;
@@ -385,6 +417,42 @@ export async function createFinanceiroCartao(input: {
       limite: input.limite || null,
       ativo: true,
     })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+export async function updateFinanceiroCartao(input: {
+  id: string;
+  nome: string;
+  banco_id: string;
+  dia_fechamento: number;
+  dia_vencimento: number;
+  limite?: number | null;
+  ativo?: boolean;
+}) {
+  const auth = await getFinanceiroAuth();
+  if (auth.perfil !== "admin") {
+    throw new Error("Apenas admin financeiro pode editar cartoes.");
+  }
+
+  const { data, error } = await auth.dataClient
+    .from("fin_cartoes")
+    .update({
+      nome: input.nome.trim(),
+      banco_id: input.banco_id,
+      dia_fechamento: input.dia_fechamento,
+      dia_vencimento: input.dia_vencimento,
+      limite: input.limite || null,
+      ativo: input.ativo ?? true,
+    })
+    .eq("id", input.id)
+    .eq("tenant_id", auth.tenantId)
     .select("*")
     .single();
 

@@ -1,22 +1,11 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import {
-  isGoogleCalendarConfigured,
-  refreshGoogleAccessToken,
-  upsertGoogleCalendarEvent,
-} from "@/services/google/calendar";
+import { syncAgendaEventWithGoogle } from "@/modules/agenda/services/agenda-server";
 import type { AgendaEvent } from "@/modules/agenda/types";
 
 export async function POST(request: Request) {
   try {
-    if (!isGoogleCalendarConfigured()) {
-      return NextResponse.json(
-        { error: "Google Calendar OAuth ainda nao configurado." },
-        { status: 422 },
-      );
-    }
-
     const { eventId } = (await request.json()) as { eventId: string };
     const supabase = await createClient();
     const dataClient = createAdminClient() ?? supabase;
@@ -53,37 +42,15 @@ export async function POST(request: Request) {
       throw eventError ?? new Error("Evento nao encontrado.");
     }
 
-    const { data: connection, error: connectionError } = await dataClient
-      .from("google_calendar_connections")
-      .select("account_email, refresh_token")
-      .eq("tenant_id", event.tenant_id)
-      .returns<{ account_email: string; refresh_token: string }[]>()
-      .maybeSingle();
-
-    if (connectionError || !connection) {
-      throw connectionError ?? new Error("Tenant sem conexao Google Calendar.");
+    const googleSync = await syncAgendaEventWithGoogle(event);
+    if (!googleSync.ok) {
+      return NextResponse.json({ error: googleSync.error }, { status: 400 });
     }
 
-    const token = await refreshGoogleAccessToken(connection.refresh_token);
-
-    const googleEvent = await upsertGoogleCalendarEvent({
-      event,
-      accessToken: token.access_token,
-    });
-
-    const { data: updatedEvent } = await dataClient
-      .from("agenda_eventos")
-      .update({ google_event_id: googleEvent.id as string })
-      .eq("id", event.id)
-      .select("*")
-      .returns<AgendaEvent[]>()
-      .single();
-
     return NextResponse.json({
-      googleEvent,
-      googleEventId: googleEvent.id,
-      accountEmail: connection.account_email,
-      event: updatedEvent ?? { ...event, google_event_id: googleEvent.id },
+      googleEventId: googleSync.googleEventId,
+      accountEmail: googleSync.accountEmail,
+      event: googleSync.event,
     });
   } catch (error) {
     return NextResponse.json(
