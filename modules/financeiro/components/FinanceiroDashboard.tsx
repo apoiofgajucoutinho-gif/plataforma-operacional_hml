@@ -54,7 +54,8 @@ const tabLabels: Record<Tab, string> = {
   cadastro: "Cadastro",
 };
 
-type PeriodFilter = "hoje" | "7d" | "15d" | "30d" | "90d" | "ano" | "tudo";
+type PeriodFilter = "hoje" | "7d" | "15d" | "30d" | "90d" | "mes" | "ano" | "tudo";
+type DiagnosticStatusFilter = "todos" | FinStatus;
 type CadastroKind = "centro" | "categoria" | "subcategoria" | "curso";
 
 function money(value: number) {
@@ -149,13 +150,14 @@ function periodStart(period: PeriodFilter) {
   if (period === "15d") date.setDate(now.getDate() - 15);
   if (period === "30d") date.setDate(now.getDate() - 30);
   if (period === "90d") date.setDate(now.getDate() - 90);
+  if (period === "mes") return firstDayOfMonth(now);
   if (period === "ano") return `${now.getFullYear()}-01-01`;
   if (period === "tudo") return "1900-01-01";
   return date.toISOString().slice(0, 10);
 }
 
 function periodEnd(period: PeriodFilter) {
-  if (period === "hoje") return todayInput();
+  if (period !== "tudo") return todayInput();
   return null;
 }
 
@@ -166,6 +168,7 @@ function periodLabel(period: PeriodFilter) {
     "15d": "15 dias",
     "30d": "30 dias",
     "90d": "90 dias",
+    mes: "Mês",
     ano: "Ano",
     tudo: "Tudo",
   };
@@ -572,61 +575,128 @@ function InicioTab({ metrics, context }: { metrics: InicioMetrics; context: Fina
 }
 
 function DiagnosticoTab({ context }: { context: FinanceiroContext }) {
-  const latest = context.dre[0];
-  const receita = latest?.receita_liquida || 0;
-  const marginEbitda = receita ? (latest!.ebitda / receita) * 100 : 0;
-  const despesaRatio = receita ? ((Math.abs(latest?.despesas_administrativas || 0) + Math.abs(latest?.despesas_pessoal || 0)) / receita) * 100 : 0;
-  const months = lastCompetenceMonths(context.drePorCentro.length ? context.drePorCentro : context.dre, 3);
-  const centrosOrdenados = sortedCentroNames(context.centros);
-  const centroRowsByMonth = new Map(
-    context.drePorCentro.map((row) => [`${row.mes_competencia}:${row.centro_resultado}`, row]),
-  );
+  const [diagnosticPeriod, setDiagnosticPeriod] = useState<PeriodFilter>("30d");
+  const [diagnosticCentro, setDiagnosticCentro] = useState("todos");
+  const [diagnosticCategoria, setDiagnosticCategoria] = useState("todos");
+  const [diagnosticSubcategoria, setDiagnosticSubcategoria] = useState("todos");
+  const [diagnosticStatus, setDiagnosticStatus] = useState<DiagnosticStatusFilter>("realizado");
+
+  const centroById = idMap(context.centros);
   const categoriaById = idMap(context.categorias);
   const subcategoriaById = idMap(context.subcategorias);
+  const filteredRows = filterLancamentosByPeriod(context.lancamentos, diagnosticPeriod)
+    .filter((row) => diagnosticCentro === "todos" || row.centro_resultado_id === diagnosticCentro)
+    .filter((row) => diagnosticCategoria === "todos" || row.categoria_id === diagnosticCategoria)
+    .filter((row) => diagnosticSubcategoria === "todos" || row.subcategoria_id === diagnosticSubcategoria)
+    .filter((row) => diagnosticStatus === "todos" || row.status === diagnosticStatus);
+  const receita = filteredRows
+    .filter((row) => row.tipo === "entrada")
+    .reduce((sum, row) => sum + row.valor, 0);
+  const gastos = filteredRows
+    .filter((row) => row.tipo === "saida")
+    .reduce((sum, row) => sum + row.valor, 0);
+  const resultado = receita - gastos;
+  const marginPeriodo = receita ? (resultado / receita) * 100 : 0;
+  const despesaRatio = receita ? (gastos / receita) * 100 : 0;
+  const months = lastCompetenceMonths(filteredRows, 3);
+  const centrosOrdenados = sortedCentroNames(context.centros);
+  const categoriasDisponiveis = context.categorias.filter((item) => item.ativo);
+  const subcategoriasDisponiveis = context.subcategorias.filter(
+    (item) => item.ativo && (diagnosticCategoria === "todos" || item.categoria_id === diagnosticCategoria),
+  );
   const categoryBars = aggregateLancamentos(
-    context.lancamentos,
+    filteredRows,
     (row) => categoriaById.get(row.categoria_id)?.nome ?? "Sem categoria",
     months,
   );
   const subcategoryBars = aggregateLancamentos(
-    context.lancamentos,
+    filteredRows,
     (row) => row.subcategoria_id ? subcategoriaById.get(row.subcategoria_id)?.nome ?? "Sem subcategoria" : "Sem subcategoria",
     months,
   );
+  const centroLabel = diagnosticCentro === "todos" ? "todos centros" : centroById.get(diagnosticCentro)?.nome ?? "centro selecionado";
+  const categoriaLabel = diagnosticCategoria === "todos" ? "todas categorias" : categoriaById.get(diagnosticCategoria)?.nome ?? "categoria selecionada";
+  const subcategoriaLabel = diagnosticSubcategoria === "todos" ? "todas subcategorias" : subcategoriaById.get(diagnosticSubcategoria)?.nome ?? "subcategoria selecionada";
+  const recorteLabel = `${periodLabel(diagnosticPeriod)} · ${centroLabel} · ${categoriaLabel} · ${subcategoriaLabel} · ${diagnosticStatusLabel(diagnosticStatus)}`;
 
   return (
     <div className="grid gap-5 lg:grid-cols-3">
-      <BenchmarkCard label="Margem EBITDA" value={`${marginEbitda.toFixed(1)}%`} good={marginEbitda >= 20} warn={marginEbitda >= 10} />
-      <BenchmarkCard label="% fixos / receita líquida" value={`${despesaRatio.toFixed(1)}%`} good={despesaRatio <= 35} warn={despesaRatio <= 50} />
-      <BenchmarkCard label="Lucro liquido" value={money(latest?.lucro_liquido ?? 0)} good={(latest?.lucro_liquido ?? 0) > 0} warn={(latest?.lucro_liquido ?? 0) === 0} />
+      <Card className="p-5 lg:col-span-3">
+        <div className="flex flex-col gap-4">
+          <div>
+            <p className="text-xs font-black uppercase text-brand-clay">Filtros do diagnóstico</p>
+            <p className="mt-1 text-sm font-semibold text-brand-teal/60">Analisando: {recorteLabel}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(["hoje", "7d", "15d", "30d", "mes", "ano", "tudo"] as PeriodFilter[]).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setDiagnosticPeriod(item)}
+                className={clsx(
+                  "rounded-full border px-4 py-2 text-sm font-bold",
+                  diagnosticPeriod === item ? "bg-brand-clay text-white" : "border-brand-sand bg-white/70 text-brand-teal",
+                )}
+              >
+                {periodLabel(item)}
+              </button>
+            ))}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Select
+              label="Centro"
+              value={diagnosticCentro}
+              onChange={(value) => setDiagnosticCentro(value)}
+              options={[["todos", "Todos centros"], ...context.centros.map((item) => [item.id, item.nome] as [string, string])]}
+            />
+            <Select
+              label="Categoria"
+              value={diagnosticCategoria}
+              onChange={(value) => {
+                setDiagnosticCategoria(value);
+                setDiagnosticSubcategoria("todos");
+              }}
+              options={[["todos", "Todas categorias"], ...categoriasDisponiveis.map((item) => [item.id, item.nome] as [string, string])]}
+            />
+            <Select
+              label="Subcategoria"
+              value={diagnosticSubcategoria}
+              onChange={setDiagnosticSubcategoria}
+              options={[["todos", "Todas subcategorias"], ...subcategoriasDisponiveis.map((item) => [item.id, item.nome] as [string, string])]}
+            />
+            <Select
+              label="Status"
+              value={diagnosticStatus}
+              onChange={(value) => setDiagnosticStatus(value as DiagnosticStatusFilter)}
+              options={[["todos", "Todos status"], ["realizado", "Realizado"], ["previsto", "Previsto"], ["cancelado", "Cancelado"]]}
+            />
+          </div>
+        </div>
+      </Card>
+      <BenchmarkCard label="Margem do período" value={`${marginPeriodo.toFixed(1)}%`} good={marginPeriodo >= 20} warn={marginPeriodo >= 10} />
+      <BenchmarkCard label="% gastos / entradas" value={`${despesaRatio.toFixed(1)}%`} good={despesaRatio <= 35} warn={despesaRatio <= 50} />
+      <BenchmarkCard label="Resultado líquido" value={money(resultado)} good={resultado > 0} warn={resultado === 0} />
       <Card className="p-5 lg:col-span-3">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-xl font-bold text-brand-teal">Resultado por centro</h2>
-            <p className="text-sm font-semibold text-brand-teal/60">Últimos 3 meses, sempre na mesma ordem de centros.</p>
+            <p className="text-sm font-semibold text-brand-teal/60">Até 3 meses dentro do filtro, sempre na mesma ordem de centros.</p>
           </div>
         </div>
         <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          {months.map((month) => (
-            <div key={month} className="rounded-lg border border-brand-sand/70 bg-white/55 p-4">
-              <p className="text-sm font-black uppercase text-brand-clay">{monthLabel(month)}</p>
-              <div className="mt-4 space-y-3">
-                {centrosOrdenados.map((centro) => {
-                  const row = centroRowsByMonth.get(`${month}:${centro}`);
-                  const value = row?.lucro_liquido ?? 0;
-
-                  return (
-                    <div key={`${month}-${centro}`} className="flex items-center justify-between gap-3">
-                      <p className="truncate text-sm font-bold text-brand-teal/75">{centro}</p>
-                      <p className={clsx("shrink-0 text-sm font-black", value >= 0 ? "text-emerald-700" : "text-brand-clay")}>
-                        {money(value)}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+          {months.length ? months.map((month) => (
+            <CentroMonthlyResultCard
+              key={month}
+              month={month}
+              centros={centrosOrdenados}
+              rows={filteredRows}
+              centroById={centroById}
+            />
+          )) : (
+            <p className="rounded-md border border-dashed border-brand-sand p-4 text-sm font-semibold text-brand-teal/60 lg:col-span-3">
+              Sem dados para o recorte selecionado.
+            </p>
+          )}
         </div>
       </Card>
       <div className="lg:col-span-3 grid gap-5 xl:grid-cols-2">
@@ -781,6 +851,58 @@ function aggregateLancamentos(
   return Array.from(map.values())
     .sort((a, b) => b.entrada + b.saida - (a.entrada + a.saida))
     .slice(0, 8);
+}
+
+function filterLancamentosByPeriod(rows: FinLancamento[], period: PeriodFilter) {
+  const start = periodStart(period);
+  const end = periodEnd(period);
+
+  return rows.filter((row) => {
+    if (row.data_pagamento < start) return false;
+    if (end && row.data_pagamento > end) return false;
+    return true;
+  });
+}
+
+function diagnosticStatusLabel(status: DiagnosticStatusFilter) {
+  if (status === "todos") return "todos status";
+  if (status === "realizado") return "realizado";
+  if (status === "previsto") return "previsto";
+  return "cancelado";
+}
+
+function CentroMonthlyResultCard({
+  month,
+  centros,
+  rows,
+  centroById,
+}: {
+  month: string;
+  centros: string[];
+  rows: FinLancamento[];
+  centroById: Map<string, FinCentroResultado>;
+}) {
+  return (
+    <div className="rounded-lg border border-brand-sand/70 bg-white/55 p-4">
+      <p className="text-sm font-black uppercase text-brand-clay">{monthLabel(month)}</p>
+      <div className="mt-4 space-y-3">
+        {centros.map((centro) => {
+          const value = rows
+            .filter((row) => row.mes_competencia === month && centroById.get(row.centro_resultado_id)?.nome === centro)
+            .reduce((sum, row) => sum + signedValue(row), 0);
+
+          return (
+            <div key={`${month}-${centro}`} className="flex items-center justify-between gap-3">
+              <p className="truncate text-sm font-bold text-brand-teal/75">{centro}</p>
+              <p className={clsx("shrink-0 text-sm font-black", value >= 0 ? "text-emerald-700" : "text-brand-clay")}>
+                {money(value)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function RevenueExpenseBars({
