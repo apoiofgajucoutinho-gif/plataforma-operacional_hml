@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { InputHTMLAttributes, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
   BadgeDollarSign,
   Banknote,
   CalendarClock,
@@ -40,6 +42,7 @@ import type {
 const tabs = ["inicio", "diagnostico", "lancar", "consultar", "dre", "marketing", "cadastro"] as const;
 type Tab = (typeof tabs)[number];
 const FINANCEIRO_PAGE_SIZE = 20;
+const CENTRO_ORDER = ["Infoproduto", "Administrativo fixo", "Não operacional", "Clínica", "Palestras"];
 
 const tabLabels: Record<Tab, string> = {
   inicio: "Início",
@@ -51,7 +54,7 @@ const tabLabels: Record<Tab, string> = {
   cadastro: "Cadastro",
 };
 
-type PeriodFilter = "30d" | "90d" | "ano" | "tudo";
+type PeriodFilter = "hoje" | "7d" | "15d" | "30d" | "90d" | "ano" | "tudo";
 type CadastroKind = "centro" | "categoria" | "subcategoria" | "curso";
 
 function money(value: number) {
@@ -78,12 +81,15 @@ function dateLabel(value: string) {
 }
 
 function monthLabel(value: string) {
-  return new Intl.DateTimeFormat("pt-BR", {
+  const label = new Intl.DateTimeFormat("pt-BR", {
     month: "short",
     year: "2-digit",
   })
     .format(new Date(`${value.slice(0, 10)}T12:00:00`))
-    .replace(".", "");
+    .replace(".", "")
+    .replace(" de ", "/");
+
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function updatedAtLabel(value: string | null) {
@@ -117,14 +123,66 @@ function signedValue(row: FinLancamento) {
   return row.tipo === "entrada" ? row.valor : -row.valor;
 }
 
+function tipoVisual(tipo: FinTipo) {
+  return tipo === "entrada"
+    ? {
+        label: "Entrada",
+        Icon: ArrowDownLeft,
+        badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+        iconBox: "bg-emerald-100 text-emerald-700",
+        text: "text-emerald-700",
+      }
+    : {
+        label: "Saída",
+        Icon: ArrowUpRight,
+        badge: "bg-rose-50 text-brand-clay border-rose-200",
+        iconBox: "bg-rose-100 text-brand-clay",
+        text: "text-brand-clay",
+      };
+}
+
 function periodStart(period: PeriodFilter) {
   const now = new Date();
   const date = new Date(now);
+  if (period === "hoje") return now.toISOString().slice(0, 10);
+  if (period === "7d") date.setDate(now.getDate() - 7);
+  if (period === "15d") date.setDate(now.getDate() - 15);
   if (period === "30d") date.setDate(now.getDate() - 30);
   if (period === "90d") date.setDate(now.getDate() - 90);
   if (period === "ano") return `${now.getFullYear()}-01-01`;
   if (period === "tudo") return "1900-01-01";
   return date.toISOString().slice(0, 10);
+}
+
+function periodEnd(period: PeriodFilter) {
+  if (period === "hoje") return todayInput();
+  return null;
+}
+
+function periodLabel(period: PeriodFilter) {
+  const labels: Record<PeriodFilter, string> = {
+    hoje: "Hoje",
+    "7d": "7 dias",
+    "15d": "15 dias",
+    "30d": "30 dias",
+    "90d": "90 dias",
+    ano: "Ano",
+    tudo: "Tudo",
+  };
+
+  return labels[period];
+}
+
+function parseCurrencyInput(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return Number(digits || "0") / 100;
+}
+
+function formatCurrencyInput(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value || 0);
 }
 
 function emptyLancamentoForm(context: FinanceiroContext): CreateLancamentoPayload {
@@ -179,10 +237,12 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
 
   const filteredLancamentos = useMemo(() => {
     const start = periodStart(period);
+    const end = periodEnd(period);
     const needle = query.trim().toLowerCase();
 
     return context.lancamentos.filter((row) => {
       if (row.data_pagamento < start) return false;
+      if (end && row.data_pagamento > end) return false;
       if (centroFilter !== "todos" && row.centro_resultado_id !== centroFilter) return false;
       if (statusFilter !== "todos" && row.status !== statusFilter) return false;
       if (needle && !row.descricao.toLowerCase().includes(needle)) return false;
@@ -516,6 +576,23 @@ function DiagnosticoTab({ context }: { context: FinanceiroContext }) {
   const receita = latest?.receita_liquida || 0;
   const marginEbitda = receita ? (latest!.ebitda / receita) * 100 : 0;
   const despesaRatio = receita ? ((Math.abs(latest?.despesas_administrativas || 0) + Math.abs(latest?.despesas_pessoal || 0)) / receita) * 100 : 0;
+  const months = lastCompetenceMonths(context.drePorCentro.length ? context.drePorCentro : context.dre, 3);
+  const centrosOrdenados = sortedCentroNames(context.centros);
+  const centroRowsByMonth = new Map(
+    context.drePorCentro.map((row) => [`${row.mes_competencia}:${row.centro_resultado}`, row]),
+  );
+  const categoriaById = idMap(context.categorias);
+  const subcategoriaById = idMap(context.subcategorias);
+  const categoryBars = aggregateLancamentos(
+    context.lancamentos,
+    (row) => categoriaById.get(row.categoria_id)?.nome ?? "Sem categoria",
+    months,
+  );
+  const subcategoryBars = aggregateLancamentos(
+    context.lancamentos,
+    (row) => row.subcategoria_id ? subcategoriaById.get(row.subcategoria_id)?.nome ?? "Sem subcategoria" : "Sem subcategoria",
+    months,
+  );
 
   return (
     <div className="grid gap-5 lg:grid-cols-3">
@@ -523,17 +600,39 @@ function DiagnosticoTab({ context }: { context: FinanceiroContext }) {
       <BenchmarkCard label="% fixos / receita líquida" value={`${despesaRatio.toFixed(1)}%`} good={despesaRatio <= 35} warn={despesaRatio <= 50} />
       <BenchmarkCard label="Lucro liquido" value={money(latest?.lucro_liquido ?? 0)} good={(latest?.lucro_liquido ?? 0) > 0} warn={(latest?.lucro_liquido ?? 0) === 0} />
       <Card className="p-5 lg:col-span-3">
-        <h2 className="text-xl font-bold text-brand-teal">Resultado por centro</h2>
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {context.drePorCentro.slice(0, 8).map((row) => (
-            <div key={`${row.centro_resultado_id}-${row.mes_competencia}`} className="rounded-md border border-brand-sand/70 bg-white/50 p-4">
-              <p className="text-sm font-bold text-brand-clay">{row.centro_resultado}</p>
-              <p className="mt-2 text-2xl font-black text-brand-teal">{money(row.lucro_liquido)}</p>
-              <p className="mt-1 text-xs font-semibold uppercase text-brand-teal/50">{monthLabel(row.mes_competencia)}</p>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-brand-teal">Resultado por centro</h2>
+            <p className="text-sm font-semibold text-brand-teal/60">Últimos 3 meses, sempre na mesma ordem de centros.</p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          {months.map((month) => (
+            <div key={month} className="rounded-lg border border-brand-sand/70 bg-white/55 p-4">
+              <p className="text-sm font-black uppercase text-brand-clay">{monthLabel(month)}</p>
+              <div className="mt-4 space-y-3">
+                {centrosOrdenados.map((centro) => {
+                  const row = centroRowsByMonth.get(`${month}:${centro}`);
+                  const value = row?.lucro_liquido ?? 0;
+
+                  return (
+                    <div key={`${month}-${centro}`} className="flex items-center justify-between gap-3">
+                      <p className="truncate text-sm font-bold text-brand-teal/75">{centro}</p>
+                      <p className={clsx("shrink-0 text-sm font-black", value >= 0 ? "text-emerald-700" : "text-brand-clay")}>
+                        {money(value)}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>
       </Card>
+      <div className="lg:col-span-3 grid gap-5 xl:grid-cols-2">
+        <RevenueExpenseBars title="Receitas e gastos por categorias" rows={categoryBars} />
+        <RevenueExpenseBars title="Receitas e gastos por subcategorias" rows={subcategoryBars} />
+      </div>
     </div>
   );
 }
@@ -641,6 +740,93 @@ function ReserveCard({
   );
 }
 
+function sortedCentroNames(centros: FinCentroResultado[]) {
+  return [
+    ...CENTRO_ORDER,
+    ...centros
+      .map((centro) => centro.nome)
+      .filter((nome) => !CENTRO_ORDER.includes(nome))
+      .sort((a, b) => a.localeCompare(b)),
+  ];
+}
+
+function lastCompetenceMonths(rows: Array<{ mes_competencia: string }>, limit = 3) {
+  return Array.from(new Set(rows.map((row) => row.mes_competencia)))
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, limit)
+    .reverse();
+}
+
+function aggregateLancamentos(
+  rows: FinLancamento[],
+  labelFor: (row: FinLancamento) => string,
+  months: string[],
+) {
+  const monthSet = new Set(months);
+  const map = new Map<string, { label: string; entrada: number; saida: number }>();
+
+  rows
+    .filter((row) => row.status !== "cancelado" && monthSet.has(row.mes_competencia))
+    .forEach((row) => {
+      const label = labelFor(row);
+      const current = map.get(label) ?? { label, entrada: 0, saida: 0 };
+      if (row.tipo === "entrada") {
+        current.entrada += row.valor;
+      } else {
+        current.saida += row.valor;
+      }
+      map.set(label, current);
+    });
+
+  return Array.from(map.values())
+    .sort((a, b) => b.entrada + b.saida - (a.entrada + a.saida))
+    .slice(0, 8);
+}
+
+function RevenueExpenseBars({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ label: string; entrada: number; saida: number }>;
+}) {
+  const max = Math.max(...rows.map((row) => Math.max(row.entrada, row.saida)), 1);
+
+  return (
+    <Card className="p-5">
+      <h3 className="text-base font-bold text-brand-teal">{title}</h3>
+      <div className="mt-5 space-y-4">
+        {rows.length ? rows.map((row) => (
+          <div key={row.label}>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="truncate text-sm font-bold text-brand-teal">{row.label}</p>
+              <p className="shrink-0 text-xs font-semibold text-brand-teal/60">
+                {money(row.entrada)} / {money(row.saida)}
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <div className="h-2 overflow-hidden rounded-full bg-emerald-50">
+                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.max((row.entrada / max) * 100, row.entrada ? 3 : 0)}%` }} />
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-rose-50">
+                <div className="h-full rounded-full bg-brand-clay" style={{ width: `${Math.max((row.saida / max) * 100, row.saida ? 3 : 0)}%` }} />
+              </div>
+            </div>
+          </div>
+        )) : (
+          <p className="rounded-md border border-dashed border-brand-sand p-4 text-sm font-semibold text-brand-teal/60">
+            Sem lançamentos no período.
+          </p>
+        )}
+      </div>
+      <div className="mt-5 flex flex-wrap gap-3 text-xs font-bold text-brand-teal/60">
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Receitas</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-brand-clay" /> Gastos</span>
+      </div>
+    </Card>
+  );
+}
+
 function LancarTab({
   context,
   isPending,
@@ -659,6 +845,11 @@ function LancarTab({
   const categorias = context.categorias.filter((item) => item.ativo && item.tipo === form.tipo);
   const subcategorias = context.subcategorias.filter((item) => item.ativo && item.categoria_id === form.categoria_id);
   const needsCurso = selectedCentro?.nome === "Infoproduto" && form.tipo === "entrada";
+  const recentByType = context.lancamentos
+    .filter((row) => row.tipo === form.tipo)
+    .slice()
+    .sort((a, b) => b.data_pagamento.localeCompare(a.data_pagamento) || b.created_at.localeCompare(a.created_at))
+    .slice(0, 15);
 
   function setTipo(tipo: FinTipo) {
     const nextCategoria = context.categorias.find((item) => item.ativo && item.tipo === tipo)?.id ?? "";
@@ -709,8 +900,13 @@ function LancarTab({
               : "border-brand-sand bg-white/70 text-brand-teal hover:bg-white",
           )}
         >
-          <p className="text-sm font-black uppercase">Entrada</p>
-          <p className="mt-1 text-xs font-semibold opacity-70">Recebimentos, cursos, clínica e palestras.</p>
+          <div className="flex items-center gap-3">
+            <span className="rounded-md bg-emerald-100 p-2 text-emerald-700"><ArrowDownLeft className="h-5 w-5" /></span>
+            <div>
+              <p className="text-sm font-black uppercase">Entrada</p>
+              <p className="mt-1 text-xs font-semibold opacity-70">Recebimentos, cursos, clínica e palestras.</p>
+            </div>
+          </div>
         </button>
         <button
           type="button"
@@ -722,8 +918,13 @@ function LancarTab({
               : "border-brand-sand bg-white/70 text-brand-teal hover:bg-white",
           )}
         >
-          <p className="text-sm font-black uppercase">Saída</p>
-          <p className="mt-1 text-xs font-semibold opacity-70">Custos, despesas, impostos e cartão.</p>
+          <div className="flex items-center gap-3">
+            <span className="rounded-md bg-rose-100 p-2 text-brand-clay"><ArrowUpRight className="h-5 w-5" /></span>
+            <div>
+              <p className="text-sm font-black uppercase">Saída</p>
+              <p className="mt-1 text-xs font-semibold opacity-70">Custos, despesas, impostos e cartão.</p>
+            </div>
+          </div>
         </button>
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -749,12 +950,47 @@ function LancarTab({
         ) : (
           <Select label="Banco" value={form.banco_id ?? ""} onChange={(value) => setForm({ ...form, banco_id: value, cartao_id: null })} options={context.bancos.filter((item) => item.ativo).map((item) => [item.id, item.apelido || item.nome])} />
         )}
-        <Field label="Valor" type="number" step="0.01" value={String(form.valor || "")} onChange={(value) => setForm({ ...form, valor: Number(value) })} />
+        <Field label="Valor" inputMode="numeric" value={formatCurrencyInput(form.valor)} onChange={(value) => setForm({ ...form, valor: parseCurrencyInput(value) })} />
         <Field label="Descrição" className="xl:col-span-2" value={form.descricao} onChange={(value) => setForm({ ...form, descricao: value })} />
         <Field label="Observação" className="xl:col-span-2" value={form.observacao ?? ""} onChange={(value) => setForm({ ...form, observacao: value })} />
       </div>
       <div className="mt-6">
         <Button onClick={submit} disabled={isPending}>{isPending ? "Salvando..." : "Salvar lançamento"}</Button>
+      </div>
+      <div className="mt-8 border-t border-brand-sand pt-5">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-base font-bold text-brand-teal">
+            Últimos 15 lançamentos de {form.tipo === "entrada" ? "entrada" : "saída"}
+          </h3>
+          <span className={clsx("rounded-full border px-3 py-1 text-xs font-black", tipoVisual(form.tipo).badge)}>
+            {tipoVisual(form.tipo).label}
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2">
+          {recentByType.length ? recentByType.map((row) => {
+            const visual = tipoVisual(row.tipo);
+            const Icon = visual.Icon;
+
+            return (
+              <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border border-brand-sand/70 bg-white/60 p-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className={clsx("flex h-9 w-9 shrink-0 items-center justify-center rounded-md", visual.iconBox)}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-brand-teal">{row.descricao}</p>
+                    <p className="text-xs font-semibold text-brand-teal/55">{dateLabel(row.data_pagamento)}</p>
+                  </div>
+                </div>
+                <p className={clsx("shrink-0 text-sm font-black", visual.text)}>{decimalMoney(signedValue(row))}</p>
+              </div>
+            );
+          }) : (
+            <p className="rounded-md border border-dashed border-brand-sand p-4 text-sm font-semibold text-brand-teal/60">
+              Nenhum lançamento desse tipo encontrado ainda.
+            </p>
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -818,9 +1054,9 @@ function ConsultarTab({
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 p-5">
         <div className="flex flex-wrap gap-2">
-          {(["30d", "90d", "ano", "tudo"] as PeriodFilter[]).map((item) => (
+          {(["hoje", "7d", "15d", "30d", "90d", "ano", "tudo"] as PeriodFilter[]).map((item) => (
             <button key={item} type="button" onClick={() => setPeriod(item)} className={clsx("rounded-full border px-4 py-2 text-sm font-bold", period === item ? "bg-brand-clay text-white" : "border-brand-sand bg-white/70 text-brand-teal")}>
-              {item === "30d" ? "30 dias" : item === "90d" ? "90 dias" : item === "ano" ? "Ano" : "Tudo"}
+              {periodLabel(item)}
             </button>
           ))}
         </div>
@@ -851,6 +1087,7 @@ function ConsultarTab({
         <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="bg-[#F0D6DB] text-xs font-black uppercase text-brand-clay">
             <tr>
+              <th className="px-5 py-3">Tipo</th>
               <th className="px-5 py-3">Data</th>
               <th className="px-5 py-3">Centro</th>
               <th className="px-5 py-3">Categoria</th>
@@ -860,16 +1097,27 @@ function ConsultarTab({
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-sand/60">
-            {paginatedRows.map((row) => (
-              <tr key={row.id}>
-                <td className="px-5 py-3 font-semibold text-brand-teal/70">{dateLabel(row.data_pagamento)}</td>
-                <td className="px-5 py-3 font-bold text-brand-teal">{maps.centroById.get(row.centro_resultado_id)?.nome}</td>
-                <td className="px-5 py-3 text-brand-teal/70">{maps.categoriaById.get(row.categoria_id)?.nome}</td>
-                <td className="px-5 py-3 text-brand-teal">{row.descricao}</td>
-                <td className="px-5 py-3 text-brand-teal/70">{row.forma_pagamento}</td>
-                <td className={clsx("px-5 py-3 text-right font-black", row.tipo === "entrada" ? "text-emerald-700" : "text-brand-clay")}>{decimalMoney(signedValue(row))}</td>
-              </tr>
-            ))}
+            {paginatedRows.map((row) => {
+              const visual = tipoVisual(row.tipo);
+              const Icon = visual.Icon;
+
+              return (
+                <tr key={row.id}>
+                  <td className="px-5 py-3">
+                    <span className={clsx("inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black", visual.badge)}>
+                      <Icon className="h-3.5 w-3.5" />
+                      {visual.label}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 font-semibold text-brand-teal/70">{dateLabel(row.data_pagamento)}</td>
+                  <td className="px-5 py-3 font-bold text-brand-teal">{maps.centroById.get(row.centro_resultado_id)?.nome}</td>
+                  <td className="px-5 py-3 text-brand-teal/70">{maps.categoriaById.get(row.categoria_id)?.nome}</td>
+                  <td className="px-5 py-3 text-brand-teal">{row.descricao}</td>
+                  <td className="px-5 py-3 text-brand-teal/70">{row.forma_pagamento}</td>
+                  <td className={clsx("px-5 py-3 text-right font-black", visual.text)}>{decimalMoney(signedValue(row))}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
