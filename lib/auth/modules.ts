@@ -1,2 +1,2 @@
-export const readyModules = ["agenda", "instagram", "adocao", "financeiro"];
-export const allModules = ["agenda", "instagram", "adocao", "financeiro", "atividades", "relatorios", "admin"];
+export const readyModules = ["agenda", "instagram", "ads", "financeiro", "adocao"];
+export const allModules = ["agenda", "instagram", "ads", "financeiro", "adocao", "atividades", "relatorios", "admin"];

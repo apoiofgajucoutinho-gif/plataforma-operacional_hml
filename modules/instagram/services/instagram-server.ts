@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { InstagramContext, InstagramPostMetric } from "@/modules/instagram/types";
 
-const allModules = ["agenda", "instagram", "adocao", "financeiro", "atividades", "relatorios", "admin"];
+const allModules = ["agenda", "instagram", "ads", "financeiro", "adocao", "atividades", "relatorios", "admin"];
 
 async function getMembershipByUserId(userId: string) {
   const admin = createAdminClient();

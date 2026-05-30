@@ -19,6 +19,7 @@ import {
   PanelLeftOpen,
   Settings,
   Sun,
+  Target,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { TrackPageView } from "@/components/adoption/TrackPageView";
@@ -28,8 +29,9 @@ import { createClient } from "@/lib/supabase/client";
 const navigation = [
   { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda" },
   { label: "Instagram", href: "/instagram", icon: BarChart3, key: "instagram" },
-  { label: "Adocao", href: "/adocao", icon: LineChart, key: "adocao" },
+  { label: "Ads", href: "/ads", icon: Target, key: "ads" },
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro" },
+  { label: "Adocao", href: "/adocao", icon: LineChart, key: "adocao" },
   { label: "Atividades", href: "#", icon: Activity, key: "atividades" },
   { label: "Relatorios", href: "#", icon: LayoutDashboard, key: "relatorios" },
   { label: "Admin", href: "#", icon: Settings, key: "admin" },

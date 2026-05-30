@@ -8,7 +8,7 @@ import {
 } from "@/services/google/calendar";
 import type { AgendaEvent, AgendaEventInput } from "@/modules/agenda/types";
 
-const allModules = ["agenda", "instagram", "adocao", "financeiro", "atividades", "relatorios", "admin"];
+const allModules = ["agenda", "instagram", "ads", "financeiro", "adocao", "atividades", "relatorios", "admin"];
 
 async function getMembershipByUserId(userId: string) {
   const admin = createAdminClient();

@@ -2,11 +2,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { allModules, readyModules } from "@/lib/auth/modules";
 import { createClient } from "@/lib/supabase/server";
 
-const landingPriority = ["instagram", "agenda", "adocao", "financeiro", "atividades", "relatorios", "admin"];
+const landingPriority = ["instagram", "ads", "agenda", "financeiro", "adocao", "atividades", "relatorios", "admin"];
 
 const modulePaths: Record<string, string> = {
   agenda: "/agenda",
   instagram: "/instagram",
+  ads: "/ads",
+  financeiro: "/financeiro",
   adocao: "/adocao",
 };
 
