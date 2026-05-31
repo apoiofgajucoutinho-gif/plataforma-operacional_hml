@@ -29,7 +29,10 @@ export function TrackPageView({ activeItem }: { activeItem: string }) {
 
 function defaultPageLabel(activeItem: string, pathname: string) {
   if (activeItem === "agenda") return "Agenda";
-  if (activeItem === "adocao") return "Adocao";
+  if (activeItem === "adocao") return "Adoção";
+  if (activeItem === "ads") return "Ads: Visão Geral";
+  if (activeItem === "financeiro") return "Financeiro: Início";
+  if (activeItem === "admin") return "Admin: Users";
   if (activeItem === "instagram") return "Instagram";
 
   return pathname;

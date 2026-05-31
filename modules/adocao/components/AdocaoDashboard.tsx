@@ -30,6 +30,7 @@ const periodFilters: Array<{ value: PeriodFilter; label: string }> = [
 const moduleLabels: Record<string, string> = {
   agenda: "Agenda",
   instagram: "Instagram",
+  ads: "Ads",
   adocao: "Adocao",
   financeiro: "Financeiro",
   atividades: "Atividades",
@@ -67,16 +68,20 @@ function applyPeriod(events: AdoptionEvent[], period: PeriodFilter) {
 function pageLabel(event: AdoptionEvent) {
   const value = event.metadata?.page_label;
   if (typeof value === "string" && value.trim()) {
-    if (event.module === "instagram") {
-      return value.includes(":") ? value : "Instagram: Insights";
+    if (event.module === "financeiro" && (value === "/financeiro" || !value.includes(":"))) {
+      return "Financeiro: Início";
     }
-
+    if (event.module === "ads" && (value === "/ads" || !value.includes(":"))) {
+      return "Ads: Visão Geral";
+    }
     return value;
   }
 
   if (event.module === "agenda") return "Agenda";
   if (event.module === "adocao") return "Adocao";
   if (event.module === "instagram") return "Instagram: Insights";
+  if (event.module === "ads") return "Ads: Visão Geral";
+  if (event.module === "financeiro") return "Financeiro: Início";
 
   return event.page_path;
 }

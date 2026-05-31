@@ -1,0 +1,1066 @@
+{
+  "name": "Instagram Ads Daily Collector_V3_Supabase_2026_full",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 20,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "id": "180f7c12-ec67-4a67-a762-901dae58a05b",
+      "name": "20h30 Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -4096,
+        176
+      ],
+      "notes": "Dispara todo dia às 20h30 BRT. Ajuste o timezone nas configurações da instância n8n para America/Sao_Paulo."
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v23.0/act_3360327820914673/insights",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "campaign_name,adset_name,ad_name,impressions,reach,clicks,ctr,cpc,cpm,frequency,spend,objective,date_start,date_stop"
+            },
+            {
+              "name": "level",
+              "value": "ad"
+            },
+            {
+              "name": "date_preset",
+              "value": "yesterday"
+            },
+            {
+              "name": "time_increment",
+              "value": "1"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "087c9a66-8784-4941-ac02-0855573a8a3a",
+      "name": "Meta Ads API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3840,
+        176
+      ],
+      "notes": "Coleta dados da Meta Ads API. Configure META_ADS_ACCESS_TOKEN no ambiente do n8n. Nao deixe token fixo no JSON."
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "794710c1-0fc1-4e52-a451-e016311d0203",
+      "name": "Split Ads",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 3,
+      "position": [
+        -3584,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nreturn items.map(item => {\n  const d = item.json;\n  const ctr = Number(d.ctr || 0);\n  const cpc = Number(d.cpc || 0);\n  const cpm = Number(d.cpm || 0);\n  const freq = Number(d.frequency || 0);\n  const spend = Number(d.spend || 0);\n  const clicks = Number(d.clicks || 0);\n  const impressions = Number(d.impressions || 0);\n  const reach = Number(d.reach || 0);\n  const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];\n  const tenantId = ($env.PLATAFORMA_TENANT_ID || '').trim();\n\n  if (!tenantId) {\n    throw new Error('Configure PLATAFORMA_TENANT_ID no ambiente do n8n.');\n  }\n\n  const campanha = (d.campaign_name || '').toString().trim();\n  const conjunto = (d.adset_name || '').toString().trim();\n  const anuncio = (d.ad_name || '').toString().trim();\n  const status = (d.effective_status || 'UNKNOWN').toString().trim().toUpperCase();\n\n  let performance_status = 'OK';\n  if (cpm > 50 && ctr < 1) performance_status = 'PUBLICO RUIM';\n  else if (freq > 3) performance_status = 'SATURADO';\n  else if (ctr < 1) performance_status = 'CTR BAIXO';\n\n  const performance_score = (ctr * 40) + ((clicks > 0 ? ctr : 0) * 40) - (cpc * 10) - (freq * 10);\n  const rowKey = crypto\n    .createHash('md5')\n    .update(`${dataRef}|${campanha}|${conjunto}|${anuncio}`)\n    .digest('hex');\n\n  return {\n    json: {\n      tenant_id: tenantId,\n      data_referencia: dataRef,\n      campanha,\n      conjunto: conjunto || null,\n      anuncio,\n      status,\n      objetivo: d.objective || null,\n      alcance: reach,\n      impressoes: impressions,\n      cliques: clicks,\n      ctr,\n      cpc,\n      cpm,\n      frequencia: freq,\n      valor_gasto: spend,\n      conversoes: 0,\n      leads: 0,\n      performance_status,\n      performance_score: Math.round(performance_score * 100) / 100,\n      origem: 'n8n_meta_ads',\n      row_key: rowKey,\n      raw_payload: d,\n      imported_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "id": "0fba6fa1-e450-4956-a6e6-617f3a4d257c",
+      "name": "Transform Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3328,
+        176
+      ],
+      "notes": "Normaliza o retorno da Meta para o schema public.instagram_ads_daily e calcula row_key para upsert."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid_campaign",
+              "leftValue": "={{ $json.campanha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "valid_spend",
+              "leftValue": "={{ $json.valor_gasto }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7e8f140a-9b5f-4369-b4aa-2dac02b87dea",
+      "name": "Valid Ad?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3056,
+        176
+      ],
+      "notes": "MUDANÇAS v2: filtro duplo — campanha preenchida E valor_gasto > 0.\nAnúncios sem gasto no dia são descartados para não poluir a base com linhas zeradas."
+    },
+    {
+      "parameters": {
+        "tableId": "instagram_ads_daily",
+        "dataToSend": "autoMapInputData"
+      },
+      "id": "9e0d6ce6-265f-472c-be24-bc9bb806860c",
+      "name": "Insert Supabase (desativado)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -2800,
+        48
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "yp33IguZrTBydpj0",
+          "name": "Supabase account"
+        }
+      },
+      "notes": "Desativado: substituido por Upsert Supabase REST para evitar duplicidade.",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1j8aHPYTNqxNr16RjzVdnwJvR-Q1Nv4MwjMM4C4MD1uQ",
+          "mode": "id"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Ads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "data_referencia": "={{ $json.data_referencia }}",
+            "campanha": "={{ $json.campanha }}",
+            "conjunto": "={{ $json.conjunto }}",
+            "status": "={{ $json.status }}",
+            "objetivo": "={{ $json.objetivo }}",
+            "anuncio": "={{ $json.anuncio }}",
+            "alcance": "={{ $json.alcance }}",
+            "impressoes": "={{ $json.impressoes }}",
+            "cliques": "={{ $json.cliques }}",
+            "cpc": "={{ $json.cpc }}",
+            "ctr": "={{ $json.ctr }}",
+            "cpm": "={{ $json.cpm }}",
+            "frequencia": "={{ $json.frequencia }}",
+            "valor_gasto": "={{ $json.valor_gasto }}",
+            "leads": "={{ $json.leads }}",
+            "conversoes": "={{ $json.conversoes }}",
+            "performance_status": "={{ $json.performance_status }}",
+            "performance_score": "={{ $json.performance_score }}",
+            "created_at": "={{ $json.created_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "data_referencia",
+              "displayName": "data_referencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "campanha",
+              "displayName": "campanha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conjunto",
+              "displayName": "conjunto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "anuncio",
+              "displayName": "anuncio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "objetivo",
+              "displayName": "objetivo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "alcance",
+              "displayName": "alcance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "impressoes",
+              "displayName": "impressoes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cliques",
+              "displayName": "cliques",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ctr",
+              "displayName": "ctr",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cpc",
+              "displayName": "cpc",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cpm",
+              "displayName": "cpm",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "frequencia",
+              "displayName": "frequencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "valor_gasto",
+              "displayName": "valor_gasto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "conversoes",
+              "displayName": "conversoes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "leads",
+              "displayName": "leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "performance_status",
+              "displayName": "performance_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "performance_score",
+              "displayName": "performance_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "3d761ff4-28af-4f5d-b347-848a0dd51566",
+      "name": "Append Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -2800,
+        256
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gVyU2hm9K1MFSZsu",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Opcional/desativado. A fonte principal agora e o Supabase.",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node de fallback — captura anúncios descartados por falta de dados\n// Útil para debug: monitore este ramo no painel do n8n\n// Se este ramo tiver muitos itens, investigar o retorno da API\n\nconst count = items.length;\nconsole.log(`[FGA Ads] ${count} anúncio(s) descartados (sem campanha ou sem gasto) em ${new Date().toISOString()}`);\n\nreturn [{ json: { discarded_count: count, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "4734d954-69e7-4385-a358-4a042a8ea7ca",
+      "name": "Log Descartados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2800,
+        432
+      ],
+      "notes": "Ramo FALSE do filtro Valid Ad?. Apenas loga — não grava. Útil para monitorar se a API está retornando dados inesperados."
+    },
+    {
+      "parameters": {},
+      "id": "c2ddaff1-2830-4f58-8454-ebefcbe02c5a",
+      "name": "▶ Executar Manualmente",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4016,
+        768
+      ],
+      "disabled": true,
+      "notes": "ATENÇÃO: executar UMA ÚNICA VEZ manualmente.\nApós execução bem-sucedida, desativar ou excluir este workflow.\nO workflow diário v2 assume a coleta contínua."
+    },
+    {
+      "parameters": {
+        "jsCode": "const sinceStr = '2026-01-01';\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst fmt = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');\nconst untilStr = fmt(today);\nconsole.log(`[FGA Historico 2026] Buscando de ${sinceStr} ate ${untilStr}`);\nreturn [{ json: { since: sinceStr, until: untilStr } }];"
+      },
+      "id": "3f044139-6f63-44c7-9361-5004d71a6ea4",
+      "name": "Calcular Periodo 2026 ate hoje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3776,
+        768
+      ],
+      "disabled": true,
+      "notes": "Execucao manual para carga historica de Ads: 01/01/2026 ate a data atual. Deixe desativado apos rodar."
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v23.0/act_3360327820914673/insights",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "campaign_name,adset_name,ad_name,impressions,reach,clicks,ctr,cpc,cpm,frequency,spend,objective,date_start,date_stop"
+            },
+            {
+              "name": "level",
+              "value": "ad"
+            },
+            {
+              "name": "time_range",
+              "value": "={{ JSON.stringify({ since: $json.since, until: $json.until }) }}"
+            },
+            {
+              "name": "time_increment",
+              "value": "1"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b74e81b5-1d4f-4ecf-a1f5-133d1e8f7a59",
+      "name": "Meta Ads API — Histórico",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3536,
+        768
+      ],
+      "disabled": true,
+      "notes": "Busca primeira página. O node seguinte trata as demais páginas.\nefective_status REMOVIDO — não é campo válido em /insights."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Paginação usando $http nativo do n8n (sem fetch)\n// A Meta API retorna { data: [...], paging: { next: '...' } }\n\nconst response = items[0].json;\nlet allData = Array.isArray(response.data) ? [...response.data] : [];\n\nlet nextUrl = response.paging?.next || null;\nlet pageCount = 1;\nconst MAX_PAGES = 20;\n\nwhile (nextUrl && pageCount < MAX_PAGES) {\n  pageCount++;\n  console.log(`[FGA Histórico] Página ${pageCount}...`);\n\n  let pageResp;\n  try {\n    pageResp = await $http.request({\n      method: 'GET',\n      url: nextUrl\n    });\n  } catch (e) {\n    console.error(`[FGA Histórico] Erro p.${pageCount}: ${e.message}`);\n    break;\n  }\n\n  const pageData = pageResp.data ?? pageResp;\n  allData = allData.concat(Array.isArray(pageData.data) ? pageData.data : []);\n  nextUrl = pageData.paging?.next || null;\n\n  // pausa 300ms entre páginas\n  await new Promise(r => setTimeout(r, 300));\n}\n\nconsole.log(`[FGA Histórico] Total: ${allData.length} registros em ${pageCount} página(s)`);\nreturn allData.map(d => ({ json: d }));"
+      },
+      "id": "4869f04d-d312-4712-a5f9-371608f4716f",
+      "name": "Tratar Paginação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3280,
+        768
+      ],
+      "disabled": true,
+      "notes": "USA $http NATIVO do n8n — sem fetch.\nBusca até 20 páginas × 500 itens = 10.000 registros máximo."
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nreturn items.map(item => {\n  const d = item.json;\n  const ctr = Number(d.ctr || 0);\n  const cpc = Number(d.cpc || 0);\n  const cpm = Number(d.cpm || 0);\n  const freq = Number(d.frequency || 0);\n  const spend = Number(d.spend || 0);\n  const clicks = Number(d.clicks || 0);\n  const impressions = Number(d.impressions || 0);\n  const reach = Number(d.reach || 0);\n  const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];\n  const tenantId = ($env.PLATAFORMA_TENANT_ID || '').trim();\n\n  if (!tenantId) {\n    throw new Error('Configure PLATAFORMA_TENANT_ID no ambiente do n8n.');\n  }\n\n  const campanha = (d.campaign_name || '').toString().trim();\n  const conjunto = (d.adset_name || '').toString().trim();\n  const anuncio = (d.ad_name || '').toString().trim();\n  const status = (d.effective_status || 'UNKNOWN').toString().trim().toUpperCase();\n\n  let performance_status = 'OK';\n  if (cpm > 50 && ctr < 1) performance_status = 'PUBLICO RUIM';\n  else if (freq > 3) performance_status = 'SATURADO';\n  else if (ctr < 1) performance_status = 'CTR BAIXO';\n\n  const performance_score = (ctr * 40) + ((clicks > 0 ? ctr : 0) * 40) - (cpc * 10) - (freq * 10);\n  const rowKey = crypto\n    .createHash('md5')\n    .update(`${dataRef}|${campanha}|${conjunto}|${anuncio}`)\n    .digest('hex');\n\n  return {\n    json: {\n      tenant_id: tenantId,\n      data_referencia: dataRef,\n      campanha,\n      conjunto: conjunto || null,\n      anuncio,\n      status,\n      objetivo: d.objective || null,\n      alcance: reach,\n      impressoes: impressions,\n      cliques: clicks,\n      ctr,\n      cpc,\n      cpm,\n      frequencia: freq,\n      valor_gasto: spend,\n      conversoes: 0,\n      leads: 0,\n      performance_status,\n      performance_score: Math.round(performance_score * 100) / 100,\n      origem: 'n8n_meta_ads',\n      row_key: rowKey,\n      raw_payload: d,\n      imported_at: new Date().toISOString()\n    }\n  };\n});"
+      },
+      "id": "9a292bd4-1fc5-4730-aac4-5379c2df543b",
+      "name": "Transform Data1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3024,
+        768
+      ],
+      "disabled": true,
+      "notes": "Normaliza o retorno da Meta para o schema public.instagram_ads_daily e calcula row_key para upsert."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid_campaign",
+              "leftValue": "={{ $json.campanha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "valid_spend",
+              "leftValue": "={{ $json.valor_gasto }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4fca111e-312e-4ea5-96e6-8d16c3ab9fd9",
+      "name": "Valid Ad?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2752,
+        768
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "tableId": "instagram_ads_daily",
+        "dataToSend": "autoMapInputData"
+      },
+      "id": "5e872d66-139d-477c-9dc4-5255e9e6a503",
+      "name": "Insert Supabase1 (desativado)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -2496,
+        640
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "yp33IguZrTBydpj0",
+          "name": "Supabase account"
+        }
+      },
+      "disabled": true,
+      "notes": "Desativado: substituido por Upsert Supabase REST para evitar duplicidade."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1j8aHPYTNqxNr16RjzVdnwJvR-Q1Nv4MwjMM4C4MD1uQ",
+          "mode": "id"
+        },
+        "sheetName": {
+          "mode": "name",
+          "value": "Ads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "data_referencia": "={{ $json.data_referencia }}",
+            "campanha": "={{ $json.campanha }}",
+            "conjunto": "={{ $json.conjunto }}",
+            "anuncio": "={{ $json.anuncio }}",
+            "status": "={{ $json.status }}",
+            "objetivo": "={{ $json.objetivo }}",
+            "alcance": "={{ $json.alcance }}",
+            "impressoes": "={{ $json.impressoes }}",
+            "cliques": "={{ $json.cliques }}",
+            "ctr": "={{ $json.ctr }}",
+            "cpc": "={{ $json.cpc }}",
+            "cpm": "={{ $json.cpm }}",
+            "frequencia": "={{ $json.frequencia }}",
+            "valor_gasto": "={{ $json.valor_gasto }}",
+            "conversoes": "={{ $json.conversoes }}",
+            "leads": "={{ $json.leads }}",
+            "performance_status": "={{ $json.performance_status }}",
+            "performance_score": "={{ $json.performance_score }}",
+            "created_at": "={{ $json.created_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "data_referencia",
+              "displayName": "data_referencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "campanha",
+              "displayName": "campanha",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conjunto",
+              "displayName": "conjunto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "anuncio",
+              "displayName": "anuncio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "objetivo",
+              "displayName": "objetivo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "alcance",
+              "displayName": "alcance",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "impressoes",
+              "displayName": "impressoes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cliques",
+              "displayName": "cliques",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ctr",
+              "displayName": "ctr",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cpc",
+              "displayName": "cpc",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cpm",
+              "displayName": "cpm",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "frequencia",
+              "displayName": "frequencia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "valor_gasto",
+              "displayName": "valor_gasto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "conversoes",
+              "displayName": "conversoes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "leads",
+              "displayName": "leads",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "performance_status",
+              "displayName": "performance_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "performance_score",
+              "displayName": "performance_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "5ba6208b-f245-415d-b93c-87db97c47d65",
+      "name": "Append Google Sheets1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -2496,
+        848
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gVyU2hm9K1MFSZsu",
+          "name": "Google Sheets account"
+        }
+      },
+      "disabled": true,
+      "notes": "Opcional/desativado. A fonte principal agora e o Supabase."
+    },
+    {
+      "parameters": {
+        "jsCode": "const count = items.length;\nconsole.log(`[FGA Histórico] ${count} descartados.`);\nreturn [{ json: { discarded_count: count, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "832b5277-a52a-440d-84a7-9692167aeeb0",
+      "name": "Log Descartados1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2496,
+        1024
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL.replace(/\\/$/, '') + '/rest/v1/instagram_ads_daily?on_conflict=tenant_id,row_key' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "1158ad1a-2b06-4f13-b5b0-cce2e17abf34",
+      "name": "Upsert Supabase Ads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2800,
+        48
+      ],
+      "notes": "Grava/atualiza em public.instagram_ads_daily usando conflito tenant_id,row_key. Usa SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY do ambiente n8n."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL.replace(/\\/$/, '') + '/rest/v1/instagram_ads_daily?on_conflict=tenant_id,row_key' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "a55efc97-03df-49e3-aff9-5b3abe367fdd",
+      "name": "Upsert Supabase Ads Historico",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2496,
+        640
+      ],
+      "notes": "Grava/atualiza em public.instagram_ads_daily usando conflito tenant_id,row_key. Usa SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY do ambiente n8n.",
+      "disabled": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "20h30 Daily": {
+      "main": [
+        [
+          {
+            "node": "Meta Ads API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Ads API": {
+      "main": [
+        [
+          {
+            "node": "Split Ads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Ads": {
+      "main": [
+        [
+          {
+            "node": "Transform Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Data": {
+      "main": [
+        [
+          {
+            "node": "Valid Ad?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Ad?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Supabase Ads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Descartados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "▶ Executar Manualmente": {
+      "main": [
+        [
+          {
+            "node": "Calcular Periodo 2026 ate hoje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Ads API — Histórico": {
+      "main": [
+        [
+          {
+            "node": "Tratar Paginação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tratar Paginação": {
+      "main": [
+        [
+          {
+            "node": "Transform Data1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Data1": {
+      "main": [
+        [
+          {
+            "node": "Valid Ad?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid Ad?1": {
+      "main": [
+        [
+          {
+            "node": "Upsert Supabase Ads Historico",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Descartados1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Periodo 2026 ate hoje": {
+      "main": [
+        [
+          {
+            "node": "Meta Ads API — Histórico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

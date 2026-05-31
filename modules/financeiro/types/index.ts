@@ -6,7 +6,7 @@ export type FinFormaPagamento =
   | "pix"
   | "boleto"
   | "dinheiro";
-export type FinPerfil = "admin" | "marketing";
+export type FinPerfil = "admin" | "suporte" | "marketing";
 
 export type FinTenant = {
   id: string;

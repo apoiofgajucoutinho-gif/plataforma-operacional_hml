@@ -10,6 +10,7 @@ const modulePaths: Record<string, string> = {
   ads: "/ads",
   financeiro: "/financeiro",
   adocao: "/adocao",
+  admin: "/admin",
 };
 
 export async function getAllowedModulesForUser(userId: string) {

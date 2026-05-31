@@ -34,7 +34,7 @@ const navigation = [
   { label: "Adocao", href: "/adocao", icon: LineChart, key: "adocao" },
   { label: "Atividades", href: "#", icon: Activity, key: "atividades" },
   { label: "Relatorios", href: "#", icon: LayoutDashboard, key: "relatorios" },
-  { label: "Admin", href: "#", icon: Settings, key: "admin" },
+  { label: "Admin", href: "/admin", icon: Settings, key: "admin" },
 ];
 
 type ThemeMode = "system" | "light" | "dark";

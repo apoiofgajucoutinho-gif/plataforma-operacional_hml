@@ -34,15 +34,17 @@ export function LoginForm() {
     try {
       const supabase = createClient();
       if (step === "email") {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: {
-            shouldCreateUser: false,
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          },
+        const response = await fetch("/api/auth/request-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            redirectTo: `${window.location.origin}/auth/callback`,
+          }),
         });
 
-        if (error) throw error;
+        const result = (await response.json()) as { error?: string };
+        if (!response.ok) throw new Error(result.error ?? "Nao foi possivel enviar o codigo.");
 
         setStep("code");
         setResendCooldown(60);

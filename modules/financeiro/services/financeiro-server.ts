@@ -105,15 +105,18 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
     throw new Error("Seu perfil nao possui acesso ao modulo Financeiro.");
   }
 
-  const { data: finProfile } = await profileClient
-    .from("fin_perfis_usuario")
+    const { data: finProfile } = await profileClient
+      .from("fin_perfis_usuario")
     .select("perfil, ativo")
     .eq("tenant_id", membership.tenant_id)
     .eq("user_id", user.id)
     .eq("ativo", true)
-    .maybeSingle();
+      .maybeSingle();
 
-  if (!finProfile?.perfil) {
+  const inferredPerfil = membership.role === "SUPORTE" ? "suporte" : null;
+  const perfil = finProfile?.perfil ?? inferredPerfil;
+
+  if (!perfil) {
     throw new Error("Seu usuario ainda nao possui perfil financeiro ativo.");
   }
 
@@ -122,9 +125,9 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
     userEmail: user.email ?? null,
     tenantId: membership.tenant_id,
     role: membership.role,
-    perfil: finProfile.perfil,
+    perfil,
     allowedModules,
-    dataClient: finProfile.perfil === "admin" ? (adminClient ?? userClient) : userClient,
+    dataClient: perfil === "admin" ? (adminClient ?? userClient) : userClient,
   };
 }
 
@@ -152,6 +155,7 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
   try {
     const auth = await getFinanceiroAuth();
     const isAdmin = auth.perfil === "admin";
+    const canSeeAdminData = auth.perfil === "admin" || auth.perfil === "suporte";
 
     const { data: tenant } = await auth.dataClient
       .from("tenants")
@@ -173,10 +177,10 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
       dreCursoResult,
       faturasResult,
     ] = await Promise.all([
-      isAdmin
+      canSeeAdminData
         ? auth.dataClient.from("fin_bancos").select("*").eq("tenant_id", auth.tenantId).order("nome")
         : Promise.resolve({ data: [] }),
-      isAdmin
+      canSeeAdminData
         ? auth.dataClient.from("fin_cartoes").select("*").eq("tenant_id", auth.tenantId).order("nome")
         : Promise.resolve({ data: [] }),
       auth.dataClient
@@ -226,7 +230,7 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
         .select("*")
         .eq("tenant_id", auth.tenantId)
         .order("mes_competencia", { ascending: false }),
-      isAdmin
+      canSeeAdminData
         ? auth.dataClient
             .from("fin_v_fatura_cartao")
             .select("*")
@@ -294,8 +298,8 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
 
 export async function createFinanceiroLancamento(input: CreateLancamentoPayload) {
   const auth = await getFinanceiroAuth();
-  if (auth.perfil !== "admin") {
-    throw new Error("Apenas admin financeiro pode criar lancamentos.");
+  if (auth.perfil !== "admin" && auth.perfil !== "suporte") {
+    throw new Error("Seu perfil financeiro nao pode criar lancamentos.");
   }
 
   if (!input.descricao?.trim()) {

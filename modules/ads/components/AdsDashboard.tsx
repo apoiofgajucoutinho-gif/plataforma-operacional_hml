@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
@@ -267,6 +267,21 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
 
   const uniqueDates = new Set(context.rows.map((row) => row.data_referencia));
   const hasAccumulatedWarning = context.rows.length > 0 && uniqueDates.size <= 1;
+
+  useEffect(() => {
+    const label = tabs.find((tab) => tab.value === activeTab)?.label ?? "Visão Geral";
+
+    void fetch("/api/adoption/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        module: "ads",
+        pagePath: "/ads",
+        pageLabel: `Ads: ${label}`,
+      }),
+      keepalive: true,
+    });
+  }, [activeTab]);
 
   if (context.diagnostic) {
     return (

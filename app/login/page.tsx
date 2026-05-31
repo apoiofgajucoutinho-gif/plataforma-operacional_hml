@@ -1,7 +1,14 @@
 import Image from "next/image";
 import { LoginForm } from "@/components/auth/LoginForm";
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ error?: string }>;
+}) {
+  const params = await searchParams;
+  const unauthorized = params?.error === "unauthorized";
+
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <section className="w-full max-w-md rounded-lg border border-white/80 bg-white/90 p-6 shadow-soft">
@@ -19,6 +26,11 @@ export default function LoginPage() {
           </p>
         </div>
         <LoginForm />
+        {unauthorized ? (
+          <p className="mt-3 rounded-md bg-brand-cream px-3 py-2 text-sm text-brand-teal/75">
+            Usuario sem permissao de acesso. Solicite o cadastro a um administrador.
+          </p>
+        ) : null}
       </section>
     </main>
   );

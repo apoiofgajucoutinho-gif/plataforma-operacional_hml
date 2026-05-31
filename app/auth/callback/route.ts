@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getLandingPathForUser } from "@/lib/auth/access";
+import { userHasActiveMembership } from "@/lib/auth/registered-users";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
@@ -13,10 +14,12 @@ export async function GET(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (user) {
+    if (user && await userHasActiveMembership(user.id)) {
       return NextResponse.redirect(new URL(await getLandingPathForUser(user.id), request.url));
     }
+
+    await supabase.auth.signOut();
   }
 
-  return NextResponse.redirect(new URL("/", request.url));
+  return NextResponse.redirect(new URL("/login?error=unauthorized", request.url));
 }

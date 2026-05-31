@@ -47,7 +47,7 @@ export type Database = {
           id: string;
           tenant_id: string;
           user_id: string;
-          role: "ADMIN" | "MARKETING_PARTNER" | "CLINICA" | "USER";
+          role: "ADMIN" | "SUPORTE" | "MARKETING_PARTNER" | "CLINICA" | "USER";
           ativo: boolean;
           created_at: string;
           updated_at: string;
@@ -56,7 +56,7 @@ export type Database = {
           id?: string;
           tenant_id: string;
           user_id: string;
-          role?: "ADMIN" | "MARKETING_PARTNER" | "CLINICA" | "USER";
+          role?: "ADMIN" | "SUPORTE" | "MARKETING_PARTNER" | "CLINICA" | "USER";
           ativo?: boolean;
           created_at?: string;
           updated_at?: string;
@@ -67,8 +67,8 @@ export type Database = {
         Row: {
           id: string;
           tenant_id: string;
-          role: "ADMIN" | "MARKETING_PARTNER" | "CLINICA" | "USER";
-          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao";
+          role: "ADMIN" | "SUPORTE" | "MARKETING_PARTNER" | "CLINICA" | "USER";
+          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao" | "ads";
           can_read: boolean;
           can_write: boolean;
           created_at: string;
@@ -77,8 +77,8 @@ export type Database = {
         Insert: {
           id?: string;
           tenant_id: string;
-          role: "ADMIN" | "MARKETING_PARTNER" | "CLINICA" | "USER";
-          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao";
+          role: "ADMIN" | "SUPORTE" | "MARKETING_PARTNER" | "CLINICA" | "USER";
+          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao" | "ads";
           can_read?: boolean;
           can_write?: boolean;
           created_at?: string;

@@ -315,6 +315,19 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
   }, [activeTab, visibleTabs]);
 
   useEffect(() => {
+    void fetch("/api/adoption/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        module: "financeiro",
+        pagePath: "/financeiro",
+        pageLabel: `Financeiro: ${tabLabels[activeTab]}`,
+      }),
+      keepalive: true,
+    });
+  }, [activeTab]);
+
+  useEffect(() => {
     setConsultarPage(1);
   }, [centroFilter, period, query, statusFilter]);
 
