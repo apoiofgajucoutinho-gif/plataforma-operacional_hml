@@ -74,7 +74,7 @@ export async function getAdsContext(): Promise<AdsContext> {
   const dataClient = createAdminClient() ?? userClient;
   const allowedModules = await getAllowedModules(membership.tenant_id, membership.role);
 
-  if (membership.role !== "ADMIN" || !allowedModules.includes("ads")) {
+  if (!allowedModules.includes("ads")) {
     return {
       tenant: null,
       rows: [],
