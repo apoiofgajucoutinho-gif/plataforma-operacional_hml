@@ -68,7 +68,7 @@ export type Database = {
           id: string;
           tenant_id: string;
           role: "ADMIN" | "SUPORTE" | "MARKETING_PARTNER" | "CLINICA" | "USER";
-          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao" | "ads";
+          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao" | "ads" | "objetivos";
           can_read: boolean;
           can_write: boolean;
           created_at: string;
@@ -78,7 +78,7 @@ export type Database = {
           id?: string;
           tenant_id: string;
           role: "ADMIN" | "SUPORTE" | "MARKETING_PARTNER" | "CLINICA" | "USER";
-          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao" | "ads";
+          module: "instagram" | "financeiro" | "atividades" | "agenda" | "relatorios" | "admin" | "adocao" | "ads" | "objetivos";
           can_read?: boolean;
           can_write?: boolean;
           created_at?: string;

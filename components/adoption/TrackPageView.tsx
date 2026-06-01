@@ -32,6 +32,7 @@ function defaultPageLabel(activeItem: string, pathname: string) {
   if (activeItem === "adocao") return "Adoção";
   if (activeItem === "ads") return "Ads: Visão Geral";
   if (activeItem === "financeiro") return "Financeiro: Início";
+  if (activeItem === "objetivos") return "Objetivos: Visao Geral";
   if (activeItem === "admin") return "Admin: Users";
   if (activeItem === "instagram") return "Instagram";
 

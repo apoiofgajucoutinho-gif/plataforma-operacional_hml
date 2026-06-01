@@ -31,6 +31,7 @@ const moduleLabels: Record<string, string> = {
   agenda: "Agenda",
   instagram: "Instagram",
   ads: "Ads",
+  objetivos: "Objetivos",
   adocao: "Adocao",
   financeiro: "Financeiro",
   atividades: "Atividades",
@@ -74,6 +75,9 @@ function pageLabel(event: AdoptionEvent) {
     if (event.module === "ads" && (value === "/ads" || !value.includes(":"))) {
       return "Ads: Visão Geral";
     }
+    if (event.module === "objetivos" && (value === "/objetivos" || !value.includes(":"))) {
+      return "Objetivos: Visao Geral";
+    }
     return value;
   }
 
@@ -81,6 +85,7 @@ function pageLabel(event: AdoptionEvent) {
   if (event.module === "adocao") return "Adocao";
   if (event.module === "instagram") return "Instagram: Insights";
   if (event.module === "ads") return "Ads: Visão Geral";
+  if (event.module === "objetivos") return "Objetivos: Visao Geral";
   if (event.module === "financeiro") return "Financeiro: Início";
 
   return event.page_path;

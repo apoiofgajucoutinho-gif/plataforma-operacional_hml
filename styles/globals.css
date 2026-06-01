@@ -281,6 +281,24 @@ html[data-theme="dark"] .agenda-type-interno {
   color: #f4f1ea !important;
 }
 
+html[data-theme="dark"] .objective-goal-good {
+  border: 1px solid rgba(111, 211, 197, 0.35) !important;
+  background-color: rgba(26, 92, 78, 0.34) !important;
+}
+
+html[data-theme="dark"] .objective-goal-good span {
+  color: #d9fff8 !important;
+}
+
+html[data-theme="dark"] .objective-goal-risk {
+  border: 1px solid rgba(229, 165, 150, 0.42) !important;
+  background-color: rgba(114, 48, 48, 0.36) !important;
+}
+
+html[data-theme="dark"] .objective-goal-risk span {
+  color: #ffe3dc !important;
+}
+
 html[data-theme="dark"] .combo-chart-bar {
   background-color: rgba(226, 208, 184, 0.22) !important;
 }

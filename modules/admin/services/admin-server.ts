@@ -17,6 +17,7 @@ const moduleLabels: Record<string, string> = {
   agenda: "Agenda",
   instagram: "Instagram",
   ads: "Ads",
+  objetivos: "Objetivos",
   financeiro: "Financeiro",
   adocao: "Adoção",
   atividades: "Atividades",
@@ -27,6 +28,7 @@ const moduleLabels: Record<string, string> = {
 const moduleTabs: Record<string, string[]> = {
   agenda: ["Agenda", "Calendário", "Lista", "Gantt"],
   instagram: ["Insights", "Resultados"],
+  objetivos: ["Visao Geral", "OKRs", "Instagram", "Ads", "Faturamento", "Admin"],
   ads: ["Visão Geral", "Performance", "Detalhamento", "Glossário", "Análise"],
   financeiro: ["Início", "Diagnóstico", "Lançar", "Consultar", "DRE", "Marketing", "Cadastro"],
   adocao: ["Adoção", "Atividades recentes"],
@@ -155,6 +157,10 @@ function tabsForRole(role: AdminRole, module: string) {
 
   if (role === "SUPORTE" && module === "financeiro") {
     return ["Início", "Diagnóstico", "Lançar", "Consultar", "DRE", "Marketing"];
+  }
+
+  if (role === "SUPORTE" && module === "objetivos") {
+    return ["Visao Geral", "OKRs", "Instagram", "Ads", "Faturamento"];
   }
 
   return moduleTabs[module] ?? [moduleLabels[module] ?? module];
