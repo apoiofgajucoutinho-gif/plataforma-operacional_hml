@@ -243,14 +243,14 @@ html[data-theme="dark"] .agenda-metric-icon {
 
 .agenda-type-aula {
   border-color: rgba(13, 58, 78, 0.12);
-  background-color: #eaf2fa;
+  background-color: #f4f1ea;
   color: #0d3a4e;
 }
 
 .agenda-type-interno {
-  border-color: rgba(13, 58, 78, 0.1);
-  background-color: #f4f1ea;
-  color: #0d3a4e;
+  border-color: rgba(157, 111, 78, 0.16);
+  background-color: #fbf7f2;
+  color: #7a4e32;
 }
 
 html[data-theme="dark"] .agenda-type-badge {

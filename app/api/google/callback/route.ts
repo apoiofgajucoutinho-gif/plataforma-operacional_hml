@@ -58,6 +58,17 @@ export async function GET(request: NextRequest) {
     },
   );
   const userInfo = (await userInfoResponse.json()) as GoogleUserInfo;
+  const preferredEmail =
+    env.googleCalendarConnectionEmail ||
+    (env.googleCalendarId?.includes("@") ? env.googleCalendarId : "");
+
+  if (!userInfo.email) {
+    return NextResponse.redirect(new URL("/agenda?google=missing-email", request.url));
+  }
+
+  if (preferredEmail && userInfo.email.toLowerCase() !== preferredEmail.toLowerCase()) {
+    return NextResponse.redirect(new URL("/agenda?google=wrong-account", request.url));
+  }
 
   const supabase = await createClient();
   const dataClient = createAdminClient() ?? supabase;

@@ -44,12 +44,22 @@ export async function GET(request: NextRequest) {
   authorizationUrl.searchParams.set("response_type", "code");
   authorizationUrl.searchParams.set(
     "scope",
-    "https://www.googleapis.com/auth/calendar.events",
+    [
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ].join(" "),
   );
   authorizationUrl.searchParams.set("access_type", "offline");
-  authorizationUrl.searchParams.set("prompt", "consent");
+  authorizationUrl.searchParams.set("prompt", "consent select_account");
   authorizationUrl.searchParams.set("include_granted_scopes", "true");
   authorizationUrl.searchParams.set("state", membership.tenant_id);
+
+  const preferredEmail =
+    env.googleCalendarConnectionEmail ||
+    (env.googleCalendarId?.includes("@") ? env.googleCalendarId : "");
+  if (preferredEmail) {
+    authorizationUrl.searchParams.set("login_hint", preferredEmail);
+  }
 
   return NextResponse.redirect(authorizationUrl);
 }

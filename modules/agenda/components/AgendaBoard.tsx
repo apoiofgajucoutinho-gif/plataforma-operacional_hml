@@ -742,11 +742,11 @@ function CalendarView({
   const renderCalendar = () => (
     <div className={isExpanded ? "p-3 sm:p-5" : "p-4"}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-sm font-bold capitalize text-brand-teal dark:text-slate-100">
+        <h3 className="text-sm font-bold capitalize text-brand-teal">
           {monthLabel(selectedMonth)}
         </h3>
         <div className="flex items-center gap-3">
-          <span className="text-xs font-bold text-brand-teal/55 dark:text-slate-300">
+          <span className="text-xs font-bold text-brand-teal/55">
             {events.length} eventos no filtro
           </span>
           <Button
@@ -760,11 +760,11 @@ function CalendarView({
           </Button>
         </div>
       </div>
-      <div className="grid grid-cols-7 overflow-hidden rounded-lg border border-brand-sand/70 text-sm dark:border-slate-600">
+      <div className="grid grid-cols-7 overflow-hidden rounded-lg border border-brand-sand/70 text-sm">
         {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"].map((day) => (
           <div
             key={day}
-            className="bg-brand-cream px-2 py-2 text-center text-xs font-black uppercase text-brand-clay dark:bg-slate-800 dark:text-slate-100"
+            className="bg-brand-cream px-2 py-2 text-center text-xs font-black uppercase text-brand-clay"
           >
             {day}
           </div>
@@ -780,11 +780,11 @@ function CalendarView({
           return (
             <div
               key={`${day ?? "empty"}-${index}`}
-              className={`${isExpanded ? "min-h-[150px] sm:min-h-[175px]" : "min-h-[112px]"} border-t border-brand-sand/70 bg-white/75 p-2 dark:border-slate-600 dark:bg-slate-900/70`}
+              className={`${isExpanded ? "min-h-[150px] sm:min-h-[175px]" : "min-h-[112px]"} border-t border-brand-sand/70 bg-white/75 p-2`}
             >
               {day ? (
                 <>
-                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${isToday ? "bg-brand-clay text-white" : "text-brand-teal/65 dark:text-slate-300"}`}>
+                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${isToday ? "bg-brand-clay text-white" : "text-brand-teal/65"}`}>
                     {day}
                   </span>
                   <div className="mt-2 space-y-1">
@@ -802,7 +802,7 @@ function CalendarView({
                     {allDayEvents.length > dayEvents.length ? (
                       <button
                         type="button"
-                        className="px-2 text-left text-xs font-semibold text-brand-clay hover:underline dark:text-slate-200"
+                        className="px-2 text-left text-xs font-semibold text-brand-clay hover:underline"
                         onClick={() => setIsExpanded(true)}
                       >
                         +{allDayEvents.length - dayEvents.length} mais
@@ -816,7 +816,7 @@ function CalendarView({
         })}
       </div>
       {events.length === 0 ? (
-        <p className="px-1 py-6 text-sm text-brand-teal/70 dark:text-slate-300">
+        <p className="px-1 py-6 text-sm text-brand-teal/70">
           Nenhum evento encontrado para este filtro.
         </p>
       ) : null}
@@ -826,7 +826,7 @@ function CalendarView({
   return (
     <>
       {isExpanded ? (
-        <div className="fixed inset-3 z-50 overflow-auto rounded-xl border border-brand-sand/70 bg-brand-cream/95 shadow-soft backdrop-blur dark:border-slate-600 dark:bg-slate-950/95">
+        <div className="fixed inset-3 z-50 overflow-auto rounded-xl border border-brand-sand/70 bg-brand-cream/95 shadow-soft backdrop-blur">
           {renderCalendar()}
         </div>
       ) : (
