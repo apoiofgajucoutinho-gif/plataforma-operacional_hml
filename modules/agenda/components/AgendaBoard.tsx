@@ -13,6 +13,8 @@ import {
   Lightbulb,
   GraduationCap,
   MapPin,
+  Maximize2,
+  Minimize2,
   Pencil,
   Stethoscope,
   X,
@@ -725,6 +727,8 @@ function CalendarView({
   selectedMonth: string;
   onEdit: (event: AgendaEvent) => void;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
   const [year, month] = selectedMonth.split("-").map(Number);
   const firstDay = new Date(year, month - 1, 1);
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -735,30 +739,52 @@ function CalendarView({
   });
   const today = new Date();
 
-  return (
-    <div className="p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-bold capitalize text-brand-teal">{monthLabel(selectedMonth)}</h3>
-        <span className="text-xs font-bold text-brand-teal/55">{events.length} eventos no filtro</span>
+  const renderCalendar = () => (
+    <div className={isExpanded ? "p-3 sm:p-5" : "p-4"}>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-sm font-bold capitalize text-brand-teal dark:text-slate-100">
+          {monthLabel(selectedMonth)}
+        </h3>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold text-brand-teal/55 dark:text-slate-300">
+            {events.length} eventos no filtro
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            className="h-9 px-3 text-xs"
+            onClick={() => setIsExpanded((value) => !value)}
+          >
+            {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {isExpanded ? "Reduzir" : "Expandir"}
+          </Button>
+        </div>
       </div>
-      <div className="grid grid-cols-7 overflow-hidden rounded-lg border border-brand-sand/70 text-sm">
+      <div className="grid grid-cols-7 overflow-hidden rounded-lg border border-brand-sand/70 text-sm dark:border-slate-600">
         {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"].map((day) => (
-          <div key={day} className="bg-brand-cream px-2 py-2 text-center text-xs font-black uppercase text-brand-clay">
+          <div
+            key={day}
+            className="bg-brand-cream px-2 py-2 text-center text-xs font-black uppercase text-brand-clay dark:bg-slate-800 dark:text-slate-100"
+          >
             {day}
           </div>
         ))}
         {cells.map((day, index) => {
           const cellDate = day ? new Date(year, month - 1, day) : null;
-          const dayEvents = cellDate
-            ? events.filter((event) => isSameDay(new Date(event.inicio), cellDate)).slice(0, 3)
+          const allDayEvents = cellDate
+            ? events.filter((event) => isSameDay(new Date(event.inicio), cellDate))
             : [];
+          const dayEvents = allDayEvents.slice(0, isExpanded ? 8 : 3);
           const isToday = cellDate ? isSameDay(cellDate, today) : false;
 
           return (
-            <div key={`${day ?? "empty"}-${index}`} className="min-h-[112px] border-t border-brand-sand/70 bg-white/75 p-2">
+            <div
+              key={`${day ?? "empty"}-${index}`}
+              className={`${isExpanded ? "min-h-[150px] sm:min-h-[175px]" : "min-h-[112px]"} border-t border-brand-sand/70 bg-white/75 p-2 dark:border-slate-600 dark:bg-slate-900/70`}
+            >
               {day ? (
                 <>
-                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${isToday ? "bg-brand-clay text-white" : "text-brand-teal/65"}`}>
+                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${isToday ? "bg-brand-clay text-white" : "text-brand-teal/65 dark:text-slate-300"}`}>
                     {day}
                   </span>
                   <div className="mt-2 space-y-1">
@@ -766,17 +792,21 @@ function CalendarView({
                       <button
                         key={event.id}
                         type="button"
-                        onClick={() => onEdit(event)}
-                        className={`block w-full truncate rounded-md px-2 py-1 text-left text-xs font-bold ${typeStyles[event.tipo]}`}
-                        title={event.titulo}
+                        onClick={() => setSelectedEvent(event)}
+                        className={`block w-full rounded-md px-2 py-1 text-left text-xs font-bold ${isExpanded ? "whitespace-normal break-words leading-snug" : "truncate"} ${typeStyles[event.tipo]}`}
+                        title={`${event.titulo} - ${formatDateTime(event.inicio)}`}
                       >
                         {event.titulo}
                       </button>
                     ))}
-                    {cellDate && events.filter((event) => isSameDay(new Date(event.inicio), cellDate)).length > 3 ? (
-                      <p className="px-2 text-xs font-semibold text-brand-clay">
-                        +{events.filter((event) => isSameDay(new Date(event.inicio), cellDate)).length - 3} mais
-                      </p>
+                    {allDayEvents.length > dayEvents.length ? (
+                      <button
+                        type="button"
+                        className="px-2 text-left text-xs font-semibold text-brand-clay hover:underline dark:text-slate-200"
+                        onClick={() => setIsExpanded(true)}
+                      >
+                        +{allDayEvents.length - dayEvents.length} mais
+                      </button>
                     ) : null}
                   </div>
                 </>
@@ -786,9 +816,89 @@ function CalendarView({
         })}
       </div>
       {events.length === 0 ? (
-        <p className="px-1 py-6 text-sm text-brand-teal/70">Nenhum evento encontrado para este filtro.</p>
+        <p className="px-1 py-6 text-sm text-brand-teal/70 dark:text-slate-300">
+          Nenhum evento encontrado para este filtro.
+        </p>
       ) : null}
     </div>
+  );
+
+  return (
+    <>
+      {isExpanded ? (
+        <div className="fixed inset-3 z-50 overflow-auto rounded-xl border border-brand-sand/70 bg-brand-cream/95 shadow-soft backdrop-blur dark:border-slate-600 dark:bg-slate-950/95">
+          {renderCalendar()}
+        </div>
+      ) : (
+        renderCalendar()
+      )}
+
+      {selectedEvent ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/35 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-brand-sand bg-white p-5 shadow-soft dark:border-slate-600 dark:bg-slate-900">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <span className={`mb-3 inline-flex rounded-md px-2 py-1 text-xs font-bold ${typeStyles[selectedEvent.tipo]}`}>
+                  {eventTypes.find((type) => type.value === selectedEvent.tipo)?.label ?? selectedEvent.tipo}
+                </span>
+                <h4 className="text-xl font-black text-brand-teal dark:text-slate-50">
+                  {selectedEvent.titulo}
+                </h4>
+              </div>
+              <button
+                type="button"
+                className="rounded-full p-2 text-brand-teal/60 hover:bg-brand-cream dark:text-slate-300 dark:hover:bg-slate-800"
+                onClick={() => setSelectedEvent(null)}
+                aria-label="Fechar detalhes"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-3 text-sm font-semibold text-brand-teal/75 dark:text-slate-300">
+              <p>
+                <span className="font-black text-brand-teal dark:text-slate-100">Inicio:</span>{" "}
+                {formatDateTime(selectedEvent.inicio)}
+              </p>
+              <p>
+                <span className="font-black text-brand-teal dark:text-slate-100">Fim:</span>{" "}
+                {formatDateTime(selectedEvent.fim)}
+              </p>
+              {selectedEvent.local ? (
+                <p>
+                  <span className="font-black text-brand-teal dark:text-slate-100">Local:</span>{" "}
+                  {selectedEvent.local}
+                </p>
+              ) : null}
+              <p>
+                <span className="font-black text-brand-teal dark:text-slate-100">Status:</span>{" "}
+                {selectedEvent.status}
+              </p>
+              {selectedEvent.descricao ? (
+                <p className="whitespace-pre-wrap rounded-lg bg-brand-cream p-3 dark:bg-slate-800">
+                  {selectedEvent.descricao}
+                </p>
+              ) : null}
+            </div>
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <Button type="button" variant="secondary" onClick={() => setSelectedEvent(null)}>
+                Fechar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const event = selectedEvent;
+                  setSelectedEvent(null);
+                  onEdit(event);
+                }}
+              >
+                <Pencil className="h-4 w-4" />
+                Editar
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 

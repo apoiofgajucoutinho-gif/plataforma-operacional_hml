@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -9,6 +10,49 @@ import {
 import type { AgendaEvent, AgendaEventInput } from "@/modules/agenda/types";
 
 const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "adocao", "atividades", "relatorios", "admin"];
+
+type GoogleCalendarConnection = {
+  account_email: string;
+  refresh_token: string;
+};
+
+function getPreferredGoogleCalendarAccountEmail() {
+  const configuredEmail =
+    env.googleCalendarConnectionEmail || (env.googleCalendarId?.includes("@") ? env.googleCalendarId : "");
+
+  return configuredEmail ? configuredEmail.toLowerCase() : null;
+}
+
+async function getTenantGoogleCalendarConnection(dataClient: any, tenantId: string) {
+  const preferredEmail = getPreferredGoogleCalendarAccountEmail();
+
+  if (preferredEmail) {
+    const { data, error } = await dataClient
+      .from("google_calendar_connections")
+      .select("account_email, refresh_token")
+      .eq("tenant_id", tenantId)
+      .ilike("account_email", preferredEmail)
+      .maybeSingle();
+
+    if (data) {
+      return { connection: data as GoogleCalendarConnection, error: null };
+    }
+
+    if (error && error.code !== "PGRST116") {
+      return { connection: null, error };
+    }
+  }
+
+  const { data, error } = await dataClient
+    .from("google_calendar_connections")
+    .select("account_email, refresh_token")
+    .eq("tenant_id", tenantId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return { connection: data as GoogleCalendarConnection | null, error };
+}
 
 async function getMembershipByUserId(userId: string) {
   const admin = createAdminClient();
@@ -258,17 +302,17 @@ export async function syncAgendaEventWithGoogle(event: AgendaEvent) {
   const userClient = await createClient();
   const dataClient = createAdminClient() ?? userClient;
 
-  const { data: connection, error: connectionError } = await dataClient
-    .from("google_calendar_connections")
-    .select("account_email, refresh_token")
-    .eq("tenant_id", event.tenant_id)
-    .returns<{ account_email: string; refresh_token: string }[]>()
-    .maybeSingle();
+  const { connection, error: connectionError } = await getTenantGoogleCalendarConnection(
+    dataClient,
+    event.tenant_id,
+  );
 
   if (connectionError || !connection) {
     return {
       ok: false,
-      error: connectionError?.message ?? "Tenant sem conexao Google Calendar.",
+      error:
+        connectionError?.message ??
+        "Tenant sem conexao Google Calendar central. Conecte a conta principal da agenda.",
       event,
     };
   }
