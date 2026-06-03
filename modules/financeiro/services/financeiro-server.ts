@@ -344,6 +344,82 @@ export async function createFinanceiroLancamento(input: CreateLancamentoPayload)
   return data;
 }
 
+export async function updateFinanceiroLancamento(input: CreateLancamentoPayload & { id?: string }) {
+  const auth = await getFinanceiroAuth();
+  if (auth.perfil !== "admin" && auth.perfil !== "suporte") {
+    throw new Error("Seu perfil financeiro nao pode editar lancamentos.");
+  }
+
+  if (!input.id) {
+    throw new Error("Informe o lancamento para editar.");
+  }
+
+  if (!input.descricao?.trim()) {
+    throw new Error("Informe uma descricao.");
+  }
+
+  if (!input.valor || input.valor <= 0) {
+    throw new Error("Informe um valor maior que zero.");
+  }
+
+  const payload = {
+    data_pagamento: input.data_pagamento,
+    mes_competencia: input.mes_competencia,
+    tipo: input.tipo,
+    status: input.status,
+    centro_resultado_id: input.centro_resultado_id,
+    categoria_id: input.categoria_id,
+    subcategoria_id: input.subcategoria_id || null,
+    curso_id: input.curso_id || null,
+    forma_pagamento: input.forma_pagamento,
+    banco_id: input.banco_id || null,
+    cartao_id: input.cartao_id || null,
+    qtd_parcelas: input.qtd_parcelas || 1,
+    descricao: input.descricao.trim(),
+    valor: input.valor,
+    observacao: input.observacao || null,
+  };
+
+  const { data, error } = await auth.dataClient
+    .from("fin_lancamentos")
+    .update(payload)
+    .eq("id", input.id)
+    .eq("tenant_id", auth.tenantId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+export async function deleteFinanceiroLancamento(input: { id?: string }) {
+  const auth = await getFinanceiroAuth();
+  if (auth.perfil !== "admin" && auth.perfil !== "suporte") {
+    throw new Error("Seu perfil financeiro nao pode excluir lancamentos.");
+  }
+
+  if (!input.id) {
+    throw new Error("Informe o lancamento para excluir.");
+  }
+
+  const { data, error } = await auth.dataClient
+    .from("fin_lancamentos")
+    .delete()
+    .eq("id", input.id)
+    .eq("tenant_id", auth.tenantId)
+    .select("id")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
 export async function createFinanceiroBanco(input: {
   nome: string;
   apelido?: string | null;

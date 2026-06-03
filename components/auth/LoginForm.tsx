@@ -7,6 +7,17 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { createClient } from "@/lib/supabase/client";
 
+async function readJson<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text) return {} as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -43,7 +54,7 @@ export function LoginForm() {
           }),
         });
 
-        const result = (await response.json()) as { error?: string };
+        const result = await readJson<{ error?: string }>(response);
         if (!response.ok) throw new Error(result.error ?? "Nao foi possivel enviar o codigo.");
 
         setStep("code");
@@ -61,7 +72,7 @@ export function LoginForm() {
       if (error) throw error;
 
       const response = await fetch("/api/auth/landing");
-      const result = (await response.json()) as { path?: string };
+      const result = await readJson<{ path?: string }>(response);
       router.replace(result.path ?? "/");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Nao foi possivel entrar.";

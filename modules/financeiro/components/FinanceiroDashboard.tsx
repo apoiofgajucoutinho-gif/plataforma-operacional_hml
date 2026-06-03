@@ -13,10 +13,12 @@ import {
   FileSpreadsheet,
   Landmark,
   LineChart,
+  Pencil,
   Plus,
   ReceiptText,
   Search,
   Settings2,
+  Trash2,
   WalletCards,
 } from "lucide-react";
 import { clsx } from "clsx";
@@ -212,6 +214,26 @@ function emptyLancamentoForm(context: FinanceiroContext): CreateLancamentoPayloa
   };
 }
 
+function lancamentoToForm(row: FinLancamento): CreateLancamentoPayload {
+  return {
+    tipo: row.tipo,
+    status: row.status,
+    data_pagamento: row.data_pagamento.slice(0, 10),
+    mes_competencia: row.mes_competencia.slice(0, 10),
+    centro_resultado_id: row.centro_resultado_id,
+    categoria_id: row.categoria_id,
+    subcategoria_id: row.subcategoria_id,
+    curso_id: row.curso_id,
+    forma_pagamento: row.forma_pagamento,
+    banco_id: row.banco_id,
+    cartao_id: row.cartao_id,
+    qtd_parcelas: row.qtd_parcelas,
+    descricao: row.descricao,
+    valor: row.valor,
+    observacao: row.observacao,
+  };
+}
+
 export function FinanceiroDashboard({ context }: { context: FinanceiroContext }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("inicio");
@@ -221,8 +243,10 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
   const [query, setQuery] = useState("");
   const [consultarPage, setConsultarPage] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
+  const [editingLancamento, setEditingLancamento] = useState<FinLancamento | null>(null);
   const [isPending, startTransition] = useTransition();
   const isAdmin = context.perfil === "admin";
+  const canEditLancamentos = context.perfil === "admin" || context.perfil === "suporte";
   const visibleTabs = useMemo(() => {
     if (context.perfil === "marketing") {
       return ["marketing"] as Tab[];
@@ -336,6 +360,43 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
     window.setTimeout(() => setMessage(null), 4500);
   }
 
+  function editLancamento(row: FinLancamento) {
+    setEditingLancamento(row);
+    setActiveTab("lancar");
+    notify(`Editando lançamento: ${row.descricao}`);
+  }
+
+  function deleteLancamento(row: FinLancamento) {
+    if (!canEditLancamentos) return;
+
+    const confirmed = window.confirm(
+      `Excluir o lançamento "${row.descricao}"? Essa ação não pode ser desfeita.`,
+    );
+
+    if (!confirmed) return;
+
+    startTransition(async () => {
+      const response = await fetch("/api/financeiro/lancamentos", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: row.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        notify(payload.error ?? "Falha ao excluir lançamento.");
+        return;
+      }
+
+      if (editingLancamento?.id === row.id) {
+        setEditingLancamento(null);
+      }
+
+      notify("Lançamento excluído com sucesso.");
+      router.refresh();
+    });
+  }
+
   if (context.diagnostic) {
     return (
       <Card className="mx-auto max-w-3xl p-6">
@@ -395,6 +456,13 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
           isPending={isPending}
           startTransition={startTransition}
           notify={notify}
+          editingLancamento={editingLancamento}
+          onEdit={(row) => {
+            setEditingLancamento(row);
+            notify(`Editando lançamento: ${row.descricao}`);
+          }}
+          onDelete={deleteLancamento}
+          onClearEditing={() => setEditingLancamento(null)}
         />
       ) : null}
       {activeTab === "consultar" ? (
@@ -412,6 +480,9 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
           page={consultarPage}
           setPage={setConsultarPage}
           maps={{ centroById, categoriaById, subcategoriaById, bancoById, cartaoById, cursoById }}
+          canEdit={canEditLancamentos}
+          onEdit={editLancamento}
+          onDelete={deleteLancamento}
         />
       ) : null}
       {activeTab === "dre" ? <DreTab context={context} /> : null}
@@ -967,14 +1038,29 @@ function LancarTab({
   isPending,
   startTransition,
   notify,
+  editingLancamento,
+  onEdit,
+  onDelete,
+  onClearEditing,
 }: {
   context: FinanceiroContext;
   isPending: boolean;
   startTransition: (callback: () => void) => void;
   notify: (message: string) => void;
+  editingLancamento: FinLancamento | null;
+  onEdit: (row: FinLancamento) => void;
+  onDelete: (row: FinLancamento) => void;
+  onClearEditing: () => void;
 }) {
   const router = useRouter();
   const [form, setForm] = useState<CreateLancamentoPayload>(() => emptyLancamentoForm(context));
+  const canEditLancamentos = context.perfil === "admin" || context.perfil === "suporte";
+
+  useEffect(() => {
+    if (editingLancamento) {
+      setForm(lancamentoToForm(editingLancamento));
+    }
+  }, [editingLancamento]);
 
   const selectedCentro = context.centros.find((item) => item.id === form.centro_resultado_id);
   const categorias = context.categorias.filter((item) => item.ativo && item.tipo === form.tipo);
@@ -999,17 +1085,19 @@ function LancarTab({
 
   async function submit() {
     startTransition(async () => {
+      const isEditing = Boolean(editingLancamento);
       const response = await fetch("/api/financeiro/lancamentos", {
-        method: "POST",
+        method: isEditing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(isEditing ? { id: editingLancamento?.id, ...form } : form),
       });
       const payload = await response.json();
       if (!response.ok) {
         notify(payload.error ?? "Falha ao salvar.");
         return;
       }
-      notify("Lançamento salvo com sucesso.");
+      notify(isEditing ? "Lançamento atualizado com sucesso." : "Lançamento salvo com sucesso.");
+      onClearEditing();
       setForm(emptyLancamentoForm(context));
       router.refresh();
     });
@@ -1020,7 +1108,9 @@ function LancarTab({
       <div className="flex items-center gap-3">
         <span className="rounded-md bg-brand-teal p-3 text-white"><Plus className="h-5 w-5" /></span>
         <div>
-          <h2 className="text-xl font-bold text-brand-teal">Novo lançamento</h2>
+          <h2 className="text-xl font-bold text-brand-teal">
+            {editingLancamento ? "Editar lançamento" : "Novo lançamento"}
+          </h2>
           <p className="text-sm text-brand-teal/60">Regras de banco, cartão, curso e competência são validadas no banco.</p>
         </div>
       </div>
@@ -1089,8 +1179,22 @@ function LancarTab({
         <Field label="Descrição" className="xl:col-span-2" value={form.descricao} onChange={(value) => setForm({ ...form, descricao: value })} />
         <Field label="Observação" className="xl:col-span-2" value={form.observacao ?? ""} onChange={(value) => setForm({ ...form, observacao: value })} />
       </div>
-      <div className="mt-6">
-        <Button onClick={submit} disabled={isPending}>{isPending ? "Salvando..." : "Salvar lançamento"}</Button>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Button onClick={submit} disabled={isPending}>
+          {isPending ? "Salvando..." : editingLancamento ? "Salvar edição" : "Salvar lançamento"}
+        </Button>
+        {editingLancamento ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              onClearEditing();
+              setForm(emptyLancamentoForm(context));
+            }}
+          >
+            Cancelar edição
+          </Button>
+        ) : null}
       </div>
       <div className="mt-8 border-t border-brand-sand pt-5">
         <div className="flex items-center justify-between gap-3">
@@ -1117,7 +1221,32 @@ function LancarTab({
                     <p className="text-xs font-semibold text-brand-teal/55">{dateLabel(row.data_pagamento)}</p>
                   </div>
                 </div>
-                <p className={clsx("shrink-0 text-sm font-black", visual.text)}>{decimalMoney(signedValue(row))}</p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <p className={clsx("text-sm font-black", visual.text)}>{decimalMoney(signedValue(row))}</p>
+                  {canEditLancamentos ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => onEdit(row)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-brand-sand bg-white/80 text-brand-teal transition hover:bg-brand-cream"
+                        aria-label={`Editar ${row.descricao}`}
+                        title="Editar lançamento"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(row)}
+                        disabled={isPending}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-brand-sand bg-white/80 text-brand-clay transition hover:bg-[#FFF0F2] disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={`Excluir ${row.descricao}`}
+                        title="Excluir lançamento"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  ) : null}
+                </div>
               </div>
             );
           }) : (
@@ -1145,6 +1274,9 @@ function ConsultarTab({
   page,
   setPage,
   maps,
+  canEdit,
+  onEdit,
+  onDelete,
 }: {
   rows: FinLancamento[];
   context: FinanceiroContext;
@@ -1158,6 +1290,9 @@ function ConsultarTab({
   setQuery: (value: string) => void;
   page: number;
   setPage: (value: number) => void;
+  canEdit: boolean;
+  onEdit: (row: FinLancamento) => void;
+  onDelete: (row: FinLancamento) => void;
   maps: {
     centroById: Map<string, FinCentroResultado>;
     categoriaById: Map<string, FinCategoria>;
@@ -1229,6 +1364,7 @@ function ConsultarTab({
               <th className="px-5 py-3">Descrição</th>
               <th className="px-5 py-3">Forma</th>
               <th className="px-5 py-3 text-right">Valor</th>
+              {canEdit ? <th className="px-5 py-3 text-right">Ações</th> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-sand/60">
@@ -1250,6 +1386,30 @@ function ConsultarTab({
                   <td className="px-5 py-3 text-brand-teal">{row.descricao}</td>
                   <td className="px-5 py-3 text-brand-teal/70">{row.forma_pagamento}</td>
                   <td className={clsx("px-5 py-3 text-right font-black", visual.text)}>{decimalMoney(signedValue(row))}</td>
+                  {canEdit ? (
+                    <td className="px-5 py-3 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onEdit(row)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-brand-sand bg-white/80 text-brand-teal transition hover:bg-brand-cream"
+                          aria-label={`Editar ${row.descricao}`}
+                          title="Editar lançamento"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDelete(row)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-brand-sand bg-white/80 text-brand-clay transition hover:bg-[#FFF0F2]"
+                          aria-label={`Excluir ${row.descricao}`}
+                          title="Excluir lançamento"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}
