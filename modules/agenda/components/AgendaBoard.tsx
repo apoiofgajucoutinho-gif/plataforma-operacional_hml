@@ -348,13 +348,19 @@ export function AgendaBoard({
           result.events?.forEach((event) => merged.set(event.id, event));
           return sortEvents(Array.from(merged.values()));
         });
+
+        const firstSyncedEvent = sortEvents(result.events)[0];
+        if (firstSyncedEvent) {
+          setSelectedMonth(toMonthInputValue(new Date(firstSyncedEvent.inicio)));
+          setTimelineFilter("month");
+        }
       }
 
       const imported = result.imported ?? 0;
       const updated = result.updated ?? 0;
       const cancelled = result.cancelled ?? 0;
       setMessage(
-        `Google Agenda sincronizado: ${imported} importados, ${updated} atualizados, ${cancelled} cancelados.`,
+        `Google Agenda sincronizado: ${imported} importados, ${updated} atualizados, ${cancelled} cancelados. Exibindo o mes do evento sincronizado.`,
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Erro ao sincronizar Google Agenda.");
