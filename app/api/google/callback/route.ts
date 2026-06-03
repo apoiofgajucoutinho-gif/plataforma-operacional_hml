@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { pullGoogleCalendarEventsToAgenda } from "@/modules/agenda/services/agenda-server";
 import {
   isGoogleCalendarConfigured,
   upsertGoogleCalendarEvent,
@@ -111,8 +112,21 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (synced > 0) {
-    return NextResponse.redirect(new URL(`/agenda?google=connected&synced=${synced}`, request.url));
+  const pulled = await pullGoogleCalendarEventsToAgenda({
+    tenantId,
+    accessToken: token.access_token,
+  });
+
+  const imported = pulled.ok ? pulled.imported : 0;
+  const updated = pulled.ok ? pulled.updated : 0;
+  const cancelled = pulled.ok ? pulled.cancelled : 0;
+  if (synced > 0 || imported > 0 || updated > 0 || cancelled > 0) {
+    return NextResponse.redirect(
+      new URL(
+        `/agenda?google=connected&synced=${synced}&imported=${imported}&updated=${updated}&cancelled=${cancelled}`,
+        request.url,
+      ),
+    );
   }
 
   return NextResponse.redirect(new URL("/agenda?google=connected", request.url));

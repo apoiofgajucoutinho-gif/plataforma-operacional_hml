@@ -16,6 +16,7 @@ import {
   Maximize2,
   Minimize2,
   Pencil,
+  RefreshCw,
   Stethoscope,
   X,
 } from "lucide-react";
@@ -221,6 +222,7 @@ export function AgendaBoard({
   const [timelineView, setTimelineView] = useState<TimelineView>("calendar");
   const [selectedMonth, setSelectedMonth] = useState(toMonthInputValue(new Date()));
   const [isSaving, setIsSaving] = useState(false);
+  const [isPullingGoogle, setIsPullingGoogle] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const defaultStart = useMemo(() => toDateInputValue(defaultBusinessStart()), []);
   const defaultEnd = useMemo(() => endAfterStart(defaultStart), [defaultStart]);
@@ -312,6 +314,52 @@ export function AgendaBoard({
       setMessage(error instanceof Error ? error.message : "Erro ao salvar evento.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handlePullGoogleEvents() {
+    if (!isTenantReady) {
+      setMessage("Vincule seu usuario a um tenant antes de sincronizar.");
+      return;
+    }
+
+    setIsPullingGoogle(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch("/api/agenda/events/pull-google", {
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        imported?: number;
+        updated?: number;
+        cancelled?: number;
+        events?: AgendaEvent[];
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Erro ao sincronizar Google Agenda.");
+      }
+
+      if (result.events?.length) {
+        setEvents((current) => {
+          const merged = new Map(current.map((event) => [event.id, event]));
+          result.events?.forEach((event) => merged.set(event.id, event));
+          return sortEvents(Array.from(merged.values()));
+        });
+      }
+
+      const imported = result.imported ?? 0;
+      const updated = result.updated ?? 0;
+      const cancelled = result.cancelled ?? 0;
+      setMessage(
+        `Google Agenda sincronizado: ${imported} importados, ${updated} atualizados, ${cancelled} cancelados.`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro ao sincronizar Google Agenda.");
+    } finally {
+      setIsPullingGoogle(false);
     }
   }
 
@@ -600,6 +648,17 @@ export function AgendaBoard({
                   <BarChart3 className="h-4 w-4" />
                   Gantt
                 </FilterButton>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-10 px-3 text-sm"
+                  onClick={handlePullGoogleEvents}
+                  disabled={isPullingGoogle || !isTenantReady}
+                  title="Importar eventos criados diretamente no Google Calendar"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isPullingGoogle ? "animate-spin" : ""}`} />
+                  {isPullingGoogle ? "Sincronizando..." : "Sincronizar Google"}
+                </Button>
                 <span className="mx-1 hidden h-7 w-px bg-brand-sand/70 sm:block" />
                 <FilterButton
                   isActive={timelineFilter === "today"}

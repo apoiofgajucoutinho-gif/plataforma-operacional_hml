@@ -8,6 +8,30 @@ type GoogleTokenResponse = {
   token_type: "Bearer";
 };
 
+export type GoogleCalendarEvent = {
+  id: string;
+  status?: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  updated?: string;
+  start?: {
+    date?: string;
+    dateTime?: string;
+    timeZone?: string;
+  };
+  end?: {
+    date?: string;
+    dateTime?: string;
+    timeZone?: string;
+  };
+};
+
+type GoogleCalendarEventsResponse = {
+  items?: GoogleCalendarEvent[];
+  nextPageToken?: string;
+};
+
 export function isGoogleCalendarConfigured() {
   return Boolean(env.googleClientId && env.googleClientSecret && env.googleRedirectUri);
 }
@@ -66,4 +90,41 @@ export async function upsertGoogleCalendarEvent(params: {
   }
 
   return (await response.json()) as { id: string; htmlLink?: string };
+}
+
+export async function listGoogleCalendarEvents(params: {
+  accessToken: string;
+  timeMin: string;
+  timeMax: string;
+}) {
+  const events: GoogleCalendarEvent[] = [];
+  const calendarId = encodeURIComponent(env.googleCalendarId);
+  let pageToken: string | undefined;
+
+  do {
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events`);
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("orderBy", "startTime");
+    url.searchParams.set("showDeleted", "true");
+    url.searchParams.set("maxResults", "250");
+    url.searchParams.set("timeMin", params.timeMin);
+    url.searchParams.set("timeMax", params.timeMax);
+    if (pageToken) {
+      url.searchParams.set("pageToken", pageToken);
+    }
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${params.accessToken}` },
+    });
+
+    if (!response.ok) {
+      throw new Error("Falha ao buscar eventos do Google Calendar.");
+    }
+
+    const body = (await response.json()) as GoogleCalendarEventsResponse;
+    events.push(...(body.items ?? []));
+    pageToken = body.nextPageToken;
+  } while (pageToken);
+
+  return events;
 }

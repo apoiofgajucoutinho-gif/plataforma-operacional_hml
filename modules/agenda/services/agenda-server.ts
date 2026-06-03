@@ -4,10 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   isGoogleCalendarConfigured,
+  listGoogleCalendarEvents,
   refreshGoogleAccessToken,
   upsertGoogleCalendarEvent,
 } from "@/services/google/calendar";
-import type { AgendaEvent, AgendaEventInput } from "@/modules/agenda/types";
+import type { GoogleCalendarEvent } from "@/services/google/calendar";
+import type { AgendaEvent, AgendaEventInput, AgendaEventType } from "@/modules/agenda/types";
 
 const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "adocao", "atividades", "relatorios", "admin"];
 
@@ -52,6 +54,59 @@ async function getTenantGoogleCalendarConnection(dataClient: any, tenantId: stri
     .maybeSingle();
 
   return { connection: data as GoogleCalendarConnection | null, error };
+}
+
+function inferAgendaEventType(title: string): AgendaEventType {
+  const normalized = title
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  if (normalized.includes("aula") || normalized.includes("curso") || normalized.includes("formacao")) {
+    return "aula";
+  }
+
+  if (normalized.includes("consulta") || normalized.includes("paciente")) {
+    return "paciente";
+  }
+
+  if (
+    normalized.includes("palestra") ||
+    normalized.includes("congresso") ||
+    normalized.includes("summit") ||
+    normalized.includes("evento")
+  ) {
+    return "palestra";
+  }
+
+  return "interno";
+}
+
+function googleDateToIso(value?: { date?: string; dateTime?: string }) {
+  if (value?.dateTime) {
+    return new Date(value.dateTime).toISOString();
+  }
+
+  if (value?.date) {
+    return new Date(`${value.date}T00:00:00-03:00`).toISOString();
+  }
+
+  return null;
+}
+
+function getGoogleImportWindow() {
+  const timeMin = new Date();
+  timeMin.setDate(timeMin.getDate() - 31);
+  timeMin.setHours(0, 0, 0, 0);
+
+  const timeMax = new Date();
+  timeMax.setDate(timeMax.getDate() + 180);
+  timeMax.setHours(23, 59, 59, 999);
+
+  return {
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+  };
 }
 
 async function getMembershipByUserId(userId: string) {
@@ -354,6 +409,200 @@ export async function syncAgendaEventWithGoogle(event: AgendaEvent) {
       event,
     };
   }
+}
+
+export async function pullGoogleCalendarEventsToAgenda(params: {
+  tenantId: string;
+  accessToken?: string;
+}) {
+  if (!isGoogleCalendarConfigured()) {
+    return {
+      ok: false,
+      error: "Google Calendar OAuth ainda nao configurado.",
+      imported: 0,
+      updated: 0,
+      cancelled: 0,
+      skipped: 0,
+      events: [] as AgendaEvent[],
+    };
+  }
+
+  const userClient = await createClient();
+  const dataClient = createAdminClient() ?? userClient;
+  let accessToken = params.accessToken;
+  let accountEmail: string | null = null;
+
+  if (!accessToken) {
+    const { connection, error: connectionError } = await getTenantGoogleCalendarConnection(
+      dataClient,
+      params.tenantId,
+    );
+
+    if (connectionError || !connection) {
+      return {
+        ok: false,
+        error:
+          connectionError?.message ??
+          "Tenant sem conexao Google Calendar central. Conecte a conta principal da agenda.",
+        imported: 0,
+        updated: 0,
+        cancelled: 0,
+        skipped: 0,
+        events: [] as AgendaEvent[],
+      };
+    }
+
+    const token = await refreshGoogleAccessToken(connection.refresh_token);
+    accessToken = token.access_token;
+    accountEmail = connection.account_email;
+  }
+
+  const { timeMin, timeMax } = getGoogleImportWindow();
+  const googleEvents = await listGoogleCalendarEvents({
+    accessToken,
+    timeMin,
+    timeMax,
+  });
+
+  let imported = 0;
+  let updated = 0;
+  let cancelled = 0;
+  let skipped = 0;
+  const changedEvents: AgendaEvent[] = [];
+
+  for (const googleEvent of googleEvents) {
+    const result = await upsertGoogleEventIntoAgenda({
+      dataClient,
+      tenantId: params.tenantId,
+      googleEvent,
+    });
+
+    if (result.action === "imported") imported += 1;
+    if (result.action === "updated") updated += 1;
+    if (result.action === "cancelled") cancelled += 1;
+    if (result.action === "skipped") skipped += 1;
+    if (result.event) changedEvents.push(result.event);
+  }
+
+  return {
+    ok: true,
+    error: null,
+    accountEmail,
+    imported,
+    updated,
+    cancelled,
+    skipped,
+    events: changedEvents,
+  };
+}
+
+async function upsertGoogleEventIntoAgenda({
+  dataClient,
+  tenantId,
+  googleEvent,
+}: {
+  dataClient: any;
+  tenantId: string;
+  googleEvent: GoogleCalendarEvent;
+}): Promise<{
+  action: "imported" | "updated" | "cancelled" | "skipped";
+  event: AgendaEvent | null;
+}> {
+  if (!googleEvent.id) {
+    return { action: "skipped", event: null };
+  }
+
+  const { data: existingByGoogleId } = await dataClient
+    .from("agenda_eventos")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("google_event_id", googleEvent.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (googleEvent.status === "cancelled") {
+    if (!existingByGoogleId) {
+      return { action: "skipped", event: null };
+    }
+
+    const { data: cancelledEvent, error } = await dataClient
+      .from("agenda_eventos")
+      .update({ status: "cancelado" })
+      .eq("id", existingByGoogleId.id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return { action: "cancelled", event: cancelledEvent as AgendaEvent };
+  }
+
+  const inicio = googleDateToIso(googleEvent.start);
+  const fim = googleDateToIso(googleEvent.end);
+  const titulo = googleEvent.summary?.trim() || "Evento Google Calendar";
+
+  if (!inicio || !fim || new Date(fim) <= new Date(inicio)) {
+    return { action: "skipped", event: null };
+  }
+
+  const payload = {
+    tenant_id: tenantId,
+    titulo,
+    descricao: googleEvent.description ?? null,
+    tipo: inferAgendaEventType(titulo),
+    status: "confirmado",
+    inicio,
+    fim,
+    local: googleEvent.location ?? null,
+    google_event_id: googleEvent.id,
+  };
+
+  if (existingByGoogleId) {
+    const { data: updatedEvent, error } = await dataClient
+      .from("agenda_eventos")
+      .update(payload)
+      .eq("id", existingByGoogleId.id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return { action: "updated", event: updatedEvent as AgendaEvent };
+  }
+
+  const { data: existingByContent } = await dataClient
+    .from("agenda_eventos")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .is("google_event_id", null)
+    .eq("titulo", titulo)
+    .eq("inicio", inicio)
+    .eq("fim", fim)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingByContent) {
+    const { data: linkedEvent, error } = await dataClient
+      .from("agenda_eventos")
+      .update({
+        google_event_id: googleEvent.id,
+        descricao: googleEvent.description ?? existingByContent.descricao,
+        local: googleEvent.location ?? existingByContent.local,
+      })
+      .eq("id", existingByContent.id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    return { action: "updated", event: linkedEvent as AgendaEvent };
+  }
+
+  const { data: insertedEvent, error } = await dataClient
+    .from("agenda_eventos")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return { action: "imported", event: insertedEvent as AgendaEvent };
 }
 
 export async function updateAgendaEvent(eventId: string, input: AgendaEventInput) {
