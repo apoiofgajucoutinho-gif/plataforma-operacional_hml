@@ -68,6 +68,7 @@ const statusOptions: Array<{ value: "" | AdsPerformanceStatus; label: string }> 
 ];
 
 const palette = ["#5BA0E6", "#AA6BD1", "#55BF83", "#D5828D", "#A87452", "#78A9B8", "#D6A35D", "#8EA4D2"];
+const monthFormatter = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "2-digit" });
 
 const glossary = [
   ["SPEND", "Valor gasto / investimento", "Quanto foi cobrado pela Meta no período. Compare sempre com a fatura do cartão; diferença acima de 5% pede explicação."],
@@ -114,6 +115,16 @@ function formatDateTime(value: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatMonthOption(year: string, month: string) {
+  const date = new Date(Number(year), Number(month) - 1, 1);
+  return monthFormatter.format(date).replace(".", "").replace(" de ", "/");
+}
+
+function formatMonthKeyOption(monthKey: string) {
+  const [year, month] = monthKey.split("-");
+  return year && month ? formatMonthOption(year, month) : monthKey;
 }
 
 function formatNumber(value: number) {
@@ -243,6 +254,8 @@ function statusTone(status: string) {
 export function AdsDashboard({ context }: { context: AdsContext }) {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [period, setPeriod] = useState<PeriodFilter>("7d");
+  const [year, setYear] = useState("");
+  const [month, setMonth] = useState("");
   const [campaign, setCampaign] = useState("");
   const [status, setStatus] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("data_referencia");
@@ -254,16 +267,41 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
     [context.rows],
   );
 
+  const years = useMemo(
+    () => [...new Set(context.rows.map((row) => parseDate(row.data_referencia).getFullYear().toString()))].sort().reverse(),
+    [context.rows],
+  );
+
+  const months = useMemo(() => {
+    const available = context.rows
+      .filter((row) => !year || parseDate(row.data_referencia).getFullYear().toString() === year)
+      .map((row) => {
+        const date = parseDate(row.data_referencia);
+        const itemYear = date.getFullYear().toString();
+        const itemMonth = String(date.getMonth() + 1).padStart(2, "0");
+        return { value: `${itemYear}-${itemMonth}`, year: itemYear, month: itemMonth };
+      });
+    const unique = new Map<string, { value: string; year: string; month: string }>();
+    available.forEach((item) => unique.set(item.value, item));
+
+    return [...unique.values()].sort((left, right) => left.value.localeCompare(right.value));
+  }, [context.rows, year]);
+
   const filteredRows = useMemo(() => {
     const periodRows = applyPeriod(context.rows, period);
 
     return periodRows.filter((row) => {
+      const date = parseDate(row.data_referencia);
+      const rowYear = date.getFullYear().toString();
+      const rowMonth = String(date.getMonth() + 1).padStart(2, "0");
+      const yearMatch = !year || rowYear === year;
+      const monthMatch = !month || `${rowYear}-${rowMonth}` === month;
       const campaignMatch = !campaign || row.campanha === campaign;
       const statusMatch = !status || row.performance_status === status;
 
-      return campaignMatch && statusMatch;
+      return yearMatch && monthMatch && campaignMatch && statusMatch;
     });
-  }, [campaign, context.rows, period, status]);
+  }, [campaign, context.rows, month, period, status, year]);
 
   const uniqueDates = new Set(context.rows.map((row) => row.data_referencia));
   const hasAccumulatedWarning = context.rows.length > 0 && uniqueDates.size <= 1;
@@ -325,11 +363,24 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
 
       <Filters
         period={period}
+        year={year}
+        month={month}
         campaign={campaign}
         status={status}
+        years={years}
+        months={months}
         campaigns={campaigns}
         onPeriod={(next) => {
           setPeriod(next);
+          setPage(1);
+        }}
+        onYear={(next) => {
+          setYear(next);
+          setMonth("");
+          setPage(1);
+        }}
+        onMonth={(next) => {
+          setMonth(next);
           setPage(1);
         }}
         onCampaign={(next) => {
@@ -352,7 +403,7 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
         </Card>
       ) : null}
 
-      <PeriodSummary rows={filteredRows} totalRows={context.rows.length} period={period} />
+      <PeriodSummary rows={filteredRows} totalRows={context.rows.length} period={period} year={year} month={month} />
 
       {activeTab === "overview" ? <OverviewTab rows={filteredRows} /> : null}
       {activeTab === "performance" ? <PerformanceTab rows={filteredRows} /> : null}
@@ -396,18 +447,30 @@ function Header({ updatedAt }: { updatedAt: string | null }) {
 
 function Filters({
   period,
+  year,
+  month,
   campaign,
   status,
+  years,
+  months,
   campaigns,
   onPeriod,
+  onYear,
+  onMonth,
   onCampaign,
   onStatus,
 }: {
   period: PeriodFilter;
+  year: string;
+  month: string;
   campaign: string;
   status: string;
+  years: string[];
+  months: Array<{ value: string; year: string; month: string }>;
   campaigns: string[];
   onPeriod: (value: PeriodFilter) => void;
+  onYear: (value: string) => void;
+  onMonth: (value: string) => void;
   onCampaign: (value: string) => void;
   onStatus: (value: string) => void;
 }) {
@@ -431,6 +494,32 @@ function Filters({
       ))}
 
       <span className="mx-2 hidden h-8 w-px bg-[#E9CBD1] md:block" />
+
+      <select
+        value={year}
+        onChange={(event) => onYear(event.target.value)}
+        className="h-10 min-w-[150px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
+      >
+        <option value="">Todos os Anos</option>
+        {years.map((item) => (
+          <option key={item} value={item}>
+            {item}
+          </option>
+        ))}
+      </select>
+
+      <select
+        value={month}
+        onChange={(event) => onMonth(event.target.value)}
+        className="h-10 min-w-[160px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
+      >
+        <option value="">Todos os Meses</option>
+        {months.map((item) => (
+          <option key={item.value} value={item.value}>
+            {formatMonthOption(item.year, item.month)}
+          </option>
+        ))}
+      </select>
 
       <select
         value={campaign}
@@ -460,13 +549,27 @@ function Filters({
   );
 }
 
-function PeriodSummary({ rows, totalRows, period }: { rows: AdsDailyRow[]; totalRows: number; period: PeriodFilter }) {
+function PeriodSummary({
+  rows,
+  totalRows,
+  period,
+  year,
+  month,
+}: {
+  rows: AdsDailyRow[];
+  totalRows: number;
+  period: PeriodFilter;
+  year: string;
+  month: string;
+}) {
   const label = periodFilters.find((filter) => filter.value === period)?.label ?? "Tudo";
+  const calendarLabel = year || month ? `, ${month ? formatMonthKeyOption(month) : `ano ${year}`}` : "";
   const dates = rows.map((row) => row.data_referencia).sort();
 
   return (
     <p className="text-sm font-semibold text-brand-teal/60">
       {rows.length} de {totalRows} registros no filtro {label}
+      {calendarLabel}
       {dates.length ? `, de ${formatDate(dates[0])} a ${formatDate(dates.at(-1) ?? dates[0])}` : ""}.
     </p>
   );
