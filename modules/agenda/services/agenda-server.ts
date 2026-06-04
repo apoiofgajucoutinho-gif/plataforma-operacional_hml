@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
+  deleteGoogleCalendarEvent,
   isGoogleCalendarConfigured,
   listGoogleCalendarEvents,
   refreshGoogleAccessToken,
@@ -658,4 +659,90 @@ export async function updateAgendaEvent(eventId: string, input: AgendaEventInput
   }
 
   return data;
+}
+
+export async function deleteAgendaEvent(eventId: string) {
+  const userClient = await createClient();
+  const {
+    data: { user },
+  } = await userClient.auth.getUser();
+
+  if (!user) {
+    throw new Error("Usuario nao autenticado.");
+  }
+
+  const { membership, error: membershipError } = await getMembershipByUserId(user.id);
+
+  if (membershipError) {
+    throw membershipError;
+  }
+
+  if (!membership) {
+    throw new Error("Usuario sem tenant vinculado.");
+  }
+
+  const dataClient = createAdminClient() ?? userClient;
+  const { data: event, error: eventError } = await dataClient
+    .from("agenda_eventos")
+    .select("*")
+    .eq("id", eventId)
+    .eq("tenant_id", membership.tenant_id)
+    .single();
+
+  if (eventError) {
+    throw eventError;
+  }
+
+  const agendaEvent = event as AgendaEvent;
+  if (agendaEvent.google_event_id && isGoogleCalendarConfigured()) {
+    const { connection, error: connectionError } = await getTenantGoogleCalendarConnection(
+      dataClient,
+      membership.tenant_id,
+    );
+
+    if (connectionError || !connection) {
+      throw new Error(
+        connectionError?.message ??
+          "Nao foi possivel excluir porque a conexao central com o Google Calendar nao foi encontrada.",
+      );
+    }
+
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const token = await refreshGoogleAccessToken(connection.refresh_token);
+        await deleteGoogleCalendarEvent({
+          googleEventId: agendaEvent.google_event_id,
+          accessToken: token.access_token,
+        });
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (lastError) {
+      throw new Error(
+        lastError instanceof Error
+          ? `Exclusao interrompida: ${lastError.message}`
+          : "Exclusao interrompida: nao foi possivel remover no Google Agenda automaticamente.",
+      );
+    }
+  }
+
+  const { data, error } = await dataClient
+    .from("agenda_eventos")
+    .delete()
+    .eq("id", eventId)
+    .eq("tenant_id", membership.tenant_id)
+    .select("id")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as { id: string };
 }

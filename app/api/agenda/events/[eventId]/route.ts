@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  deleteAgendaEvent,
   syncAgendaEventWithGoogle,
   updateAgendaEvent,
 } from "@/modules/agenda/services/agenda-server";
@@ -27,6 +28,23 @@ export async function PATCH(
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Erro ao atualizar evento." },
+      { status: 400 },
+    );
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ eventId: string }> },
+) {
+  try {
+    const { eventId } = await params;
+    const data = await deleteAgendaEvent(eventId);
+
+    return NextResponse.json({ data });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Erro ao excluir evento." },
       { status: 400 },
     );
   }

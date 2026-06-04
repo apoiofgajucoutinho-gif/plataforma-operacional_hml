@@ -53,7 +53,12 @@ export async function refreshGoogleAccessToken(refreshToken: string) {
   });
 
   if (!response.ok) {
-    throw new Error("Falha ao renovar token do Google Calendar.");
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      details
+        ? `Falha ao renovar token do Google Calendar: ${details.slice(0, 240)}`
+        : "Falha ao renovar token do Google Calendar.",
+    );
   }
 
   return (await response.json()) as GoogleTokenResponse;
@@ -90,6 +95,32 @@ export async function upsertGoogleCalendarEvent(params: {
   }
 
   return (await response.json()) as { id: string; htmlLink?: string };
+}
+
+export async function deleteGoogleCalendarEvent(params: {
+  googleEventId: string;
+  accessToken: string;
+}) {
+  const calendarId = encodeURIComponent(env.googleCalendarId);
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${encodeURIComponent(
+    params.googleEventId,
+  )}`;
+
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${params.accessToken}` },
+  });
+
+  if (!response.ok && response.status !== 404 && response.status !== 410) {
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      details
+        ? `Nao foi possivel remover no Google Agenda automaticamente. Detalhe: ${details.slice(0, 180)}`
+        : "Nao foi possivel remover no Google Agenda automaticamente.",
+    );
+  }
+
+  return { ok: true };
 }
 
 export async function listGoogleCalendarEvents(params: {

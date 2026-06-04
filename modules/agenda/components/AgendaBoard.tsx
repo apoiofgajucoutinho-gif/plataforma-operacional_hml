@@ -18,6 +18,7 @@ import {
   Pencil,
   RefreshCw,
   Stethoscope,
+  Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -147,12 +148,13 @@ function isSameDay(left: Date, right: Date) {
 }
 
 function isWithinNextDays(date: Date, days: number) {
-  const now = new Date();
-  const end = new Date(now);
-  end.setDate(now.getDate() + days);
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + days);
   end.setHours(23, 59, 59, 999);
 
-  return date >= now && date <= end;
+  return date >= start && date <= end;
 }
 
 function isSameMonth(date: Date, monthValue: string) {
@@ -369,6 +371,43 @@ export function AgendaBoard({
     }
   }
 
+  async function handleDeleteEvent(event: AgendaEvent) {
+    if (!isTenantReady) {
+      setMessage("Vincule seu usuario a um tenant antes de excluir eventos.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Excluir o evento "${event.titulo}"? A plataforma tambem removera automaticamente do Google Agenda.`,
+    );
+
+    if (!confirmed) return;
+
+    setIsSaving(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/agenda/events/${event.id}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Nao foi possivel excluir o evento.");
+      }
+
+      setEvents((current) => current.filter((item) => item.id !== event.id));
+      if (editingEvent?.id === event.id) {
+        setEditingEvent(null);
+      }
+      setMessage("Evento excluido do sistema e do Google Agenda.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Erro ao excluir evento.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   const formDefaults = editingEvent
     ? {
         titulo: editingEvent.titulo,
@@ -389,18 +428,19 @@ export function AgendaBoard({
         descricao: "",
       };
 
-  const upcomingEvents = events.filter((event) => {
+  const activeEvents = events.filter((event) => event.status !== "cancelado");
+  const upcomingEvents = activeEvents.filter((event) => {
     const eventDate = new Date(event.inicio);
 
     return eventDate >= new Date() && event.status !== "cancelado";
   });
-  const todayEvents = upcomingEvents.filter((event) =>
+  const todayEvents = activeEvents.filter((event) =>
     isSameDay(new Date(event.inicio), new Date()),
   );
-  const nextSevenDaysEvents = upcomingEvents.filter((event) =>
+  const nextSevenDaysEvents = activeEvents.filter((event) =>
     isWithinNextDays(new Date(event.inicio), 7),
   );
-  const monthEvents = events.filter((event) =>
+  const monthEvents = activeEvents.filter((event) =>
     isSameMonth(new Date(event.inicio), selectedMonth),
   );
   const visibleTimelineEvents =
@@ -409,6 +449,7 @@ export function AgendaBoard({
       : timelineFilter === "next7"
         ? nextSevenDaysEvents
         : monthEvents;
+  const metricEvents = visibleTimelineEvents;
   const nextEvent = upcomingEvents[0] ?? null;
 
   return (
@@ -453,7 +494,7 @@ export function AgendaBoard({
           <Metric
             key={value}
             label={label}
-            value={events.filter((event) => event.tipo === value).length}
+            value={metricEvents.filter((event) => event.tipo === value).length}
             icon={<Icon className="h-5 w-5" />}
             className={className}
           />
@@ -612,17 +653,29 @@ export function AgendaBoard({
                     : "Vincular tenant para salvar"}
             </Button>
             {editingEvent ? (
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                onClick={() => {
-                  setEditingEvent(null);
-                  setMessage(null);
-                }}
-              >
-                Cancelar edicao
-              </Button>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    setEditingEvent(null);
+                    setMessage(null);
+                  }}
+                >
+                  Cancelar edicao
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full border-brand-clay text-brand-clay hover:bg-[#FFF0F2]"
+                  onClick={() => handleDeleteEvent(editingEvent)}
+                  disabled={isSaving}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Excluir evento
+                </Button>
+              </div>
             ) : null}
             {message ? <p className="text-sm text-brand-teal/75">{message}</p> : null}
           </form>
@@ -704,6 +757,7 @@ export function AgendaBoard({
                 setEditingEvent(event);
                 setMessage(null);
               }}
+              onDelete={handleDeleteEvent}
             />
           ) : timelineView === "gantt" ? (
             <GanttView events={visibleTimelineEvents} />
@@ -714,6 +768,7 @@ export function AgendaBoard({
                 setEditingEvent(event);
                 setMessage(null);
               }}
+              onDelete={handleDeleteEvent}
             />
           )}
         </Card>
@@ -725,9 +780,11 @@ export function AgendaBoard({
 function ListView({
   events,
   onEdit,
+  onDelete,
 }: {
   events: AgendaEvent[];
   onEdit: (event: AgendaEvent) => void;
+  onDelete: (event: AgendaEvent) => void;
 }) {
   if (events.length === 0) {
     return (
@@ -745,10 +802,21 @@ function ListView({
           className="grid gap-4 px-5 py-4 md:grid-cols-[1fr_auto] md:items-center"
         >
           <EventSummary event={event} />
-          <Button type="button" variant="secondary" onClick={() => onEdit(event)} className="md:w-32">
-            <Pencil className="h-4 w-4" />
-            Editar
-          </Button>
+          <div className="flex flex-wrap gap-2 md:justify-end">
+            <Button type="button" variant="secondary" onClick={() => onEdit(event)} className="md:w-32">
+              <Pencil className="h-4 w-4" />
+              Editar
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => onDelete(event)}
+              className="border-brand-clay text-brand-clay hover:bg-[#FFF0F2] md:w-32"
+            >
+              <Trash2 className="h-4 w-4" />
+              Excluir
+            </Button>
+          </div>
         </article>
       ))}
     </div>
@@ -787,10 +855,12 @@ function CalendarView({
   events,
   selectedMonth,
   onEdit,
+  onDelete,
 }: {
   events: AgendaEvent[];
   selectedMonth: string;
   onEdit: (event: AgendaEvent) => void;
+  onDelete: (event: AgendaEvent) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
@@ -947,6 +1017,19 @@ function CalendarView({
             <div className="mt-5 flex flex-wrap justify-end gap-3">
               <Button type="button" variant="secondary" onClick={() => setSelectedEvent(null)}>
                 Fechar
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="border-brand-clay text-brand-clay hover:bg-[#FFF0F2]"
+                onClick={() => {
+                  const event = selectedEvent;
+                  setSelectedEvent(null);
+                  onDelete(event);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir
               </Button>
               <Button
                 type="button"
