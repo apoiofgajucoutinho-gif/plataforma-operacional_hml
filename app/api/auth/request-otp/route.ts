@@ -29,7 +29,12 @@ export async function POST(request: Request) {
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      const normalizedMessage = error.message.toLowerCase();
+      const friendlyMessage = normalizedMessage.includes("sending magic link email")
+        ? "Nao foi possivel enviar o codigo. Verifique a configuracao SMTP do Supabase Auth neste ambiente."
+        : error.message;
+
+      return NextResponse.json({ error: friendlyMessage }, { status: 400 });
     }
 
     return NextResponse.json({ ok: true });

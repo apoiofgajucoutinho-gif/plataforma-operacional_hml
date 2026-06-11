@@ -1063,9 +1063,10 @@ function LancarTab({
   }, [editingLancamento]);
 
   const selectedCentro = context.centros.find((item) => item.id === form.centro_resultado_id);
+  const isInfoproduto = selectedCentro?.nome === "Infoproduto";
   const categorias = context.categorias.filter((item) => item.ativo && item.tipo === form.tipo);
   const subcategorias = context.subcategorias.filter((item) => item.ativo && item.categoria_id === form.categoria_id);
-  const needsCurso = selectedCentro?.nome === "Infoproduto" && form.tipo === "entrada";
+  const showsCurso = isInfoproduto && form.tipo === "entrada";
   const recentByType = context.lancamentos
     .filter((row) => row.tipo === form.tipo)
     .slice()
@@ -1156,15 +1157,21 @@ function LancarTab({
         <Select label="Status" value={form.status} onChange={(value) => setForm({ ...form, status: value as FinStatus })} options={[["realizado", "Realizado"], ["previsto", "Previsto"]]} />
         <Field label="Data pagamento" type="date" value={form.data_pagamento} onChange={(value) => setForm({ ...form, data_pagamento: value, mes_competencia: form.mes_competencia || `${value.slice(0, 7)}-01` })} />
         <Field label="Mês competência" type="month" value={form.mes_competencia.slice(0, 7)} onChange={(value) => setForm({ ...form, mes_competencia: `${value}-01` })} />
-        <Select label="Centro" value={form.centro_resultado_id} onChange={(value) => setForm({ ...form, centro_resultado_id: value })} options={context.centros.filter((item) => item.ativo).map((item) => [item.id, item.nome])} />
+        <Select label="Centro" value={form.centro_resultado_id} onChange={(value) => setForm({ ...form, centro_resultado_id: value, subcategoria_id: null })} options={context.centros.filter((item) => item.ativo).map((item) => [item.id, item.nome])} />
         <Select label="Categoria" value={form.categoria_id} onChange={(value) => setForm({ ...form, categoria_id: value, subcategoria_id: null })} options={categorias.map((item) => [item.id, item.nome])} />
-        <Select label="Subcategoria" value={form.subcategoria_id ?? ""} onChange={(value) => setForm({ ...form, subcategoria_id: value || null })} options={[["", "Selecionar"], ...subcategorias.map((item) => [item.id, item.nome] as [string, string])]} />
-        {needsCurso ? (
-          <Select label="Curso" value={form.curso_id ?? ""} onChange={(value) => setForm({ ...form, curso_id: value })} options={context.cursos.filter((item) => item.ativo).map((item) => [item.id, item.nome])} />
+        {!isInfoproduto ? (
+          <Select label="Subcategoria" value={form.subcategoria_id ?? ""} onChange={(value) => setForm({ ...form, subcategoria_id: value || null })} options={[["", "Selecionar"], ...subcategorias.map((item) => [item.id, item.nome] as [string, string])]} />
+        ) : (
+          <div className="rounded-md border border-brand-sand bg-brand-cream/50 px-3 py-2 text-sm font-semibold text-brand-teal/70">
+            Subcategoria nao se aplica para Infoproduto.
+          </div>
+        )}
+        {showsCurso ? (
+          <Select label="Curso (opcional)" value={form.curso_id ?? ""} onChange={(value) => setForm({ ...form, curso_id: value || null })} options={[["", "Curso nao identificado / saque de plataforma"], ...context.cursos.filter((item) => item.ativo).map((item) => [item.id, item.nome] as [string, string])]} />
         ) : (
           <Select label="Forma" value={form.forma_pagamento} onChange={(value) => setForm({ ...form, forma_pagamento: value as FinFormaPagamento })} options={[["conta_bancaria", "Conta"], ["cartao_credito", "Cartão"], ["pix", "PIX"], ["boleto", "Boleto"], ["dinheiro", "Dinheiro"]]} />
         )}
-        {needsCurso ? (
+        {showsCurso ? (
           <Select label="Forma" value={form.forma_pagamento} onChange={(value) => setForm({ ...form, forma_pagamento: value as FinFormaPagamento })} options={[["conta_bancaria", "Conta"], ["cartao_credito", "Cartão"], ["pix", "PIX"], ["boleto", "Boleto"], ["dinheiro", "Dinheiro"]]} />
         ) : null}
         {form.forma_pagamento === "cartao_credito" ? (
