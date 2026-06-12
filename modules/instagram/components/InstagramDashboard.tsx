@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  AlertTriangle,
   BarChart3,
   CalendarDays,
   ExternalLink,
@@ -42,7 +43,7 @@ type InteractionPotentialFilter = "all" | InstagramInteractionPotential;
 type InteractionPriority = "alta" | "media" | "baixa";
 type InteractionPriorityFilter = "all" | InteractionPriority;
 type InteractionTopicFilter = "all" | string;
-type InteractionQuickFilter = "response_queue" | "marketing_focus" | "high_potential";
+type InteractionQuickFilter = "response_queue" | "marketing_focus" | "high_potential" | "risk_alert";
 type RankMetric = "alcance" | "likes" | "salvos" | "compartilhamentos" | "comentarios";
 type SortKey =
   | "data_postagem"
@@ -429,7 +430,23 @@ function isCtaEngagementComment(interaction: InstagramInteraction) {
   return interaction.source === "post_comment" && wordCount > 0 && wordCount <= 3 && !/(valor|preco|agenda|consulta|curso|formacao|inscricao|matricula|comprar|link)/.test(text);
 }
 
+function isRiskInteraction(interaction: InstagramInteraction) {
+  const text = normalizeInteractionText(
+    [
+      interaction.product_topic,
+      interaction.message_text,
+      interaction.next_action,
+    ].filter(Boolean).join(" "),
+  );
+
+  return /(erro|errado|incorreto|falha|falhou|bug|problema|reclamacao|reclamar|ruim|pessimo|incompleto|incompleta|plagio|plagiado|copiado|enganoso|indevido|indevida|valor indevido|preco errado|link errado|link incorreto|nao funciona|nao funcionou|nao recebi|nao abre|quebrado|cancelamento|reembolso|devolucao|chargeback)/.test(text);
+}
+
 function interactionTopic(interaction: InstagramInteraction) {
+  if (isRiskInteraction(interaction)) {
+    return "Risco / Reclamacao";
+  }
+
   if (isCtaEngagementComment(interaction) && (!interaction.product_topic || interaction.product_topic === "Sem tema definido")) {
     return "Engajamento por CTA";
   }
@@ -449,6 +466,10 @@ function interactionTopic(interaction: InstagramInteraction) {
 
 function interactionSuggestedAction(interaction: InstagramInteraction) {
   const topic = interactionTopic(interaction);
+
+  if (topic === "Risco / Reclamacao") {
+    return "Priorizar resposta humana, corrigir link/valor se aplicavel e registrar acao tomada.";
+  }
 
   if (topic === "Engajamento por CTA") {
     return "Responder curto ou curtir; nao priorizar como lead comercial.";
@@ -482,6 +503,7 @@ function interactionPriorityReason(interaction: InstagramInteraction) {
 
   if (interaction.status === "respondido") return "Ja respondido";
   if (interaction.status === "arquivado") return "Arquivado";
+  if (interactionTopic(interaction) === "Risco / Reclamacao") return "Alerta de risco/reclamacao";
   if (interactionTopic(interaction) === "Engajamento por CTA") return "Resposta a CTA do post";
   if (interaction.potential === "alto") return "Intencao comercial";
   if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento)/.test(text)) {
@@ -502,12 +524,17 @@ function interactionPriorityScore(interaction: InstagramInteraction) {
 
   const text = normalizeInteractionText(interaction.message_text);
   let score = 0;
+  const topic = interactionTopic(interaction);
 
-  if (interactionTopic(interaction) === "Engajamento por CTA") {
+  if (topic === "Risco / Reclamacao") {
+    score += 80;
+  }
+
+  if (topic === "Engajamento por CTA") {
     score -= 24;
   }
 
-  if (interactionTopic(interaction) === "Jiu Jitsu" || interactionTopic(interaction) === "Familia") {
+  if (topic === "Jiu Jitsu" || topic === "Familia") {
     score -= 12;
   }
 
@@ -515,7 +542,7 @@ function interactionPriorityScore(interaction: InstagramInteraction) {
   if (interaction.status === "analisado") score += 20;
   if (interaction.potential === "alto") score += 45;
   if (interaction.potential === "medio") score += 25;
-  if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento)/.test(text)) score += 35;
+  if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento|erro|errado|falha|reclamacao|ruim|incomplet|plagio|indevido)/.test(text)) score += 35;
   if (/(curso|formacao|aasi|imersao|zumbido|interesse|quero|como funciona)/.test(text)) score += 18;
   if (interaction.source === "post_comment") score += 12;
   if (interaction.source === "story_reply") score += 8;
@@ -644,6 +671,11 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
 
     if (filter === "high_potential") {
       setInteractionPotentialFilter("alto");
+    }
+
+    if (filter === "risk_alert") {
+      setInteractionTopicFilter("Risco / Reclamacao");
+      setInteractionStatus("novo");
     }
   }
 
@@ -836,6 +868,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
   const directHighPotential = filteredInteractions.filter((interaction) => interaction.potential === "alto").length;
   const directPending = filteredInteractions.filter((interaction) => interaction.status === "novo" || interaction.status === "analisado").length;
   const directHighPriorityOpen = filteredInteractions.filter((interaction) => interactionPriority(interaction) === "alta" && interaction.status !== "respondido" && interaction.status !== "arquivado").length;
+  const directRiskAlerts = filteredInteractions.filter((interaction) => interactionTopic(interaction) === "Risco / Reclamacao" && interaction.status !== "respondido" && interaction.status !== "arquivado").length;
   const directRespondedToday = filteredInteractions.filter((interaction) => {
     const today = new Date().toISOString().slice(0, 10);
     return interaction.status === "respondido" && interactionDateKey(interaction) === today;
@@ -1188,16 +1221,24 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
         </>
       ) : (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-7">
             <Metric icon={<MessageCircle className="h-5 w-5" />} label="Interacoes" value={filteredInteractions.length} helper="no filtro aplicado" />
             <Metric icon={<Sparkles className="h-5 w-5" />} label="Alta prioridade" value={directHighPriorityOpen} helper="sem resposta" />
+            <Metric icon={<AlertTriangle className="h-5 w-5" />} label="Alertas" value={directRiskAlerts} helper="risco/reclamacao" />
             <Metric icon={<Send className="h-5 w-5" />} label="Stories" value={directStoryReplies} helper="respostas recebidas" />
             <Metric icon={<MessageCircle className="h-5 w-5" />} label="Comentarios" value={directComments} helper="comentarios de posts" />
             <Metric icon={<UserPlus className="h-5 w-5" />} label="Seguidores" value={directFollowers} helper="eventos/variacao" />
             <Metric icon={<Radio className="h-5 w-5" />} label="Pendentes" value={directPending} helper={`${directRespondedToday} respondidos hoje`} />
           </section>
 
-          <section className="grid gap-4 lg:grid-cols-3">
+          <section className="grid gap-4 lg:grid-cols-4">
+            <InsightCard
+              label="Alertas de risco"
+              value={`${numberFormat(directRiskAlerts)} pendentes`}
+              description="Reclamacoes, erro, falha, link errado, valor indevido, aula incompleta, produto ruim ou plagio."
+              isActive={interactionQuickFilter === "risk_alert"}
+              onClick={() => toggleDirectQuickFilter("risk_alert")}
+            />
             <InsightCard
               label="Fila de resposta"
               value={`${numberFormat(directHighPriorityOpen)} urgentes`}
