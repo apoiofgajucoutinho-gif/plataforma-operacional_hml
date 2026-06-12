@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { InstagramContext, InstagramPostMetric } from "@/modules/instagram/types";
+import type { InstagramContext, InstagramInteraction, InstagramPostMetric } from "@/modules/instagram/types";
 
 const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "adocao", "atividades", "relatorios", "admin"];
 
@@ -59,6 +59,7 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       tenant: null,
       account: null,
       posts: [],
+      interactions: [],
       importRun: null,
       updatedAt: null,
       diagnostic: `${source}: ${membershipError.message}`,
@@ -71,6 +72,7 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       tenant: null,
       account: null,
       posts: [],
+      interactions: [],
       importRun: null,
       updatedAt: null,
       diagnostic: "Nenhum tenant ativo encontrado para este usuario.",
@@ -86,6 +88,7 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       tenant: null,
       account: null,
       posts: [],
+      interactions: [],
       importRun: null,
       updatedAt: null,
       diagnostic: "Seu perfil nao possui acesso ao modulo Instagram.",
@@ -112,6 +115,7 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
       account: null,
       posts: [],
+      interactions: [],
       importRun: null,
       updatedAt: null,
       diagnostic: accountError.message,
@@ -124,6 +128,7 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
       account: null,
       posts: [],
+      interactions: [],
       importRun: null,
       updatedAt: null,
       diagnostic:
@@ -144,6 +149,7 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
       account,
       posts: [],
+      interactions: [],
       importRun: null,
       updatedAt: null,
       diagnostic: postsError.message,
@@ -198,10 +204,21 @@ export async function getInstagramContext(): Promise<InstagramContext> {
     .limit(1)
     .maybeSingle();
 
+  const { data: interactions } = await dataClient
+    .from("instagram_interactions")
+    .select(
+      "id, source, marketing_type, external_id, profile_username, profile_name, message_text, media_id, post_permalink, interaction_at, status, potential, product_topic, next_action",
+    )
+    .eq("tenant_id", membership.tenant_id)
+    .eq("account_id", account.id)
+    .order("interaction_at", { ascending: false })
+    .limit(500);
+
   return {
     tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
     account,
     posts: combined,
+    interactions: (interactions ?? []) as InstagramInteraction[],
     importRun: importRun ?? null,
     updatedAt,
     diagnostic: null,

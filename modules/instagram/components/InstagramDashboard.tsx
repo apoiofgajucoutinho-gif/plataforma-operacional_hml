@@ -11,10 +11,12 @@ import {
   MessageCircle,
   Radio,
   Save,
+  Send,
   Share2,
   Sparkles,
   Star,
   Trophy,
+  UserPlus,
 } from "lucide-react";
 import { clsx } from "clsx";
 import { Card } from "@/components/ui/Card";
@@ -23,13 +25,24 @@ import type { ExportColumn } from "@/lib/client/table-export";
 import type {
   EngagementClassification,
   InstagramContext,
+  InstagramInteraction,
+  InstagramInteractionPotential,
+  InstagramInteractionSource,
+  InstagramInteractionStatus,
   InstagramPostMetric,
   InstagramPostType,
 } from "@/modules/instagram/types";
 
-type TabKey = "insights" | "results";
+type TabKey = "insights" | "results" | "directs";
 type PeriodFilter = "all" | "today" | "7d" | "15d" | "30d";
 type TypeFilter = "all" | InstagramPostType;
+type InteractionSourceFilter = "all" | InstagramInteractionSource;
+type InteractionStatusFilter = "all" | InstagramInteractionStatus;
+type InteractionPotentialFilter = "all" | InstagramInteractionPotential;
+type InteractionPriority = "alta" | "media" | "baixa";
+type InteractionPriorityFilter = "all" | InteractionPriority;
+type InteractionTopicFilter = "all" | string;
+type InteractionQuickFilter = "response_queue" | "marketing_focus" | "high_potential";
 type RankMetric = "alcance" | "likes" | "salvos" | "compartilhamentos" | "comentarios";
 type SortKey =
   | "data_postagem"
@@ -40,8 +53,20 @@ type SortKey =
   | "salvos"
   | "compartilhamentos"
   | "engajamento_classificacao";
+type InteractionSortKey =
+  | "interaction_at"
+  | "source"
+  | "profile"
+  | "message_text"
+  | "priority"
+  | "priority_reason"
+  | "potential"
+  | "status"
+  | "product_topic"
+  | "next_action";
 
 const RESULTS_PAGE_SIZE = 20;
+const DIRECTS_PAGE_SIZE = 20;
 
 const postTypes: Array<{ value: TypeFilter; label: string }> = [
   { value: "all", label: "Todos os Tipos" },
@@ -57,6 +82,36 @@ const periodFilters: Array<{ value: PeriodFilter; label: string }> = [
   { value: "15d", label: "15 dias" },
   { value: "30d", label: "30 dias" },
   { value: "all", label: "Tudo" },
+];
+
+const interactionSources: Array<{ value: InteractionSourceFilter; label: string }> = [
+  { value: "all", label: "Todas origens" },
+  { value: "story_reply", label: "Stories" },
+  { value: "post_comment", label: "Comentarios" },
+  { value: "new_follower", label: "Seguidores" },
+];
+
+const interactionStatuses: Array<{ value: InteractionStatusFilter; label: string }> = [
+  { value: "all", label: "Todos status" },
+  { value: "novo", label: "Novo" },
+  { value: "analisado", label: "Analisado" },
+  { value: "respondido", label: "Respondido" },
+  { value: "arquivado", label: "Arquivado" },
+];
+
+const interactionPotentials: Array<{ value: InteractionPotentialFilter; label: string }> = [
+  { value: "all", label: "Todos potenciais" },
+  { value: "alto", label: "Potencial alto" },
+  { value: "medio", label: "Potencial medio" },
+  { value: "baixo", label: "Potencial baixo" },
+  { value: "nao_classificado", label: "Nao classificado" },
+];
+
+const interactionPriorities: Array<{ value: InteractionPriorityFilter; label: string }> = [
+  { value: "all", label: "Todas prioridades" },
+  { value: "alta", label: "Alta prioridade" },
+  { value: "media", label: "Media prioridade" },
+  { value: "baixa", label: "Baixa prioridade" },
 ];
 
 const rankMetrics: Array<{ value: RankMetric; label: string; icon: ReactNode }> = [
@@ -103,6 +158,20 @@ function dateFormat(value: string) {
 
 function parseDate(value: string) {
   return new Date(`${value}T00:00:00`);
+}
+
+function parseInteractionDate(value: string) {
+  return new Date(value);
+}
+
+function interactionDateKey(interaction: InstagramInteraction) {
+  return interaction.interaction_at.slice(0, 10);
+}
+
+function interactionMonthKey(interaction: InstagramInteraction) {
+  const date = parseInteractionDate(interaction.interaction_at);
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function monthKey(post: InstagramPostMetric) {
@@ -167,6 +236,30 @@ function applyPeriod(posts: InstagramPostMetric[], period: PeriodFilter) {
     const postDate = parseDate(post.data_postagem);
 
     return postDate >= start && postDate <= end;
+  });
+}
+
+function applyInteractionPeriod(interactions: InstagramInteraction[], period: PeriodFilter) {
+  if (period === "all") {
+    return interactions;
+  }
+
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+
+  if (period === "today") {
+    start.setHours(0, 0, 0, 0);
+  } else {
+    const days = period === "7d" ? 7 : period === "15d" ? 15 : 30;
+    start.setDate(end.getDate() - days + 1);
+    start.setHours(0, 0, 0, 0);
+  }
+
+  return interactions.filter((interaction) => {
+    const interactionDate = parseInteractionDate(interaction.interaction_at);
+
+    return interactionDate >= start && interactionDate <= end;
   });
 }
 
@@ -304,6 +397,160 @@ function truncate(value: string | null | undefined, size = 96) {
   return value.length > size ? `${value.slice(0, size).trim()}...` : value;
 }
 
+function interactionSourceLabel(source: InstagramInteractionSource) {
+  if (source === "story_reply") return "Story";
+  if (source === "post_comment") return "Comentario";
+  return "Novo seguidor";
+}
+
+function interactionPotentialLabel(value: InstagramInteractionPotential) {
+  if (value === "alto") return "Alto";
+  if (value === "medio") return "Medio";
+  if (value === "baixo") return "Baixo";
+  return "Nao classificado";
+}
+
+function interactionStatusLabel(value: InstagramInteractionStatus) {
+  if (value === "novo") return "Novo";
+  if (value === "analisado") return "Analisado";
+  if (value === "respondido") return "Respondido";
+  return "Arquivado";
+}
+
+function isCtaEngagementComment(interaction: InstagramInteraction) {
+  const text = normalizeInteractionText(interaction.message_text);
+  const cleanText = text.replace(/[^a-z0-9\s]/g, "").trim();
+  const wordCount = cleanText ? cleanText.split(/\s+/).length : 0;
+
+  if (/(crianca|criancas|mapa|perfeito|excelente|chapeu|aplauso|potencial evocado|estado estavel)/.test(text)) {
+    return true;
+  }
+
+  return interaction.source === "post_comment" && wordCount > 0 && wordCount <= 3 && !/(valor|preco|agenda|consulta|curso|formacao|inscricao|matricula|comprar|link)/.test(text);
+}
+
+function interactionTopic(interaction: InstagramInteraction) {
+  if (isCtaEngagementComment(interaction) && (!interaction.product_topic || interaction.product_topic === "Sem tema definido")) {
+    return "Engajamento por CTA";
+  }
+
+  const text = normalizeInteractionText(interaction.message_text);
+
+  if ((!interaction.product_topic || interaction.product_topic === "Sem tema definido") && /(jiu jitsu|jiujitsu|luta|tatame|faixa|treino|kimono)/.test(text)) {
+    return "Jiu Jitsu";
+  }
+
+  if ((!interaction.product_topic || interaction.product_topic === "Sem tema definido") && /(familia|filho|filha|mae|pai|crianca|criancas|marido|esposa)/.test(text)) {
+    return "Familia";
+  }
+
+  return interaction.product_topic ?? "Sem tema definido";
+}
+
+function interactionSuggestedAction(interaction: InstagramInteraction) {
+  const topic = interactionTopic(interaction);
+
+  if (topic === "Engajamento por CTA") {
+    return "Responder curto ou curtir; nao priorizar como lead comercial.";
+  }
+
+  if (topic === "Jiu Jitsu" || topic === "Familia") {
+    return "Responder em tom de relacionamento e fortalecer conexao com a comunidade.";
+  }
+
+  return interaction.next_action ?? "Analisar contexto antes de responder.";
+}
+
+function normalizeInteractionText(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function daysSinceInteraction(interaction: InstagramInteraction) {
+  const now = new Date();
+  const date = parseInteractionDate(interaction.interaction_at);
+  const diff = now.getTime() - date.getTime();
+
+  return Math.max(Math.floor(diff / 86_400_000), 0);
+}
+
+function interactionPriorityReason(interaction: InstagramInteraction) {
+  const text = normalizeInteractionText(interaction.message_text);
+  const age = daysSinceInteraction(interaction);
+
+  if (interaction.status === "respondido") return "Ja respondido";
+  if (interaction.status === "arquivado") return "Arquivado";
+  if (interactionTopic(interaction) === "Engajamento por CTA") return "Resposta a CTA do post";
+  if (interaction.potential === "alto") return "Intencao comercial";
+  if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento)/.test(text)) {
+    return "Palavra-chave comercial";
+  }
+  if (age >= 2) return `Sem resposta ha ${age} dias`;
+  if (interaction.source === "post_comment") return "Comentario publico";
+  if (interaction.potential === "medio") return "Interesse aberto";
+  if (/(curso|formacao|aasi|imersao|zumbido|interesse|quero|como funciona)/.test(text)) {
+    return "Possivel interesse";
+  }
+
+  return "Baixa urgencia";
+}
+
+function interactionPriorityScore(interaction: InstagramInteraction) {
+  if (interaction.status === "respondido" || interaction.status === "arquivado") return 0;
+
+  const text = normalizeInteractionText(interaction.message_text);
+  let score = 0;
+
+  if (interactionTopic(interaction) === "Engajamento por CTA") {
+    score -= 24;
+  }
+
+  if (interactionTopic(interaction) === "Jiu Jitsu" || interactionTopic(interaction) === "Familia") {
+    score -= 12;
+  }
+
+  if (interaction.status === "novo") score += 30;
+  if (interaction.status === "analisado") score += 20;
+  if (interaction.potential === "alto") score += 45;
+  if (interaction.potential === "medio") score += 25;
+  if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento)/.test(text)) score += 35;
+  if (/(curso|formacao|aasi|imersao|zumbido|interesse|quero|como funciona)/.test(text)) score += 18;
+  if (interaction.source === "post_comment") score += 12;
+  if (interaction.source === "story_reply") score += 8;
+  score += Math.min(daysSinceInteraction(interaction) * 8, 32);
+
+  return score;
+}
+
+function interactionPriority(interaction: InstagramInteraction): InteractionPriority {
+  const score = interactionPriorityScore(interaction);
+
+  if (score >= 65) return "alta";
+  if (score >= 30) return "media";
+  return "baixa";
+}
+
+function interactionPriorityLabel(value: InteractionPriority) {
+  if (value === "alta") return "Alta";
+  if (value === "media") return "Media";
+  return "Baixa";
+}
+
+function interactionSortValue(interaction: InstagramInteraction, key: InteractionSortKey) {
+  if (key === "source") return interactionSourceLabel(interaction.source);
+  if (key === "profile") return interaction.profile_username ?? interaction.profile_name ?? "";
+  if (key === "message_text") return interaction.message_text ?? "";
+  if (key === "priority_reason") return interactionPriorityReason(interaction);
+  if (key === "potential") return interactionPotentialLabel(interaction.potential);
+  if (key === "status") return interactionStatusLabel(interaction.status);
+  if (key === "product_topic") return interactionTopic(interaction);
+  if (key === "next_action") return interactionSuggestedAction(interaction);
+
+  return "";
+}
+
 export function InstagramDashboard({ context }: { context: InstagramContext }) {
   const [activeTab, setActiveTab] = useState<TabKey>("insights");
   const [period, setPeriod] = useState<PeriodFilter>("all");
@@ -315,6 +562,15 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
   const [sortKey, setSortKey] = useState<SortKey>("data_postagem");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [resultsPage, setResultsPage] = useState(1);
+  const [directsPage, setDirectsPage] = useState(1);
+  const [interactionSource, setInteractionSource] = useState<InteractionSourceFilter>("all");
+  const [interactionStatus, setInteractionStatus] = useState<InteractionStatusFilter>("all");
+  const [interactionPotentialFilter, setInteractionPotentialFilter] = useState<InteractionPotentialFilter>("all");
+  const [interactionPriorityFilter, setInteractionPriorityFilter] = useState<InteractionPriorityFilter>("all");
+  const [interactionTopicFilter, setInteractionTopicFilter] = useState<InteractionTopicFilter>("all");
+  const [interactionSortKey, setInteractionSortKey] = useState<InteractionSortKey>("priority");
+  const [interactionSortDirection, setInteractionSortDirection] = useState<"asc" | "desc">("desc");
+  const [interactionQuickFilter, setInteractionQuickFilter] = useState<InteractionQuickFilter | null>(null);
 
   useEffect(() => {
     void fetch("/api/adoption/track", {
@@ -323,7 +579,12 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
       body: JSON.stringify({
         module: "instagram",
         pagePath: "/instagram",
-        pageLabel: activeTab === "insights" ? "Instagram: Insights" : "Instagram: Resultados",
+        pageLabel:
+          activeTab === "insights"
+            ? "Instagram: Insights"
+            : activeTab === "results"
+              ? "Instagram: Resultados"
+              : "Instagram: Directs",
       }),
       keepalive: true,
     });
@@ -331,19 +592,95 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
 
   useEffect(() => {
     setResultsPage(1);
-  }, [period, type, year, month, week, sortKey, sortDirection]);
+    setDirectsPage(1);
+  }, [
+    period,
+    type,
+    year,
+    month,
+    week,
+    sortKey,
+    sortDirection,
+    interactionSource,
+    interactionStatus,
+    interactionPotentialFilter,
+    interactionPriorityFilter,
+    interactionTopicFilter,
+    interactionSortKey,
+    interactionSortDirection,
+  ]);
 
-  const years = useMemo(
-    () => [...new Set(context.posts.map((post) => parseDate(post.data_postagem).getFullYear().toString()))].sort().reverse(),
-    [context.posts],
-  );
+  function clearDirectQuickFilters() {
+    setInteractionQuickFilter(null);
+    setInteractionSource("all");
+    setInteractionStatus("all");
+    setInteractionPotentialFilter("all");
+    setInteractionPriorityFilter("all");
+    setInteractionTopicFilter("all");
+  }
+
+  function toggleDirectQuickFilter(filter: InteractionQuickFilter) {
+    if (interactionQuickFilter === filter) {
+      clearDirectQuickFilters();
+      return;
+    }
+
+    setInteractionQuickFilter(filter);
+    setInteractionSource("all");
+    setInteractionStatus("all");
+    setInteractionPotentialFilter("all");
+    setInteractionPriorityFilter("all");
+    setInteractionTopicFilter("all");
+
+    if (filter === "response_queue") {
+      setInteractionPriorityFilter("alta");
+      setInteractionStatus("novo");
+    }
+
+    if (filter === "marketing_focus") {
+      setInteractionSource("post_comment");
+      setInteractionStatus("novo");
+    }
+
+    if (filter === "high_potential") {
+      setInteractionPotentialFilter("alto");
+    }
+  }
+
+  const years = useMemo(() => {
+    const postYears = context.posts.map((post) => parseDate(post.data_postagem).getFullYear().toString());
+    const interactionYears = context.interactions.map((interaction) => parseInteractionDate(interaction.interaction_at).getFullYear().toString());
+
+    return [...new Set([...postYears, ...interactionYears])].sort().reverse();
+  }, [context.interactions, context.posts]);
   const months = useMemo(() => {
+    if (activeTab === "directs") {
+      const source = year === "all"
+        ? context.interactions
+        : context.interactions.filter((interaction) => parseInteractionDate(interaction.interaction_at).getFullYear().toString() === year);
+
+      return [...new Set(source.map(interactionMonthKey))].sort().reverse();
+    }
+
     const source = year === "all"
       ? context.posts
       : context.posts.filter((post) => parseDate(post.data_postagem).getFullYear().toString() === year);
 
     return [...new Set(source.map(monthKey))].sort().reverse();
-  }, [context.posts, year]);
+  }, [activeTab, context.interactions, context.posts, year]);
+  const interactionTopics = useMemo(() => {
+    let interactions = context.interactions;
+
+    if (year !== "all") {
+      interactions = interactions.filter((interaction) => parseInteractionDate(interaction.interaction_at).getFullYear().toString() === year);
+    }
+
+    if (month !== "all") {
+      interactions = interactions.filter((interaction) => interactionMonthKey(interaction) === month);
+    }
+
+    return [...new Set(interactions.map(interactionTopic))].filter(Boolean).sort((left, right) => left.localeCompare(right));
+  }, [context.interactions, month, year]);
   const availableWeeks = useMemo(() => {
     if (month === "all") return [];
     return [...new Set(context.posts.filter((post) => monthKey(post) === month).map(weekOfMonth))].sort((a, b) => a - b);
@@ -387,6 +724,70 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
     });
   }, [filteredPosts, sortDirection, sortKey]);
 
+  const filteredInteractions = useMemo(() => {
+    let interactions = applyInteractionPeriod(context.interactions, period);
+
+    if (year !== "all") {
+      interactions = interactions.filter((interaction) => parseInteractionDate(interaction.interaction_at).getFullYear().toString() === year);
+    }
+
+    if (month !== "all") {
+      interactions = interactions.filter((interaction) => interactionMonthKey(interaction) === month);
+    }
+
+    if (interactionSource !== "all") {
+      interactions = interactions.filter((interaction) => interaction.source === interactionSource);
+    }
+
+    if (interactionStatus !== "all") {
+      interactions = interactions.filter((interaction) => interaction.status === interactionStatus);
+    }
+
+    if (interactionPotentialFilter !== "all") {
+      interactions = interactions.filter((interaction) => interaction.potential === interactionPotentialFilter);
+    }
+
+    if (interactionPriorityFilter !== "all") {
+      interactions = interactions.filter((interaction) => interactionPriority(interaction) === interactionPriorityFilter);
+    }
+
+    if (interactionTopicFilter !== "all") {
+      interactions = interactions.filter((interaction) => interactionTopic(interaction) === interactionTopicFilter);
+    }
+
+    return [...interactions].sort((left, right) => {
+      let result = 0;
+
+      if (interactionSortKey === "interaction_at") {
+        result = parseInteractionDate(left.interaction_at).getTime() - parseInteractionDate(right.interaction_at).getTime();
+      } else if (interactionSortKey === "priority") {
+        result = interactionPriorityScore(left) - interactionPriorityScore(right);
+      } else {
+        const leftValue = interactionSortValue(left, interactionSortKey);
+        const rightValue = interactionSortValue(right, interactionSortKey);
+        result = leftValue.localeCompare(rightValue);
+      }
+
+      if (result === 0) {
+        result = parseInteractionDate(left.interaction_at).getTime() - parseInteractionDate(right.interaction_at).getTime();
+      }
+
+      return interactionSortDirection === "asc" ? result : -result;
+    });
+  }, [
+    context.interactions,
+    interactionPotentialFilter,
+    interactionPriorityFilter,
+    interactionSortDirection,
+    interactionSortKey,
+    interactionSource,
+    interactionStatus,
+    interactionTopicFilter,
+    month,
+    period,
+    year,
+  ]);
+
   const totalPosts = filteredPosts.length;
   const totalReach = filteredPosts.reduce((sum, post) => sum + (post.alcance ?? 0), 0);
   const totalLikes = filteredPosts.reduce((sum, post) => sum + post.likes, 0);
@@ -429,6 +830,22 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
     currentResultsPage * RESULTS_PAGE_SIZE,
   );
   const groupedRows = month !== "all" ? groupedByMonthWeek(paginatedPosts) : [];
+  const directStoryReplies = filteredInteractions.filter((interaction) => interaction.source === "story_reply").length;
+  const directComments = filteredInteractions.filter((interaction) => interaction.source === "post_comment").length;
+  const directFollowers = filteredInteractions.filter((interaction) => interaction.source === "new_follower").length;
+  const directHighPotential = filteredInteractions.filter((interaction) => interaction.potential === "alto").length;
+  const directPending = filteredInteractions.filter((interaction) => interaction.status === "novo" || interaction.status === "analisado").length;
+  const directHighPriorityOpen = filteredInteractions.filter((interaction) => interactionPriority(interaction) === "alta" && interaction.status !== "respondido" && interaction.status !== "arquivado").length;
+  const directRespondedToday = filteredInteractions.filter((interaction) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return interaction.status === "respondido" && interactionDateKey(interaction) === today;
+  }).length;
+  const directsPageCount = Math.max(Math.ceil(filteredInteractions.length / DIRECTS_PAGE_SIZE), 1);
+  const currentDirectsPage = Math.min(directsPage, directsPageCount);
+  const paginatedInteractions = filteredInteractions.slice(
+    (currentDirectsPage - 1) * DIRECTS_PAGE_SIZE,
+    currentDirectsPage * DIRECTS_PAGE_SIZE,
+  );
 
   function resetPeriodFilters(nextPeriod: PeriodFilter) {
     setPeriod(nextPeriod);
@@ -472,6 +889,19 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
     { header: "Engajamento", value: (post) => post.engajamento_classificacao },
     { header: "Link", value: (post) => post.permalink ?? "" },
   ];
+  const directColumns: ExportColumn<InstagramInteraction>[] = [
+    { header: "Data", value: (interaction) => dateTimeFormat(interaction.interaction_at) ?? "" },
+    { header: "Origem", value: (interaction) => interactionSourceLabel(interaction.source) },
+    { header: "Perfil", value: (interaction) => interaction.profile_username ?? interaction.profile_name ?? "" },
+    { header: "Mensagem", value: (interaction) => interaction.message_text ?? "" },
+    { header: "Prioridade", value: (interaction) => interactionPriorityLabel(interactionPriority(interaction)) },
+    { header: "Motivo", value: (interaction) => interactionPriorityReason(interaction) },
+    { header: "Potencial", value: (interaction) => interactionPotentialLabel(interaction.potential) },
+    { header: "Status", value: (interaction) => interactionStatusLabel(interaction.status) },
+    { header: "Tema", value: (interaction) => interactionTopic(interaction) },
+    { header: "Acao sugerida", value: (interaction) => interactionSuggestedAction(interaction) },
+    { header: "Link", value: (interaction) => interaction.post_permalink ?? "" },
+  ];
 
   return (
     <div className="mx-auto max-w-[1760px] space-y-5 text-[15px]">
@@ -506,6 +936,9 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
         <TabButton isActive={activeTab === "results"} onClick={() => setActiveTab("results")}>
           Resultados
         </TabButton>
+        <TabButton isActive={activeTab === "directs"} onClick={() => setActiveTab("directs")}>
+          Directs
+        </TabButton>
       </div>
 
       <Card className="border-[#E9CBD1] bg-white/90 p-4 shadow-sm">
@@ -533,13 +966,84 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
               </option>
             ))}
           </Select>
-          <Select value={type} onChange={(value) => setType(value as TypeFilter)}>
-            {postTypes.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </Select>
+          {activeTab === "directs" ? (
+            <>
+              <Select
+                value={interactionSource}
+                onChange={(value) => {
+                  setInteractionQuickFilter(null);
+                  setInteractionSource(value as InteractionSourceFilter);
+                }}
+              >
+                {interactionSources.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={interactionStatus}
+                onChange={(value) => {
+                  setInteractionQuickFilter(null);
+                  setInteractionStatus(value as InteractionStatusFilter);
+                }}
+              >
+                {interactionStatuses.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={interactionPotentialFilter}
+                onChange={(value) => {
+                  setInteractionQuickFilter(null);
+                  setInteractionPotentialFilter(value as InteractionPotentialFilter);
+                }}
+              >
+                {interactionPotentials.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={interactionPriorityFilter}
+                onChange={(value) => {
+                  setInteractionQuickFilter(null);
+                  setInteractionPriorityFilter(value as InteractionPriorityFilter);
+                }}
+              >
+                {interactionPriorities.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={interactionTopicFilter}
+                onChange={(value) => {
+                  setInteractionQuickFilter(null);
+                  setInteractionTopicFilter(value);
+                }}
+              >
+                <option value="all">Todos os temas</option>
+                {interactionTopics.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </Select>
+            </>
+          ) : (
+            <Select value={type} onChange={(value) => setType(value as TypeFilter)}>
+              {postTypes.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </Select>
+          )}
         </div>
       </Card>
 
@@ -629,7 +1133,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
             />
           </section>
         </>
-      ) : (
+      ) : activeTab === "results" ? (
         <>
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <Metric icon={<BarChart3 className="h-5 w-5" />} label="Posts" value={totalPosts} helper="publicacoes" />
@@ -679,6 +1183,81 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
               total={sortedPosts.length}
               pageSize={RESULTS_PAGE_SIZE}
               onPageChange={setResultsPage}
+            />
+          </Card>
+        </>
+      ) : (
+        <>
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+            <Metric icon={<MessageCircle className="h-5 w-5" />} label="Interacoes" value={filteredInteractions.length} helper="no filtro aplicado" />
+            <Metric icon={<Sparkles className="h-5 w-5" />} label="Alta prioridade" value={directHighPriorityOpen} helper="sem resposta" />
+            <Metric icon={<Send className="h-5 w-5" />} label="Stories" value={directStoryReplies} helper="respostas recebidas" />
+            <Metric icon={<MessageCircle className="h-5 w-5" />} label="Comentarios" value={directComments} helper="comentarios de posts" />
+            <Metric icon={<UserPlus className="h-5 w-5" />} label="Seguidores" value={directFollowers} helper="eventos/variacao" />
+            <Metric icon={<Radio className="h-5 w-5" />} label="Pendentes" value={directPending} helper={`${directRespondedToday} respondidos hoje`} />
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-3">
+            <InsightCard
+              label="Fila de resposta"
+              value={`${numberFormat(directHighPriorityOpen)} urgentes`}
+              description="Interacoes que merecem resposta primeiro, considerando intencao comercial, tempo sem retorno e comentarios publicos."
+              isActive={interactionQuickFilter === "response_queue"}
+              onClick={() => toggleDirectQuickFilter("response_queue")}
+            />
+            <InsightCard
+              label="Foco de marketing"
+              value="Comentarios + leads"
+              description="Use esta fila para encontrar duvidas, oportunidades de conversa e possiveis leads gerados pelos conteudos."
+              isActive={interactionQuickFilter === "marketing_focus"}
+              onClick={() => toggleDirectQuickFilter("marketing_focus")}
+            />
+            <InsightCard
+              label="Potencial alto"
+              value={numberFormat(directHighPotential)}
+              description="Sinais claros de interesse, como preco, inscricao, curso, consulta, agenda ou pedido de informacao."
+              isActive={interactionQuickFilter === "high_potential"}
+              onClick={() => toggleDirectQuickFilter("high_potential")}
+            />
+          </section>
+
+          <Card className="border-[#E9CBD1] bg-white/85 p-4 text-sm text-brand-teal/70 shadow-sm">
+            A prioridade e calculada automaticamente por tema, potencial, status e tempo sem resposta. Comentarios curtos de CTA, como "crianca" ou "mapa", entram como engajamento e nao como lead urgente.
+          </Card>
+
+          <Card className="overflow-hidden border-[#E9CBD1] bg-white/95 shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-[#EFDDE1] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-base font-bold text-brand-teal">Fila de resposta</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-brand-clay">{numberFormat(filteredInteractions.length)} interacoes</span>
+                <ExportButtons
+                  label="Exportar directs"
+                  filename="instagram-directs"
+                  columns={directColumns}
+                  rows={filteredInteractions}
+                />
+              </div>
+            </div>
+            <InteractionsTable
+              interactions={paginatedInteractions}
+              sortDirection={interactionSortDirection}
+              sortKey={interactionSortKey}
+              onSort={(key) => {
+                if (interactionSortKey === key) {
+                  setInteractionSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+                  return;
+                }
+
+                setInteractionSortKey(key);
+                setInteractionSortDirection(key === "priority" || key === "interaction_at" ? "desc" : "asc");
+              }}
+            />
+            <Pagination
+              page={currentDirectsPage}
+              pageCount={directsPageCount}
+              total={filteredInteractions.length}
+              pageSize={DIRECTS_PAGE_SIZE}
+              onPageChange={setDirectsPage}
             />
           </Card>
         </>
@@ -807,14 +1386,42 @@ function Metric({ icon, label, value, helper }: { icon: ReactNode; label: string
   );
 }
 
-function InsightCard({ label, value, description }: { label: string; value: string; description: string }) {
-  return (
-    <Card className="min-h-[118px] border-[#E9CBD1] bg-[#FFF7F8] p-5 shadow-sm">
+function InsightCard({
+  label,
+  value,
+  description,
+  isActive = false,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  description: string;
+  isActive?: boolean;
+  onClick?: () => void;
+}) {
+  const className = clsx(
+    "min-h-[118px] rounded-lg border border-[#E9CBD1] bg-[#FFF7F8] p-5 shadow-sm transition",
+    isActive && "border-brand-clay bg-white ring-2 ring-brand-clay/20",
+    onClick && "cursor-pointer text-left hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-clay/25",
+  );
+
+  const content = (
+    <>
       <p className="text-xs font-black uppercase tracking-wide text-brand-clay/70">{label}</p>
       <p className="mt-3 text-2xl font-black text-brand-clay">{value}</p>
       <p className="mt-2 max-h-12 overflow-hidden text-sm leading-6 text-brand-teal/70">{description}</p>
-    </Card>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {content}
+      </button>
+    );
+  }
+
+  return <Card className={className}>{content}</Card>;
 }
 
 function RankingTable({ ranking, metric, totalReach }: { ranking: InstagramPostMetric[]; metric: RankMetric; totalReach: number }) {
@@ -1065,6 +1672,66 @@ function SimpleTable({ headers, rows }: { headers: string[]; rows: string[][] })
   );
 }
 
+function InteractionsTable({
+  interactions,
+  sortDirection,
+  sortKey,
+  onSort,
+}: {
+  interactions: InstagramInteraction[];
+  sortDirection: "asc" | "desc";
+  sortKey: InteractionSortKey;
+  onSort: (key: InteractionSortKey) => void;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1120px] text-left text-sm">
+        <thead className="bg-[#F4DCE0] text-xs uppercase tracking-wide text-brand-clay">
+          <tr>
+            <InteractionSortableHeader label="Data" target="interaction_at" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Origem" target="source" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Perfil" target="profile" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Mensagem" target="message_text" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Prioridade" target="priority" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Motivo" target="priority_reason" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Potencial" target="potential" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Status" target="status" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Tema" target="product_topic" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <InteractionSortableHeader label="Acao sugerida" target="next_action" sortKey={sortKey} direction={sortDirection} onSort={onSort} />
+            <th className="px-4 py-3">Link</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#F0DDE1]">
+          {interactions.map((interaction) => (
+            <tr key={interaction.id} className="hover:bg-[#FFF7F8]">
+              <td className="whitespace-nowrap px-4 py-3 font-medium text-brand-teal">{dateTimeFormat(interaction.interaction_at)}</td>
+              <td className="px-4 py-3"><InteractionSourceBadge value={interaction.source} /></td>
+              <td className="max-w-[180px] truncate px-4 py-3 font-bold text-brand-teal">{interaction.profile_username ?? interaction.profile_name ?? "-"}</td>
+              <td className="max-w-[360px] truncate px-4 py-3 text-brand-teal">{interaction.message_text ?? "-"}</td>
+              <td className="px-4 py-3"><InteractionPriorityBadge value={interactionPriority(interaction)} /></td>
+              <td className="max-w-[220px] truncate px-4 py-3 text-brand-teal/70">{interactionPriorityReason(interaction)}</td>
+              <td className="px-4 py-3"><InteractionPotentialBadge value={interaction.potential} /></td>
+              <td className="px-4 py-3"><InteractionStatusBadge value={interaction.status} /></td>
+              <td className="max-w-[180px] truncate px-4 py-3 text-brand-teal/70">{interactionTopic(interaction)}</td>
+              <td className="max-w-[260px] truncate px-4 py-3 text-brand-teal/70">{interactionSuggestedAction(interaction)}</td>
+              <td className="px-4 py-3">
+                {interaction.post_permalink ? (
+                  <a href={interaction.post_permalink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-brand-clay">
+                    <ExternalLink className="h-4 w-4" /> Ver
+                  </a>
+                ) : "-"}
+              </td>
+            </tr>
+          ))}
+          {interactions.length === 0 ? (
+            <tr><td colSpan={11}><EmptyState /></td></tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ResultsTable({
   posts,
   groupedRows,
@@ -1179,6 +1846,28 @@ function SortableHeader({
   );
 }
 
+function InteractionSortableHeader({
+  label,
+  target,
+  sortKey,
+  direction,
+  onSort,
+}: {
+  label: string;
+  target: InteractionSortKey;
+  sortKey: InteractionSortKey;
+  direction: "asc" | "desc";
+  onSort: (key: InteractionSortKey) => void;
+}) {
+  const active = sortKey === target;
+
+  return (
+    <th className="cursor-pointer px-4 py-3" onClick={() => onSort(target)}>
+      {label} <span className="text-brand-clay/40">{active ? (direction === "asc" ? "up" : "down") : "sort"}</span>
+    </th>
+  );
+}
+
 function TypeBadge({ value }: { value: InstagramPostType }) {
   const className =
     value === "Reels"
@@ -1203,6 +1892,70 @@ function EngagementBadge({ value }: { value: EngagementClassification }) {
           : "bg-[#F2EBEC] text-brand-teal/70";
 
   return <span className={`rounded-full px-3 py-1 text-xs font-black ${className}`}>{value}</span>;
+}
+
+function InteractionSourceBadge({ value }: { value: InstagramInteractionSource }) {
+  const className =
+    value === "story_reply"
+      ? "bg-[#E9F4FF] text-[#2670B8]"
+      : value === "post_comment"
+        ? "bg-[#F4E8FC] text-[#8A3AB8]"
+        : "bg-[#E9F9F0] text-[#238C55]";
+
+  return (
+    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${className}`}>
+      {interactionSourceLabel(value)}
+    </span>
+  );
+}
+
+function InteractionPotentialBadge({ value }: { value: InstagramInteractionPotential }) {
+  const className =
+    value === "alto"
+      ? "bg-[#FEECEC] text-[#A03030]"
+      : value === "medio"
+        ? "bg-[#FEF3E2] text-[#B07000]"
+        : value === "baixo"
+          ? "bg-[#EDFAF3] text-[#2D8A58]"
+          : "bg-[#F2EBEC] text-brand-teal/70";
+
+  return (
+    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${className}`}>
+      {interactionPotentialLabel(value)}
+    </span>
+  );
+}
+
+function InteractionPriorityBadge({ value }: { value: InteractionPriority }) {
+  const className =
+    value === "alta"
+      ? "bg-[#FEECEC] text-[#A03030]"
+      : value === "media"
+        ? "bg-[#FEF3E2] text-[#B07000]"
+        : "bg-[#EDFAF3] text-[#2D8A58]";
+
+  return (
+    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${className}`}>
+      {interactionPriorityLabel(value)}
+    </span>
+  );
+}
+
+function InteractionStatusBadge({ value }: { value: InstagramInteractionStatus }) {
+  const className =
+    value === "novo"
+      ? "bg-[#E9F4FF] text-[#2670B8]"
+      : value === "analisado"
+        ? "bg-[#FEF3E2] text-[#B07000]"
+        : value === "respondido"
+          ? "bg-[#EDFAF3] text-[#2D8A58]"
+          : "bg-[#F2EBEC] text-brand-teal/70";
+
+  return (
+    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-black ${className}`}>
+      {interactionStatusLabel(value)}
+    </span>
+  );
 }
 
 function EmptyState() {
