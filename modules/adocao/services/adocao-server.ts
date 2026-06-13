@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "adocao", "atividades", "relatorios", "admin"];
+const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 
 export async function getAdocaoContext() {
   const userClient = await createClient();

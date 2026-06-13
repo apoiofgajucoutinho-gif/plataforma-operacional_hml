@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
+  AlertTriangle,
   BarChart3,
   CalendarDays,
   CircleDollarSign,
@@ -33,6 +34,7 @@ const navigation = [
   { label: "Ads", href: "/ads", icon: Target, key: "ads" },
   { label: "Objetivos", href: "/objetivos", icon: Sparkles, key: "objetivos" },
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro" },
+  { label: "Ocorrencias", href: "/ocorrencias", icon: AlertTriangle, key: "ocorrencias" },
   { label: "Adocao", href: "/adocao", icon: LineChart, key: "adocao" },
   { label: "Atividades", href: "#", icon: Activity, key: "atividades" },
   { label: "Relatorios", href: "#", icon: LayoutDashboard, key: "relatorios" },

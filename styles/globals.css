@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-brand-sand bg-white px-4 py-3 text-sm font-bold text-brand-teal outline-none transition focus:border-brand-clay focus:ring-2 focus:ring-brand-clay/20;
+  }
+}
+
 :root {
   color-scheme: light;
   --background: #f4f1ea;

@@ -12,7 +12,7 @@ import {
 import type { GoogleCalendarEvent } from "@/services/google/calendar";
 import type { AgendaEvent, AgendaEventInput, AgendaEventType } from "@/modules/agenda/types";
 
-const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "adocao", "atividades", "relatorios", "admin"];
+const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 
 type GoogleCalendarConnection = {
   account_email: string;

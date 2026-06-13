@@ -1,6 +1,6 @@
 export type InstagramPostType = "Reels" | "Carrossel" | "Estatico" | "Outro";
 export type EngagementClassification = "Bom" | "Medio" | "Ruim" | "N/A";
-export type InstagramInteractionSource = "story_reply" | "post_comment" | "new_follower";
+export type InstagramInteractionSource = "story_reply" | "post_comment" | "new_follower" | "direct_message";
 export type InstagramInteractionStatus = "novo" | "analisado" | "respondido" | "arquivado";
 export type InstagramInteractionPotential = "alto" | "medio" | "baixo" | "nao_classificado";
 

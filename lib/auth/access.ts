@@ -2,7 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { allModules, readyModules } from "@/lib/auth/modules";
 import { createClient } from "@/lib/supabase/server";
 
-const landingPriority = ["instagram", "ads", "objetivos", "agenda", "financeiro", "adocao", "atividades", "relatorios", "admin"];
+const landingPriority = ["instagram", "ads", "objetivos", "agenda", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 
 const modulePaths: Record<string, string> = {
   agenda: "/agenda",
@@ -10,6 +10,7 @@ const modulePaths: Record<string, string> = {
   ads: "/ads",
   objetivos: "/objetivos",
   financeiro: "/financeiro",
+  ocorrencias: "/ocorrencias",
   adocao: "/adocao",
   admin: "/admin",
 };

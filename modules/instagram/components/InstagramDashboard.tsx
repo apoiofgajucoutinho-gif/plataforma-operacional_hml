@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Heart,
   LayoutGrid,
+  Mail,
   MessageCircle,
   Radio,
   Save,
@@ -87,6 +88,7 @@ const periodFilters: Array<{ value: PeriodFilter; label: string }> = [
 
 const interactionSources: Array<{ value: InteractionSourceFilter; label: string }> = [
   { value: "all", label: "Todas origens" },
+  { value: "direct_message", label: "Directs" },
   { value: "story_reply", label: "Stories" },
   { value: "post_comment", label: "Comentarios" },
   { value: "new_follower", label: "Seguidores" },
@@ -399,6 +401,7 @@ function truncate(value: string | null | undefined, size = 96) {
 }
 
 function interactionSourceLabel(source: InstagramInteractionSource) {
+  if (source === "direct_message") return "Direct";
   if (source === "story_reply") return "Story";
   if (source === "post_comment") return "Comentario";
   return "Novo seguidor";
@@ -544,6 +547,7 @@ function interactionPriorityScore(interaction: InstagramInteraction) {
   if (interaction.potential === "medio") score += 25;
   if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento|erro|errado|falha|reclamacao|ruim|incomplet|plagio|indevido)/.test(text)) score += 35;
   if (/(curso|formacao|aasi|imersao|zumbido|interesse|quero|como funciona)/.test(text)) score += 18;
+  if (interaction.source === "direct_message") score += 18;
   if (interaction.source === "post_comment") score += 12;
   if (interaction.source === "story_reply") score += 8;
   score += Math.min(daysSinceInteraction(interaction) * 8, 32);
@@ -862,6 +866,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
     currentResultsPage * RESULTS_PAGE_SIZE,
   );
   const groupedRows = month !== "all" ? groupedByMonthWeek(paginatedPosts) : [];
+  const directMessages = filteredInteractions.filter((interaction) => interaction.source === "direct_message").length;
   const directStoryReplies = filteredInteractions.filter((interaction) => interaction.source === "story_reply").length;
   const directComments = filteredInteractions.filter((interaction) => interaction.source === "post_comment").length;
   const directFollowers = filteredInteractions.filter((interaction) => interaction.source === "new_follower").length;
@@ -1225,6 +1230,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
             <Metric icon={<MessageCircle className="h-5 w-5" />} label="Interacoes" value={filteredInteractions.length} helper="no filtro aplicado" />
             <Metric icon={<Sparkles className="h-5 w-5" />} label="Alta prioridade" value={directHighPriorityOpen} helper="sem resposta" />
             <Metric icon={<AlertTriangle className="h-5 w-5" />} label="Alertas" value={directRiskAlerts} helper="risco/reclamacao" />
+            <Metric icon={<Mail className="h-5 w-5" />} label="Directs" value={directMessages} helper="mensagens privadas" />
             <Metric icon={<Send className="h-5 w-5" />} label="Stories" value={directStoryReplies} helper="respostas recebidas" />
             <Metric icon={<MessageCircle className="h-5 w-5" />} label="Comentarios" value={directComments} helper="comentarios de posts" />
             <Metric icon={<UserPlus className="h-5 w-5" />} label="Seguidores" value={directFollowers} helper="eventos/variacao" />
@@ -1937,7 +1943,9 @@ function EngagementBadge({ value }: { value: EngagementClassification }) {
 
 function InteractionSourceBadge({ value }: { value: InstagramInteractionSource }) {
   const className =
-    value === "story_reply"
+    value === "direct_message"
+      ? "bg-[#FCEFE6] text-brand-clay"
+      : value === "story_reply"
       ? "bg-[#E9F4FF] text-[#2670B8]"
       : value === "post_comment"
         ? "bg-[#F4E8FC] text-[#8A3AB8]"
