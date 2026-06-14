@@ -59,6 +59,31 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function localTodayIso() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function minutesFromTime(value: string | null | undefined) {
+  if (!value) return null;
+  const match = value.match(/^(\d{2}):(\d{2})/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function isInsideLookbackWindow(scheduleTime: string | null | undefined, currentTime: string, windowMinutes: number) {
+  const scheduleMinutes = minutesFromTime(scheduleTime);
+  const currentMinutes = minutesFromTime(currentTime);
+  if (scheduleMinutes === null || currentMinutes === null) return false;
+
+  const diff = currentMinutes - scheduleMinutes;
+  return diff >= 0 && diff < windowMinutes;
+}
+
 function addDays(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -294,23 +319,25 @@ export async function getRelatorioDispatchByScheduleId(scheduleId: string) {
   };
 }
 
-export async function getRelatorioDispatchesDue(time: string) {
+export async function getRelatorioDispatchesDue(time: string, windowMinutes = 15) {
   const dataClient = createAdminClient();
   if (!dataClient) throw new Error("SUPABASE_SERVICE_ROLE_KEY nao configurada.");
 
-  const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? `${time}:00` : time;
-  const today = todayIso();
+  const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : time.slice(0, 5);
+  const today = localTodayIso();
   const { data: schedules, error } = await dataClient
     .from("relatorio_agendamentos")
-    .select("id")
+    .select("id, horario")
     .eq("ativo", true)
     .neq("frequencia", "sob_demanda")
-    .eq("horario", normalizedTime);
+    .not("horario", "is", null);
 
   if (error) throw new Error(error.message);
 
   const dispatches = [];
   for (const schedule of schedules ?? []) {
+    if (!isInsideLookbackWindow(schedule.horario, normalizedTime, windowMinutes)) continue;
+
     const { data: existingLog } = await dataClient
       .from("relatorio_envios")
       .select("id, status")

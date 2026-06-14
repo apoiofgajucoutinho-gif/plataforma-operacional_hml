@@ -20,15 +20,17 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const time = url.searchParams.get("time");
+  const windowMinutes = Math.max(1, Math.min(60, Number(url.searchParams.get("windowMinutes") ?? 15)));
 
   if (!time) {
     return NextResponse.json({ error: "Parametro time obrigatorio no formato HH:mm." }, { status: 400 });
   }
 
   try {
-    const dispatches = await getRelatorioDispatchesDue(time);
+    const dispatches = await getRelatorioDispatchesDue(time, windowMinutes);
     return NextResponse.json({
       ok: true,
+      windowMinutes,
       count: dispatches.length,
       items: dispatches.map((dispatch) => ({
         logId: dispatch.log.id,
