@@ -16,6 +16,7 @@ Na Vercel e no ambiente local:
 ```env
 N8N_INGEST_TOKEN=um_token_forte_compartilhado_com_o_n8n
 SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
+TELEGRAM_BOT_TOKEN=token_do_botfather
 ```
 
 No n8n:
@@ -46,3 +47,13 @@ Importe o arquivo:
 O workflow roda a cada 15 minutos, calcula o horario de Sao Paulo, pergunta para a plataforma quais reports estao previstos naquele horario e envia por Telegram.
 
 Se o mesmo report ja foi preparado ou enviado no dia, a plataforma nao duplica.
+
+## Envio imediato
+
+O botao `Enviar agora` fica em `Relatorios > Admin > Agendamentos` e envia o resumo por Telegram sem depender do horario do workflow.
+
+Para funcionar em homologacao/producao, configure tambem na Vercel:
+
+```env
+TELEGRAM_BOT_TOKEN=token_do_botfather
+```

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Bell, CheckCircle2, Clock, Mail, Plus, Send, Settings, Smartphone, Trash2, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, Clock, Mail, Pencil, Plus, Send, Settings, Smartphone, Trash2, X, XCircle } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import type {
   RelatorioAgendamento,
@@ -98,6 +98,9 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   const [envios, setEnvios] = useState(context.envios);
   const [recipientForm, setRecipientForm] = useState(initialRecipient);
   const [scheduleForm, setScheduleForm] = useState(initialSchedule);
+  const [editingRecipientId, setEditingRecipientId] = useState<string | null>(null);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [sendingNowId, setSendingNowId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const visibleTabs = context.canWrite ? tabs : tabs.filter((tab) => tab.key !== "admin");
@@ -122,12 +125,12 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     });
   }, [activeTab]);
 
-  async function saveEntity(entity: "destinatario" | "agendamento", payload: Record<string, unknown>) {
+  async function saveEntity(entity: "destinatario" | "agendamento", payload: Record<string, unknown>, id?: string | null) {
     setMessage("Salvando...");
     const response = await fetch("/api/relatorios", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entity, action: "create", payload }),
+      body: JSON.stringify({ entity, action: id ? "update" : "create", id, payload }),
     });
     const result = await response.json();
     if (!response.ok) {
@@ -159,12 +162,37 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     setMessage("Registro excluido.");
   }
 
+  async function sendNow(scheduleId: string) {
+    setSendingNowId(scheduleId);
+    setMessage("Enviando report agora...");
+    const response = await fetch("/api/relatorios/send-now", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scheduleId }),
+    });
+    const result = await response.json();
+    setSendingNowId(null);
+    if (!response.ok) {
+      setMessage(result.error ?? "Nao foi possivel enviar agora.");
+      return;
+    }
+    if (result.data) {
+      setEnvios((items) => [result.data, ...items]);
+    }
+    setMessage("Report enviado no Telegram.");
+  }
+
   async function saveRecipient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const saved = await saveEntity("destinatario", recipientForm);
+    const saved = await saveEntity("destinatario", recipientForm, editingRecipientId);
     if (!saved) return;
-    setDestinatarios((items) => [saved, ...items].sort((left, right) => left.nome.localeCompare(right.nome)));
+    setDestinatarios((items) =>
+      (editingRecipientId ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]).sort((left, right) =>
+        left.nome.localeCompare(right.nome),
+      ),
+    );
     setRecipientForm(initialRecipient);
+    setEditingRecipientId(null);
   }
 
   async function saveSchedule(event: FormEvent<HTMLFormElement>) {
@@ -175,9 +203,49 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
       timezone: "America/Sao_Paulo",
       filtros: {},
     };
-    const saved = await saveEntity("agendamento", payload);
+    const saved = await saveEntity("agendamento", payload, editingScheduleId);
     if (!saved) return;
-    setAgendamentos((items) => [saved, ...items]);
+    setAgendamentos((items) => (editingScheduleId ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
+    setScheduleForm(initialSchedule);
+    setEditingScheduleId(null);
+  }
+
+  function editRecipient(item: RelatorioDestinatario) {
+    setEditingRecipientId(item.id);
+    setRecipientForm({
+      nome: item.nome,
+      perfil_alvo: item.perfil_alvo,
+      canal_preferencial: item.canal_preferencial,
+      email: item.email ?? "",
+      telegram_chat_id: item.telegram_chat_id ?? "",
+      whatsapp: item.whatsapp ?? "",
+      ativo: item.ativo,
+    });
+    setMessage("Editando destinatario.");
+  }
+
+  function editSchedule(item: RelatorioAgendamento) {
+    setEditingScheduleId(item.id);
+    setScheduleForm({
+      destinatario_id: item.destinatario_id,
+      nome: item.nome,
+      tipo_resumo: item.tipo_resumo,
+      canal: item.canal,
+      frequencia: item.frequencia,
+      horario: item.horario?.slice(0, 5) ?? "",
+      incluir_modulos: item.incluir_modulos,
+      ativo: item.ativo,
+    });
+    setMessage("Editando agendamento.");
+  }
+
+  function cancelRecipientEdit() {
+    setEditingRecipientId(null);
+    setRecipientForm(initialRecipient);
+  }
+
+  function cancelScheduleEdit() {
+    setEditingScheduleId(null);
     setScheduleForm(initialSchedule);
   }
 
@@ -260,7 +328,11 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
       {activeTab === "admin" && context.canWrite ? (
         <div className="grid gap-5 xl:grid-cols-2">
           <Card className="p-5">
-            <FormTitle icon={<Plus className="h-5 w-5" />} title="Destinatario" helper="Quem recebe os resumos e alertas." />
+            <FormTitle
+              icon={editingRecipientId ? <Pencil className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+              title={editingRecipientId ? "Editar destinatario" : "Destinatario"}
+              helper="Quem recebe os resumos e alertas."
+            />
             <form onSubmit={saveRecipient} className="mt-5 grid gap-4">
               <Field label="Nome">
                 <input className="input" required value={recipientForm.nome} onChange={(event) => setRecipientForm((current) => ({ ...current, nome: event.target.value }))} />
@@ -289,12 +361,24 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                   <input type="email" className="input" value={recipientForm.email} onChange={(event) => setRecipientForm((current) => ({ ...current, email: event.target.value }))} />
                 </Field>
               </div>
-              <button className="rounded-md bg-brand-teal px-4 py-3 text-sm font-black text-white">Salvar destinatario</button>
+              <div className="flex flex-wrap gap-3">
+                <button className="rounded-md bg-brand-teal px-4 py-3 text-sm font-black text-white">{editingRecipientId ? "Atualizar destinatario" : "Salvar destinatario"}</button>
+                {editingRecipientId ? (
+                  <button type="button" onClick={cancelRecipientEdit} className="inline-flex items-center gap-2 rounded-md border border-brand-sand px-4 py-3 text-sm font-black text-brand-teal">
+                    <X className="h-4 w-4" />
+                    Cancelar edicao
+                  </button>
+                ) : null}
+              </div>
             </form>
           </Card>
 
           <Card className="p-5">
-            <FormTitle icon={<Settings className="h-5 w-5" />} title="Agendamento" helper="Quando e qual resumo deve sair." />
+            <FormTitle
+              icon={editingScheduleId ? <Pencil className="h-5 w-5" /> : <Settings className="h-5 w-5" />}
+              title={editingScheduleId ? "Editar agendamento" : "Agendamento"}
+              helper="Quando e qual resumo deve sair."
+            />
             <form onSubmit={saveSchedule} className="mt-5 grid gap-4">
               <Field label="Nome">
                 <input className="input" required value={scheduleForm.nome} onChange={(event) => setScheduleForm((current) => ({ ...current, nome: event.target.value }))} />
@@ -343,7 +427,15 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                   ))}
                 </div>
               </Field>
-              <button className="rounded-md bg-brand-teal px-4 py-3 text-sm font-black text-white">Salvar agendamento</button>
+              <div className="flex flex-wrap gap-3">
+                <button className="rounded-md bg-brand-teal px-4 py-3 text-sm font-black text-white">{editingScheduleId ? "Atualizar agendamento" : "Salvar agendamento"}</button>
+                {editingScheduleId ? (
+                  <button type="button" onClick={cancelScheduleEdit} className="inline-flex items-center gap-2 rounded-md border border-brand-sand px-4 py-3 text-sm font-black text-brand-teal">
+                    <X className="h-4 w-4" />
+                    Cancelar edicao
+                  </button>
+                ) : null}
+              </div>
             </form>
           </Card>
 
@@ -354,12 +446,26 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
             <div className="grid gap-5 p-5 lg:grid-cols-2">
               <List title="Destinatarios">
                 {destinatarios.map((item) => (
-                  <ListItem key={item.id} title={item.nome} helper={`${item.perfil_alvo} - ${canalLabels[item.canal_preferencial]}`} onDelete={() => deleteEntity("destinatario", item.id)} />
+                  <ListItem
+                    key={item.id}
+                    title={item.nome}
+                    helper={`${item.perfil_alvo} - ${canalLabels[item.canal_preferencial]}`}
+                    onEdit={() => editRecipient(item)}
+                    onDelete={() => deleteEntity("destinatario", item.id)}
+                  />
                 ))}
               </List>
               <List title="Agendamentos">
                 {agendamentos.map((item) => (
-                  <ListItem key={item.id} title={item.nome} helper={`${tipoLabels[item.tipo_resumo]} - ${frequenciaLabels[item.frequencia]}`} onDelete={() => deleteEntity("agendamento", item.id)} />
+                  <ListItem
+                    key={item.id}
+                    title={item.nome}
+                    helper={`${tipoLabels[item.tipo_resumo]} - ${frequenciaLabels[item.frequencia]}`}
+                    onEdit={() => editSchedule(item)}
+                    onSendNow={() => sendNow(item.id)}
+                    sendingNow={sendingNowId === item.id}
+                    onDelete={() => deleteEntity("agendamento", item.id)}
+                  />
                 ))}
               </List>
             </div>
@@ -475,16 +581,47 @@ function List({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function ListItem({ title, helper, onDelete }: { title: string; helper: string; onDelete: () => void }) {
+function ListItem({
+  title,
+  helper,
+  onEdit,
+  onSendNow,
+  sendingNow,
+  onDelete,
+}: {
+  title: string;
+  helper: string;
+  onEdit: () => void;
+  onSendNow?: () => void;
+  sendingNow?: boolean;
+  onDelete: () => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 bg-white/70 p-4">
       <div>
         <p className="font-black text-brand-teal">{title}</p>
         <p className="text-sm text-brand-teal/60">{helper}</p>
       </div>
-      <button type="button" onClick={onDelete} className="rounded-md border border-brand-sand p-2 text-rose-700">
-        <Trash2 className="h-4 w-4" />
-      </button>
+      <div className="flex shrink-0 gap-2">
+        {onSendNow ? (
+          <button
+            type="button"
+            onClick={onSendNow}
+            disabled={sendingNow}
+            className="inline-flex items-center gap-2 rounded-md border border-brand-sand px-3 py-2 text-xs font-black text-brand-teal disabled:opacity-60"
+            title="Enviar agora"
+          >
+            <Send className="h-4 w-4" />
+            {sendingNow ? "Enviando" : "Enviar agora"}
+          </button>
+        ) : null}
+        <button type="button" onClick={onEdit} className="rounded-md border border-brand-sand p-2 text-brand-teal" title="Editar">
+          <Pencil className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={onDelete} className="rounded-md border border-brand-sand p-2 text-rose-700" title="Excluir">
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

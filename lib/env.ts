@@ -18,6 +18,7 @@ export const env = {
     process.env.GOOGLE_CALENDAR_OWNER_EMAIL ??
     "",
   n8nIngestToken: process.env.N8N_INGEST_TOKEN,
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
 };
 
 export function hasPublicSupabaseEnv() {
