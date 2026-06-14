@@ -12,6 +12,7 @@ const modulePaths: Record<string, string> = {
   financeiro: "/financeiro",
   ocorrencias: "/ocorrencias",
   adocao: "/adocao",
+  relatorios: "/relatorios",
   admin: "/admin",
 };
 

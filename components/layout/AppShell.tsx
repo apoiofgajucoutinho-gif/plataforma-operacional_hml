@@ -37,7 +37,7 @@ const navigation = [
   { label: "Ocorrencias", href: "/ocorrencias", icon: AlertTriangle, key: "ocorrencias" },
   { label: "Adocao", href: "/adocao", icon: LineChart, key: "adocao" },
   { label: "Atividades", href: "#", icon: Activity, key: "atividades" },
-  { label: "Relatorios", href: "#", icon: LayoutDashboard, key: "relatorios" },
+  { label: "Relatorios", href: "/relatorios", icon: LayoutDashboard, key: "relatorios" },
   { label: "Admin", href: "/admin", icon: Settings, key: "admin" },
 ];
 
