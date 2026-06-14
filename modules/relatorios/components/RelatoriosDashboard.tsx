@@ -182,6 +182,34 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     setMessage("Report enviado no Telegram.");
   }
 
+  async function manageHistory(action: "cancel_prepared" | "clear_history") {
+    const label = action === "cancel_prepared" ? "cancelar todos os envios preparados" : "limpar todo o historico de envios";
+    if (!window.confirm(`Deseja ${label}?`)) return;
+
+    setMessage(action === "cancel_prepared" ? "Cancelando envios preparados..." : "Limpando historico...");
+    const response = await fetch("/api/relatorios/history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setMessage(result.error ?? "Nao foi possivel atualizar o historico.");
+      return;
+    }
+
+    if (action === "clear_history") {
+      setEnvios([]);
+      setMessage("Historico limpo.");
+      return;
+    }
+
+    const updated = (result.data ?? []) as RelatorioEnvio[];
+    const updatedById = new Map(updated.map((item) => [item.id, item]));
+    setEnvios((items) => items.map((item) => updatedById.get(item.id) ?? item));
+    setMessage(`${updated.length} envio(s) preparado(s) cancelado(s).`);
+  }
+
   async function saveRecipient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const saved = await saveEntity("destinatario", recipientForm, editingRecipientId);
@@ -290,6 +318,25 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
             <Metric icon={<XCircle />} label="Com erro" value={errors} helper="falha de envio ou destino" />
             <Metric icon={<Bell />} label="Agendamentos ativos" value={activeSchedules} helper="rotinas configuradas" />
           </div>
+
+          {context.canWrite ? (
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => manageHistory("cancel_prepared")}
+                className="rounded-md border border-brand-sand bg-white/80 px-4 py-3 text-sm font-black text-brand-teal"
+              >
+                Cancelar preparados
+              </button>
+              <button
+                type="button"
+                onClick={() => manageHistory("clear_history")}
+                className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700"
+              >
+                Limpar historico
+              </button>
+            </div>
+          ) : null}
 
           <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
             <Card className="p-5">
