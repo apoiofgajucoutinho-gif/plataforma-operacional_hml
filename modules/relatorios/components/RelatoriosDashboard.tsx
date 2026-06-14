@@ -9,8 +9,12 @@ import type {
   RelatorioCanal,
   RelatorioDestinatario,
   RelatorioEnvio,
+  RelatorioFiltros,
   RelatorioFrequencia,
+  RelatorioNivelDetalhe,
+  RelatorioPeriodo,
   RelatoriosContext,
+  RelatorioTemplateKey,
   RelatorioTipoResumo,
 } from "@/modules/relatorios/types";
 
@@ -28,6 +32,7 @@ const tipoLabels: Record<RelatorioTipoResumo, string> = {
   agenda: "Agenda",
   ocorrencias: "Ocorrencias",
   financeiro: "Financeiro",
+  lembrete_agendamento: "Lembrete de agenda",
 };
 
 const canalLabels: Record<RelatorioCanal, string> = {
@@ -45,6 +50,52 @@ const frequenciaLabels: Record<RelatorioFrequencia, string> = {
 };
 
 const moduleOptions = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "adocao"];
+const blockOptions: Array<{ key: string; label: string }> = [
+  { key: "agenda", label: "Agenda" },
+  { key: "financeiro", label: "Financeiro operacional" },
+  { key: "ocorrencias", label: "Ocorrencias" },
+  { key: "instagram", label: "Directs e interacoes" },
+  { key: "ads", label: "Ads" },
+  { key: "objetivos", label: "Objetivos e metas" },
+];
+
+const periodLabels: Record<RelatorioPeriodo, string> = {
+  hoje: "Hoje",
+  amanha: "Amanha",
+  proximos_7d: "Proximos 7 dias",
+  proximos_15d: "Proximos 15 dias",
+  mes_atual: "Mes atual",
+  ultimos_7d: "Ultimos 7 dias",
+  ultimos_30d: "Ultimos 30 dias",
+  ano_atual: "Ano atual",
+  pendentes: "Pendentes em aberto",
+};
+
+const templateLabels: Record<RelatorioTemplateKey, string> = {
+  ju_resumo_executivo: "Ju - Resumo executivo",
+  ju_fechamento_dia: "Ju - Fechamento do dia",
+  suporte_prioridades: "Suporte - Prioridades do dia",
+  jeff_alertas_tecnicos: "Jeff - Alertas tecnicos",
+  especialista_agenda: "Especialista - Agenda operacional",
+  marketing_performance: "Marketing - Performance",
+  lembrete_agenda: "Lembrete de agenda",
+  personalizado: "Personalizado",
+};
+
+const defaultScheduleFilters: RelatorioFiltros = {
+  template_key: "personalizado",
+  nivel_detalhe: "normal",
+  enviar_apenas_com_alerta: false,
+  antecedencia_minutos: 60,
+  blocos: {
+    agenda: { enabled: true, periodo: "hoje" },
+    financeiro: { enabled: false, periodo: "mes_atual" },
+    ocorrencias: { enabled: true, periodo: "pendentes" },
+    instagram: { enabled: false, periodo: "ultimos_7d" },
+    ads: { enabled: false, periodo: "ultimos_7d" },
+    objetivos: { enabled: false, periodo: "mes_atual" },
+  },
+};
 
 const initialRecipient = {
   nome: "",
@@ -64,6 +115,7 @@ const initialSchedule = {
   frequencia: "diario" as RelatorioFrequencia,
   horario: "07:30",
   incluir_modulos: ["agenda", "financeiro", "ocorrencias"],
+  filtros: defaultScheduleFilters,
   ativo: true,
 };
 
@@ -111,6 +163,50 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   const errors = envios.filter((envio) => envio.status === "erro").length;
   const prepared = envios.filter((envio) => envio.status === "preparado").length;
   const activeSchedules = agendamentos.filter((item) => item.ativo).length;
+
+  function getScheduleFilters() {
+    const current = scheduleForm.filtros ?? defaultScheduleFilters;
+    return {
+      ...defaultScheduleFilters,
+      ...current,
+      blocos: {
+        ...defaultScheduleFilters.blocos,
+        ...(current.blocos ?? {}),
+      },
+    };
+  }
+
+  function updateScheduleFilters(updater: (current: RelatorioFiltros) => RelatorioFiltros) {
+    setScheduleForm((current) => {
+      const base = {
+        ...defaultScheduleFilters,
+        ...(current.filtros ?? {}),
+        blocos: {
+          ...defaultScheduleFilters.blocos,
+          ...(current.filtros?.blocos ?? {}),
+        },
+      };
+
+      return {
+        ...current,
+        filtros: updater(base),
+      };
+    });
+  }
+
+  function updateBlockConfig(blockKey: string, patch: Partial<{ enabled: boolean; periodo: RelatorioPeriodo }>) {
+    updateScheduleFilters((current) => ({
+      ...current,
+      blocos: {
+        ...(current.blocos ?? defaultScheduleFilters.blocos),
+        [blockKey]: {
+          enabled: current.blocos?.[blockKey]?.enabled ?? defaultScheduleFilters.blocos?.[blockKey]?.enabled ?? false,
+          periodo: current.blocos?.[blockKey]?.periodo ?? defaultScheduleFilters.blocos?.[blockKey]?.periodo ?? "hoje",
+          ...patch,
+        },
+      },
+    }));
+  }
 
   useEffect(() => {
     void fetch("/api/adoption/track", {
@@ -225,11 +321,16 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
 
   async function saveSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const filtros = getScheduleFilters();
+    const incluirModulos = Object.entries(filtros.blocos ?? {})
+      .filter(([, config]) => config.enabled)
+      .map(([key]) => key);
     const payload = {
       ...scheduleForm,
       horario: scheduleForm.horario || null,
       timezone: "America/Sao_Paulo",
-      filtros: {},
+      incluir_modulos: incluirModulos,
+      filtros,
     };
     const saved = await saveEntity("agendamento", payload, editingScheduleId);
     if (!saved) return;
@@ -262,6 +363,14 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
       frequencia: item.frequencia,
       horario: item.horario?.slice(0, 5) ?? "",
       incluir_modulos: item.incluir_modulos,
+      filtros: {
+        ...defaultScheduleFilters,
+        ...(item.filtros ?? {}),
+        blocos: {
+          ...defaultScheduleFilters.blocos,
+          ...(item.filtros?.blocos ?? {}),
+        },
+      },
       ativo: item.ativo,
     });
     setMessage("Editando agendamento.");
@@ -438,9 +547,55 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                   ))}
                 </select>
               </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Template">
+                  <select
+                    className="input"
+                    value={getScheduleFilters().template_key ?? "personalizado"}
+                    onChange={(event) => {
+                      const templateKey = event.target.value as RelatorioTemplateKey;
+                      updateScheduleFilters((current) => ({
+                        ...current,
+                        template_key: templateKey,
+                        ...(templateKey === "lembrete_agenda" ? { antecedencia_minutos: current.antecedencia_minutos ?? 60 } : {}),
+                      }));
+                      if (templateKey === "lembrete_agenda") {
+                        setScheduleForm((current) => ({ ...current, tipo_resumo: "lembrete_agendamento" }));
+                      }
+                    }}
+                  >
+                    {Object.entries(templateLabels).map(([key, value]) => (
+                      <option key={key} value={key}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Nivel de detalhe">
+                  <select
+                    className="input"
+                    value={getScheduleFilters().nivel_detalhe ?? "normal"}
+                    onChange={(event) => updateScheduleFilters((current) => ({ ...current, nivel_detalhe: event.target.value as RelatorioNivelDetalhe }))}
+                  >
+                    <option value="curto">Curto</option>
+                    <option value="normal">Normal</option>
+                    <option value="detalhado">Detalhado</option>
+                  </select>
+                </Field>
+              </div>
               <div className="grid gap-4 sm:grid-cols-3">
                 <Field label="Tipo">
-                  <select className="input" value={scheduleForm.tipo_resumo} onChange={(event) => setScheduleForm((current) => ({ ...current, tipo_resumo: event.target.value as RelatorioTipoResumo }))}>
+                  <select
+                    className="input"
+                    value={scheduleForm.tipo_resumo}
+                    onChange={(event) => {
+                      const tipoResumo = event.target.value as RelatorioTipoResumo;
+                      setScheduleForm((current) => ({ ...current, tipo_resumo: tipoResumo }));
+                      if (tipoResumo === "lembrete_agendamento") {
+                        updateScheduleFilters((current) => ({ ...current, template_key: "lembrete_agenda", antecedencia_minutos: current.antecedencia_minutos ?? 60 }));
+                      }
+                    }}
+                  >
                     {Object.entries(tipoLabels).map(([key, value]) => <option key={key} value={key}>{value}</option>)}
                   </select>
                 </Field>
@@ -453,10 +608,74 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                   <input type="time" className="input" value={scheduleForm.horario} onChange={(event) => setScheduleForm((current) => ({ ...current, horario: event.target.value }))} />
                 </Field>
               </div>
-              <Field label="Modulos incluidos">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Canal">
+                  <select className="input" value={scheduleForm.canal} onChange={(event) => setScheduleForm((current) => ({ ...current, canal: event.target.value as RelatorioCanal }))}>
+                    <option value="telegram">Telegram</option>
+                    <option value="email">E-mail</option>
+                    <option value="whatsapp">WhatsApp futuro</option>
+                  </select>
+                </Field>
+                {(scheduleForm.tipo_resumo === "lembrete_agendamento" || getScheduleFilters().template_key === "lembrete_agenda") ? (
+                  <Field label="Antecedencia do lembrete (min)">
+                    <input
+                      type="number"
+                      min={5}
+                      step={5}
+                      className="input"
+                      value={getScheduleFilters().antecedencia_minutos ?? 60}
+                      onChange={(event) => updateScheduleFilters((current) => ({ ...current, antecedencia_minutos: Number(event.target.value) || 60 }))}
+                    />
+                  </Field>
+                ) : (
+                  <label className="flex items-center gap-3 rounded-md border border-brand-sand bg-white px-4 py-3 text-sm font-bold text-brand-teal">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(getScheduleFilters().enviar_apenas_com_alerta)}
+                      onChange={(event) => updateScheduleFilters((current) => ({ ...current, enviar_apenas_com_alerta: event.target.checked }))}
+                    />
+                    Enviar apenas se houver alerta
+                  </label>
+                )}
+              </div>
+              <Field label="Blocos e periodos">
+                <div className="grid gap-3">
+                  {blockOptions.map((block) => {
+                    const config = getScheduleFilters().blocos?.[block.key] ?? defaultScheduleFilters.blocos?.[block.key];
+                    return (
+                      <div key={block.key} className="grid gap-3 rounded-md border border-brand-sand bg-white px-3 py-3 text-sm font-bold text-brand-teal sm:grid-cols-[1fr_220px]">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(config?.enabled)}
+                            onChange={(event) => updateBlockConfig(block.key, { enabled: event.target.checked })}
+                          />
+                          {block.label}
+                        </label>
+                        <select
+                          className="input"
+                          value={config?.periodo ?? "hoje"}
+                          disabled={!config?.enabled}
+                          onChange={(event) => updateBlockConfig(block.key, { periodo: event.target.value as RelatorioPeriodo })}
+                        >
+                          {Object.entries(periodLabels).map(([key, value]) => (
+                            <option key={key} value={key}>
+                              {value}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs font-bold text-brand-teal/55">
+                  Cada bloco pode usar um periodo diferente. Ex.: suporte recebe agenda de hoje, financeiro dos proximos 7 dias e interacoes dos ultimos 7 dias.
+                </p>
+              </Field>
+              <Field label="Compatibilidade com workflow">
                 <div className="grid gap-2 sm:grid-cols-2">
                   {moduleOptions.map((module) => (
-                    <label key={module} className="flex items-center gap-2 rounded-md border border-brand-sand bg-white px-3 py-2 text-sm font-bold text-brand-teal">
+                    <label key={module} className="flex items-center gap-2 rounded-md border border-brand-sand bg-white px-3 py-2 text-sm font-bold text-brand-teal/70">
                       <input
                         type="checkbox"
                         checked={scheduleForm.incluir_modulos.includes(module)}
@@ -473,6 +692,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                     </label>
                   ))}
                 </div>
+                <p className="mt-2 text-xs font-bold text-brand-teal/55">Campo mantido para compatibilidade; ao salvar, ele tambem acompanha os blocos marcados acima.</p>
               </Field>
               <div className="flex flex-wrap gap-3">
                 <button className="rounded-md bg-brand-teal px-4 py-3 text-sm font-black text-white">{editingScheduleId ? "Atualizar agendamento" : "Salvar agendamento"}</button>

@@ -6,9 +6,44 @@ export type RelatorioTipoResumo =
   | "alerta_tecnico"
   | "agenda"
   | "ocorrencias"
-  | "financeiro";
+  | "financeiro"
+  | "lembrete_agendamento";
 export type RelatorioFrequencia = "sob_demanda" | "diario" | "semanal" | "mensal" | "imediato";
 export type RelatorioStatusEnvio = "preparado" | "enviado" | "erro" | "ignorado";
+export type RelatorioPeriodo =
+  | "hoje"
+  | "amanha"
+  | "proximos_7d"
+  | "proximos_15d"
+  | "mes_atual"
+  | "ultimos_7d"
+  | "ultimos_30d"
+  | "ano_atual"
+  | "pendentes";
+export type RelatorioNivelDetalhe = "curto" | "normal" | "detalhado";
+export type RelatorioTemplateKey =
+  | "ju_resumo_executivo"
+  | "ju_fechamento_dia"
+  | "suporte_prioridades"
+  | "jeff_alertas_tecnicos"
+  | "especialista_agenda"
+  | "marketing_performance"
+  | "lembrete_agenda"
+  | "personalizado";
+
+export type RelatorioBlocoConfig = {
+  enabled: boolean;
+  periodo: RelatorioPeriodo;
+  detalhe?: RelatorioNivelDetalhe;
+};
+
+export type RelatorioFiltros = {
+  template_key?: RelatorioTemplateKey;
+  nivel_detalhe?: RelatorioNivelDetalhe;
+  enviar_apenas_com_alerta?: boolean;
+  antecedencia_minutos?: number;
+  blocos?: Record<string, RelatorioBlocoConfig>;
+};
 
 export type RelatorioDestinatario = {
   id: string;
@@ -35,7 +70,7 @@ export type RelatorioAgendamento = {
   horario: string | null;
   timezone: string;
   incluir_modulos: string[];
-  filtros: Record<string, unknown>;
+  filtros: RelatorioFiltros;
   ativo: boolean;
   created_at: string;
   updated_at: string;

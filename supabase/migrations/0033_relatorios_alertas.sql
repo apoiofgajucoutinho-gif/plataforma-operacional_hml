@@ -17,7 +17,7 @@ create table if not exists public.relatorio_agendamentos (
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   destinatario_id uuid not null references public.relatorio_destinatarios(id) on delete cascade,
   nome text not null,
-  tipo_resumo text not null check (tipo_resumo in ('resumo_executivo', 'resumo_suporte', 'alerta_tecnico', 'agenda', 'ocorrencias', 'financeiro')),
+  tipo_resumo text not null check (tipo_resumo in ('resumo_executivo', 'resumo_suporte', 'alerta_tecnico', 'agenda', 'ocorrencias', 'financeiro', 'lembrete_agendamento')),
   canal text not null default 'telegram' check (canal in ('telegram', 'email', 'whatsapp')),
   frequencia text not null default 'diario' check (frequencia in ('sob_demanda', 'diario', 'semanal', 'mensal', 'imediato')),
   horario time,
@@ -56,8 +56,8 @@ on public.relatorio_destinatarios (tenant_id, perfil_alvo, nome);
 create index if not exists relatorio_agendamentos_tenant_idx
 on public.relatorio_agendamentos (tenant_id, ativo, tipo_resumo);
 
-create unique index if not exists relatorio_agendamentos_tenant_dest_tipo_idx
-on public.relatorio_agendamentos (tenant_id, destinatario_id, tipo_resumo);
+create unique index if not exists relatorio_agendamentos_tenant_dest_nome_idx
+on public.relatorio_agendamentos (tenant_id, destinatario_id, nome);
 
 create index if not exists relatorio_envios_tenant_created_idx
 on public.relatorio_envios (tenant_id, created_at desc);
@@ -166,5 +166,5 @@ where not exists (
   from public.relatorio_agendamentos existing
   where existing.tenant_id = d.tenant_id
     and existing.destinatario_id = d.id
-    and existing.tipo_resumo = seed.tipo_resumo
+    and existing.nome = seed.nome
 );

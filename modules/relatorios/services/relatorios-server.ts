@@ -6,6 +6,8 @@ import type {
   RelatorioAgendamento,
   RelatorioDestinatario,
   RelatorioEnvio,
+  RelatorioFiltros,
+  RelatorioPeriodo,
   RelatoriosContext,
   RelatorioTipoResumo,
 } from "@/modules/relatorios/types";
@@ -13,6 +15,86 @@ import type {
 type SupabaseAny = any;
 
 const dayMs = 1000 * 60 * 60 * 24;
+const defaultBlocks = {
+  agenda: { enabled: true, periodo: "hoje" },
+  financeiro: { enabled: false, periodo: "mes_atual" },
+  ocorrencias: { enabled: true, periodo: "pendentes" },
+  instagram: { enabled: false, periodo: "ultimos_7d" },
+  ads: { enabled: false, periodo: "ultimos_7d" },
+  objetivos: { enabled: false, periodo: "mes_atual" },
+} satisfies NonNullable<RelatorioFiltros["blocos"]>;
+
+const templateDefaults: Record<string, RelatorioFiltros> = {
+  ju_resumo_executivo: {
+    template_key: "ju_resumo_executivo",
+    nivel_detalhe: "normal",
+    blocos: {
+      agenda: { enabled: true, periodo: "proximos_7d" },
+      financeiro: { enabled: true, periodo: "mes_atual" },
+      ocorrencias: { enabled: true, periodo: "pendentes" },
+      instagram: { enabled: true, periodo: "ultimos_7d" },
+      ads: { enabled: true, periodo: "ultimos_7d" },
+      objetivos: { enabled: true, periodo: "mes_atual" },
+    },
+  },
+  ju_fechamento_dia: {
+    template_key: "ju_fechamento_dia",
+    nivel_detalhe: "curto",
+    blocos: {
+      agenda: { enabled: true, periodo: "proximos_7d" },
+      financeiro: { enabled: true, periodo: "hoje" },
+      ocorrencias: { enabled: true, periodo: "pendentes" },
+      instagram: { enabled: true, periodo: "hoje" },
+      objetivos: { enabled: true, periodo: "mes_atual" },
+    },
+  },
+  suporte_prioridades: {
+    template_key: "suporte_prioridades",
+    nivel_detalhe: "normal",
+    blocos: {
+      agenda: { enabled: true, periodo: "hoje" },
+      financeiro: { enabled: true, periodo: "proximos_7d" },
+      ocorrencias: { enabled: true, periodo: "pendentes" },
+      instagram: { enabled: true, periodo: "ultimos_7d" },
+    },
+  },
+  jeff_alertas_tecnicos: {
+    template_key: "jeff_alertas_tecnicos",
+    nivel_detalhe: "curto",
+    enviar_apenas_com_alerta: true,
+    blocos: {
+      ocorrencias: { enabled: true, periodo: "pendentes" },
+      ads: { enabled: true, periodo: "ultimos_7d" },
+      instagram: { enabled: true, periodo: "ultimos_7d" },
+    },
+  },
+  especialista_agenda: {
+    template_key: "especialista_agenda",
+    nivel_detalhe: "curto",
+    blocos: {
+      agenda: { enabled: true, periodo: "proximos_7d" },
+    },
+  },
+  marketing_performance: {
+    template_key: "marketing_performance",
+    nivel_detalhe: "normal",
+    blocos: {
+      instagram: { enabled: true, periodo: "ultimos_7d" },
+      ads: { enabled: true, periodo: "ultimos_7d" },
+      objetivos: { enabled: true, periodo: "mes_atual" },
+      ocorrencias: { enabled: true, periodo: "pendentes" },
+    },
+  },
+  lembrete_agenda: {
+    template_key: "lembrete_agenda",
+    nivel_detalhe: "curto",
+    antecedencia_minutos: 60,
+    enviar_apenas_com_alerta: true,
+    blocos: {
+      agenda: { enabled: true, periodo: "proximos_7d" },
+    },
+  },
+};
 
 async function getMembershipByUserId(userId: string) {
   const admin = createAdminClient();
@@ -88,6 +170,63 @@ function addDays(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function addMinutes(minutes: number) {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() + minutes);
+  return date.toISOString();
+}
+
+function getPeriodRange(period: RelatorioPeriodo) {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+
+  if (period === "amanha") {
+    return {
+      start: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString(),
+      end: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2).toISOString(),
+      label: "amanha",
+    };
+  }
+
+  if (period === "proximos_7d") return { start: todayStart.toISOString(), end: new Date(todayStart.getTime() + 7 * dayMs).toISOString(), label: "proximos 7 dias" };
+  if (period === "proximos_15d") return { start: todayStart.toISOString(), end: new Date(todayStart.getTime() + 15 * dayMs).toISOString(), label: "proximos 15 dias" };
+  if (period === "ultimos_7d") return { start: new Date(todayStart.getTime() - 7 * dayMs).toISOString(), end: todayEnd.toISOString(), label: "ultimos 7 dias" };
+  if (period === "ultimos_30d") return { start: new Date(todayStart.getTime() - 30 * dayMs).toISOString(), end: todayEnd.toISOString(), label: "ultimos 30 dias" };
+  if (period === "mes_atual") return { start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), end: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(), label: "mes atual" };
+  if (period === "ano_atual") return { start: new Date(now.getFullYear(), 0, 1).toISOString(), end: new Date(now.getFullYear() + 1, 0, 1).toISOString(), label: "ano atual" };
+
+  return { start: todayStart.toISOString(), end: todayEnd.toISOString(), label: period === "pendentes" ? "pendentes em aberto" : "hoje" };
+}
+
+function normalizeReportFilters(schedule: RelatorioAgendamento): Required<Pick<RelatorioFiltros, "nivel_detalhe" | "blocos">> &
+  Omit<RelatorioFiltros, "nivel_detalhe" | "blocos"> {
+  const raw = (schedule.filtros ?? {}) as RelatorioFiltros;
+  const templateKey =
+    raw.template_key ??
+    (schedule.tipo_resumo === "resumo_suporte"
+      ? "suporte_prioridades"
+      : schedule.tipo_resumo === "alerta_tecnico"
+        ? "jeff_alertas_tecnicos"
+        : schedule.tipo_resumo === "lembrete_agendamento"
+          ? "lembrete_agenda"
+          : "personalizado");
+  const template = templateDefaults[templateKey] ?? {};
+  const templateBlocks = template.blocos ?? {};
+
+  return {
+    ...template,
+    ...raw,
+    template_key: templateKey as RelatorioFiltros["template_key"],
+    nivel_detalhe: raw.nivel_detalhe ?? template.nivel_detalhe ?? "normal",
+    blocos: {
+      ...defaultBlocks,
+      ...templateBlocks,
+      ...(raw.blocos ?? {}),
+    },
+  };
 }
 
 function monthStartIso() {
@@ -277,6 +416,7 @@ export async function getRelatorioDispatchByScheduleId(scheduleId: string) {
     tenantId: schedule.tenant_id,
     tipoResumo: schedule.tipo_resumo,
     recipientName: recipient.nome,
+    schedule: schedule as RelatorioAgendamento,
   });
 
   const destino =
@@ -295,10 +435,14 @@ export async function getRelatorioDispatchByScheduleId(scheduleId: string) {
       tipo_resumo: schedule.tipo_resumo,
       canal: schedule.canal,
       destino,
-      status: destino ? "preparado" : "erro",
+      status: !message.shouldSend ? "ignorado" : destino ? "preparado" : "erro",
       assunto: message.subject,
       mensagem: message.text,
-      erro: destino ? null : "Destinatario sem destino configurado para este canal.",
+      erro: !message.shouldSend
+        ? "Relatorio ignorado por nao haver alerta no periodo configurado."
+        : destino
+          ? null
+          : "Destinatario sem destino configurado para este canal.",
       metadata: message.metadata,
     })
     .select("*")
@@ -316,6 +460,7 @@ export async function getRelatorioDispatchByScheduleId(scheduleId: string) {
     telegramChatId: schedule.canal === "telegram" ? recipient.telegram_chat_id : null,
     email: schedule.canal === "email" ? recipient.email : null,
     whatsapp: schedule.canal === "whatsapp" ? recipient.whatsapp : null,
+    shouldSend: message.shouldSend,
   };
 }
 
@@ -344,12 +489,13 @@ export async function getRelatorioDispatchesDue(time: string, windowMinutes = 15
       .eq("agendamento_id", schedule.id)
       .gte("created_at", `${today}T00:00:00.000Z`)
       .lte("created_at", `${today}T23:59:59.999Z`)
-      .in("status", ["preparado", "enviado"])
+      .in("status", ["preparado", "enviado", "ignorado"])
       .limit(1)
       .maybeSingle();
 
     if (existingLog) continue;
-    dispatches.push(await getRelatorioDispatchByScheduleId(schedule.id));
+    const dispatch = await getRelatorioDispatchByScheduleId(schedule.id);
+    if (dispatch.shouldSend) dispatches.push(dispatch);
   }
 
   return dispatches;
@@ -385,87 +531,97 @@ export async function buildOperationalSummary({
   tenantId,
   tipoResumo,
   recipientName,
+  schedule,
 }: {
   dataClient: SupabaseAny;
   tenantId: string;
   tipoResumo: RelatorioTipoResumo;
   recipientName: string;
+  schedule: RelatorioAgendamento;
 }) {
-  const today = todayIso();
-  const next7 = addDays(7);
-  const monthStart = monthStartIso();
-  const monthEnd = monthEndIso();
+  const filters = normalizeReportFilters(schedule);
+  const block = filters.blocos;
+  const agendaPeriod = getPeriodRange(block.agenda.periodo);
+  const financialPeriod = getPeriodRange(block.financeiro.periodo);
+  const interactionPeriod = getPeriodRange(block.instagram.periodo);
+  const adsPeriod = getPeriodRange(block.ads.periodo);
+  const reminderEnd = addMinutes(filters.antecedencia_minutos ?? 60);
 
   const [
-    agendaToday,
-    agendaNext7,
-    ocorrenciasOpen,
-    interactionsOpen,
-    financialMonth,
-    adsMonth,
-    goalsRisk,
+    agendaResult,
+    occurrencesResult,
+    interactionsResult,
+    financialResult,
+    adsResult,
+    goalsResult,
   ] = await Promise.all([
-    dataClient
-      .from("agenda_eventos")
-      .select("id, titulo, tipo, inicio, local, status")
-      .eq("tenant_id", tenantId)
-      .neq("status", "cancelado")
-      .gte("inicio", `${today}T00:00:00.000Z`)
-      .lt("inicio", `${addDays(1)}T00:00:00.000Z`)
-      .order("inicio", { ascending: true })
-      .limit(8),
-    dataClient
-      .from("agenda_eventos")
-      .select("id, titulo, tipo, inicio, local, status")
-      .eq("tenant_id", tenantId)
-      .neq("status", "cancelado")
-      .gte("inicio", `${today}T00:00:00.000Z`)
-      .lte("inicio", `${next7}T23:59:59.999Z`)
-      .order("inicio", { ascending: true })
-      .limit(12),
-    dataClient
-      .from("ocorrencias_chamados")
-      .select("id, prioridade, status, origem_falha, tipo_falha, erro_motivo, data_chamado")
-      .eq("tenant_id", tenantId)
-      .in("status", ["aberto", "em_andamento", "reaberto"])
-      .order("data_chamado", { ascending: false })
-      .limit(20),
-    dataClient
-      .from("instagram_interactions")
-      .select("id, source, profile_username, message_text, status, potential, product_topic, interaction_at")
-      .eq("tenant_id", tenantId)
-      .in("status", ["novo", "analisado"])
-      .order("interaction_at", { ascending: false })
-      .limit(20),
-    dataClient
-      .from("fin_lancamentos")
-      .select("tipo, status, valor, data_pagamento")
-      .eq("tenant_id", tenantId)
-      .gte("data_pagamento", monthStart)
-      .lte("data_pagamento", monthEnd)
-      .neq("status", "cancelado")
-      .limit(2000),
-    dataClient
-      .from("instagram_ads_daily")
-      .select("valor_gasto, impressoes, alcance, cliques, leads, data_referencia")
-      .eq("tenant_id", tenantId)
-      .gte("data_referencia", monthStart)
-      .lte("data_referencia", monthEnd)
-      .limit(2000),
-    dataClient
-      .from("objetivos_metas")
-      .select("id, titulo, modulo, periodo_tipo, meta_alcancavel, updated_at")
-      .eq("tenant_id", tenantId)
-      .eq("ativo", true)
-      .limit(30),
+    block.agenda.enabled
+      ? dataClient
+          .from("agenda_eventos")
+          .select("id, titulo, tipo, inicio, local, status")
+          .eq("tenant_id", tenantId)
+          .neq("status", "cancelado")
+          .gte("inicio", tipoResumo === "lembrete_agendamento" ? new Date().toISOString() : agendaPeriod.start)
+          .lt("inicio", tipoResumo === "lembrete_agendamento" ? reminderEnd : agendaPeriod.end)
+          .order("inicio", { ascending: true })
+          .limit(filters.nivel_detalhe === "detalhado" ? 12 : 6)
+      : Promise.resolve({ data: [] }),
+    block.ocorrencias.enabled
+      ? dataClient
+          .from("ocorrencias_chamados")
+          .select("id, prioridade, status, origem_falha, tipo_falha, erro_motivo, data_chamado")
+          .eq("tenant_id", tenantId)
+          .in("status", ["aberto", "em_andamento", "reaberto"])
+          .order("data_chamado", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [] }),
+    block.instagram.enabled
+      ? dataClient
+          .from("instagram_interactions")
+          .select("id, source, profile_username, message_text, status, potential, product_topic, interaction_at")
+          .eq("tenant_id", tenantId)
+          .in("status", ["novo", "analisado"])
+          .gte("interaction_at", interactionPeriod.start)
+          .lt("interaction_at", interactionPeriod.end)
+          .order("interaction_at", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [] }),
+    block.financeiro.enabled
+      ? dataClient
+          .from("fin_lancamentos")
+          .select("tipo, status, valor, data_pagamento, descricao")
+          .eq("tenant_id", tenantId)
+          .gte("data_pagamento", financialPeriod.start.slice(0, 10))
+          .lt("data_pagamento", financialPeriod.end.slice(0, 10))
+          .neq("status", "cancelado")
+          .order("data_pagamento", { ascending: true })
+          .limit(200)
+      : Promise.resolve({ data: [] }),
+    block.ads.enabled
+      ? dataClient
+          .from("instagram_ads_daily")
+          .select("valor_gasto, impressoes, alcance, cliques, leads, data_referencia")
+          .eq("tenant_id", tenantId)
+          .gte("data_referencia", adsPeriod.start.slice(0, 10))
+          .lt("data_referencia", adsPeriod.end.slice(0, 10))
+          .limit(2000)
+      : Promise.resolve({ data: [] }),
+    block.objetivos.enabled
+      ? dataClient
+          .from("objetivos_metas")
+          .select("id, titulo, modulo, periodo_tipo, meta_alcancavel, updated_at")
+          .eq("tenant_id", tenantId)
+          .eq("ativo", true)
+          .limit(30)
+      : Promise.resolve({ data: [] }),
   ]);
 
-  const todayEvents = agendaToday.data ?? [];
-  const nextEvents = agendaNext7.data ?? [];
-  const openOccurrences = ocorrenciasOpen.data ?? [];
-  const openInteractions = interactionsOpen.data ?? [];
-  const financialRows = financialMonth.data ?? [];
-  const adsRows = adsMonth.data ?? [];
+  const agendaEvents = agendaResult.data ?? [];
+  const openOccurrences = occurrencesResult.data ?? [];
+  const openInteractions = interactionsResult.data ?? [];
+  const financialRows = financialResult.data ?? [];
+  const adsRows = adsResult.data ?? [];
+  const goalsRows = goalsResult.data ?? [];
 
   const entradas = financialRows
     .filter((row: { tipo: string; status: string }) => row.tipo === "entrada" && row.status === "realizado")
@@ -473,21 +629,31 @@ export async function buildOperationalSummary({
   const saidas = financialRows
     .filter((row: { tipo: string; status: string }) => row.tipo === "saida" && row.status === "realizado")
     .reduce((sum: number, row: { valor: unknown }) => sum + toNumber(row.valor), 0);
+  const predictedPayables = financialRows
+    .filter((row: { tipo: string; status: string }) => row.tipo === "saida" && row.status === "previsto")
+    .reduce((sum: number, row: { valor: unknown }) => sum + toNumber(row.valor), 0);
   const adsSpend = adsRows.reduce((sum: number, row: { valor_gasto: unknown }) => sum + toNumber(row.valor_gasto), 0);
   const adsLeads = adsRows.reduce((sum: number, row: { leads?: unknown }) => sum + toNumber(row.leads), 0);
   const urgentOccurrences = openOccurrences.filter((row: { prioridade: string }) => row.prioridade === "urgente").length;
   const highPotentialInteractions = openInteractions.filter((row: { potential: string }) => row.potential === "alto").length;
+  const hasAlert =
+    tipoResumo === "lembrete_agendamento"
+      ? agendaEvents.length > 0
+      : urgentOccurrences > 0 || highPotentialInteractions > 0 || predictedPayables > 0 || agendaEvents.length > 0;
 
   const subject =
-    tipoResumo === "alerta_tecnico"
-      ? "Alertas tecnicos da plataforma"
-      : tipoResumo === "resumo_suporte"
-        ? "Resumo operacional do suporte"
-        : "Resumo executivo operacional";
+    tipoResumo === "lembrete_agendamento"
+      ? "Lembrete de agendamento"
+      : tipoResumo === "alerta_tecnico"
+        ? "Alertas tecnicos da plataforma"
+        : tipoResumo === "resumo_suporte"
+          ? "Prioridades operacionais do suporte"
+          : "Resumo executivo operacional";
 
   const lines = [
     `*${subject}*`,
     `Destinatario: ${recipientName}`,
+    `Template: ${filters.template_key ?? "personalizado"}`,
     `Atualizado em ${new Intl.DateTimeFormat("pt-BR", {
       day: "2-digit",
       month: "2-digit",
@@ -498,37 +664,50 @@ export async function buildOperationalSummary({
     "",
   ];
 
-  if (tipoResumo !== "alerta_tecnico") {
+  if (block.agenda.enabled) {
     lines.push(`*Agenda*`);
-    lines.push(`Hoje: ${todayEvents.length} evento(s). Proximos 7 dias: ${nextEvents.length}.`);
-    nextEvents.slice(0, 5).forEach((event: { titulo: string; inicio: string; local?: string | null }) => {
+    lines.push(
+      tipoResumo === "lembrete_agendamento"
+        ? `Proximos ${filters.antecedencia_minutos ?? 60} min: ${agendaEvents.length} evento(s).`
+        : `${agendaPeriod.label}: ${agendaEvents.length} evento(s).`,
+    );
+    agendaEvents.slice(0, filters.nivel_detalhe === "detalhado" ? 10 : 5).forEach((event: { titulo: string; inicio: string; local?: string | null }) => {
       lines.push(`- ${formatDateTime(event.inicio)} - ${event.titulo}${event.local ? ` (${event.local})` : ""}`);
     });
     lines.push("");
   }
 
-  if (tipoResumo === "resumo_executivo" || tipoResumo === "financeiro") {
-    lines.push(`*Financeiro do mes*`);
-    lines.push(`Entradas realizadas: ${formatMoney(entradas)}`);
-    lines.push(`Saidas realizadas: ${formatMoney(saidas)}`);
-    lines.push(`Resultado parcial: ${formatMoney(entradas - saidas)}`);
+  if (block.financeiro.enabled) {
+    lines.push(`*Financeiro operacional*`);
+    lines.push(`Periodo: ${financialPeriod.label}.`);
+    lines.push(`Entradas realizadas: ${formatMoney(entradas)}. Saidas realizadas: ${formatMoney(saidas)}.`);
+    lines.push(`A pagar previsto: ${formatMoney(predictedPayables)}.`);
+    financialRows
+      .filter((row: { tipo: string; status: string }) => row.tipo === "saida" && row.status === "previsto")
+      .slice(0, 4)
+      .forEach((row: { data_pagamento: string; descricao?: string | null; valor: unknown }) => {
+        lines.push(`- ${row.data_pagamento}: ${row.descricao ?? "Pagamento previsto"} (${formatMoney(toNumber(row.valor))})`);
+      });
     lines.push("");
   }
 
-  if (tipoResumo === "resumo_executivo" || tipoResumo === "resumo_suporte" || tipoResumo === "alerta_tecnico") {
+  if (block.ocorrencias.enabled || block.instagram.enabled) {
     lines.push(`*Atencoes operacionais*`);
-    lines.push(`Ocorrencias abertas: ${openOccurrences.length} (${urgentOccurrences} urgente(s)).`);
-    lines.push(`Interacoes pendentes: ${openInteractions.length} (${highPotentialInteractions} alto potencial).`);
+    if (block.ocorrencias.enabled) lines.push(`Ocorrencias abertas: ${openOccurrences.length} (${urgentOccurrences} urgente(s)).`);
+    if (block.instagram.enabled) lines.push(`Interacoes pendentes: ${openInteractions.length} (${highPotentialInteractions} alto potencial).`);
     openOccurrences.slice(0, 4).forEach((item: { prioridade: string; tipo_falha?: string | null; erro_motivo: string }) => {
       lines.push(`- ${item.prioridade.toUpperCase()}: ${item.tipo_falha ?? item.erro_motivo}`);
+    });
+    openInteractions.slice(0, 4).forEach((item: { potential: string; profile_username?: string | null; product_topic?: string | null; message_text?: string | null }) => {
+      lines.push(`- ${item.potential.toUpperCase()}: ${item.profile_username ?? "perfil"} - ${item.product_topic ?? item.message_text ?? "interacao"}`);
     });
     lines.push("");
   }
 
-  if (tipoResumo === "resumo_executivo" || tipoResumo === "alerta_tecnico") {
+  if (block.ads.enabled || block.objetivos.enabled) {
     lines.push(`*Ads e metas*`);
-    lines.push(`Investimento Ads no mes: ${formatMoney(adsSpend)}. Leads registrados: ${adsLeads}.`);
-    lines.push(`Metas cadastradas para monitorar: ${(goalsRisk.data ?? []).length}.`);
+    if (block.ads.enabled) lines.push(`Investimento Ads (${adsPeriod.label}): ${formatMoney(adsSpend)}. Leads registrados: ${adsLeads}.`);
+    if (block.objetivos.enabled) lines.push(`Metas cadastradas para monitorar: ${goalsRows.length}.`);
     lines.push("");
   }
 
@@ -537,7 +716,7 @@ export async function buildOperationalSummary({
       ? "Acao sugerida: priorizar ocorrencias urgentes antes de novas demandas."
       : highPotentialInteractions > 0
         ? "Acao sugerida: responder interacoes de alto potencial ainda hoje."
-        : todayEvents.length > 0
+        : agendaEvents.length > 0
           ? "Acao sugerida: confirmar agenda do dia e preparar materiais dos eventos."
           : "Acao sugerida: revisar pendencias abertas e manter acompanhamento preventivo.";
 
@@ -546,15 +725,20 @@ export async function buildOperationalSummary({
   return {
     subject,
     text: lines.join("\n"),
+    shouldSend: !filters.enviar_apenas_com_alerta || hasAlert,
     metadata: {
-      todayEvents: todayEvents.length,
-      nextEvents: nextEvents.length,
+      templateKey: filters.template_key,
+      blocks: filters.blocos,
+      onlyAlert: Boolean(filters.enviar_apenas_com_alerta),
+      hasAlert,
+      agendaEvents: agendaEvents.length,
       openOccurrences: openOccurrences.length,
       urgentOccurrences,
       openInteractions: openInteractions.length,
       highPotentialInteractions,
       entradas,
       saidas,
+      predictedPayables,
       adsSpend,
       adsLeads,
     },

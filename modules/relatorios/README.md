@@ -5,9 +5,46 @@ Modulo para configurar destinatarios, agendamentos e historico de envio de resum
 ## Estrutura
 
 - `Reports`: quadro geral de envios, erros, rotinas ativas e historico.
-- `Admin`: cadastro de destinatarios e agendamentos.
+- `Admin`: cadastro de destinatarios, templates e agendamentos.
 - Endpoint n8n: `/api/relatorios/due?time=HH:mm`.
 - Endpoint de log: `/api/relatorios/log`.
+
+## Templates e blocos
+
+Cada agendamento pode usar um template pronto ou uma configuracao personalizada.
+
+Templates iniciais:
+
+- `Ju - Resumo executivo`: agenda, financeiro, ocorrencias, directs/interacoes, Ads e objetivos.
+- `Ju - Fechamento do dia`: leitura curta do dia e principais pendencias.
+- `Suporte - Prioridades do dia`: agenda do dia, proximos compromissos financeiros, ocorrencias e interacoes pendentes.
+- `Jeff - Alertas tecnicos`: envia apenas quando houver alerta.
+- `Especialista - Agenda operacional`: foco nos proximos compromissos.
+- `Lembrete de agenda`: envia somente se existir compromisso dentro da antecedencia configurada.
+
+Blocos disponiveis:
+
+- Agenda
+- Financeiro operacional
+- Ocorrencias
+- Directs e interacoes
+- Ads
+- Objetivos e metas
+
+Cada bloco tem seu proprio periodo: hoje, amanha, proximos 7 dias, proximos 15 dias, mes atual, ultimos 7 dias, ultimos 30 dias, ano atual ou pendentes em aberto.
+
+Use `Enviar apenas se houver alerta` para evitar mensagens vazias. Nesse caso, o envio e registrado como `ignorado` quando nao houver evento, pendencia ou alerta relevante no periodo.
+
+## Lembrete de agendamento
+
+Para lembretes:
+
+1. Crie um agendamento com tipo `Lembrete de agenda`.
+2. Selecione o template `Lembrete de agenda`.
+3. Configure a antecedencia em minutos, por exemplo `60`.
+4. Mantenha o bloco `Agenda` ativo.
+
+O sistema envia apenas se houver evento dentro da janela configurada.
 
 ## Variaveis
 
