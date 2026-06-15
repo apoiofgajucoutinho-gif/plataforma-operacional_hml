@@ -83,6 +83,20 @@ export type ComercialRecebivel = {
   updated_at: string;
 };
 
+export type ComercialRawImport = {
+  id: string;
+  tenant_id: string;
+  event_id: string | null;
+  transaction_id: string | null;
+  payload: Record<string, unknown>;
+  status: "recebido" | "processado" | "erro" | "ignorado";
+  error: string | null;
+  received_at: string;
+  processed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ComercialContext = {
   tenant: ComercialTenant | null;
   allowedModules: string[];
@@ -93,4 +107,5 @@ export type ComercialContext = {
   recebiveis: ComercialRecebivel[];
   alunos: ComercialAluno[];
   produtos: ComercialProduto[];
+  rawImports: ComercialRawImport[];
 };

@@ -6,6 +6,7 @@ import type {
   ComercialAluno,
   ComercialContext,
   ComercialProduto,
+  ComercialRawImport,
   ComercialRecebivel,
   ComercialVenda,
 } from "@/modules/comercial/types";
@@ -64,6 +65,43 @@ function latestDate(rows: Array<{ updated_at?: string | null; created_at?: strin
     .at(-1) ?? null;
 }
 
+async function fetchTenantRows({
+  client,
+  table,
+  tenantId,
+  orderColumn,
+  ascending,
+  nullsFirst,
+  maxRows = 20000,
+}: {
+  client: SupabaseAny;
+  table: string;
+  tenantId: string;
+  orderColumn: string;
+  ascending: boolean;
+  nullsFirst?: boolean;
+  maxRows?: number;
+}) {
+  const pageSize = 1000;
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (let from = 0; from < maxRows; from += pageSize) {
+    const { data, error } = await client
+      .from(table)
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order(orderColumn, { ascending, nullsFirst })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw new Error(error.message);
+
+    rows.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+  }
+
+  return rows;
+}
+
 export async function getComercialContext(): Promise<ComercialContext> {
   const userClient = await createClient();
   const {
@@ -107,53 +145,65 @@ export async function getComercialContext(): Promise<ComercialContext> {
   }
 
   try {
-    const [tenantResult, vendasResult, recebiveisResult, alunosResult, produtosResult] = await Promise.all([
+    const [tenantResult, vendasResult, recebiveisResult, alunosResult, produtosResult, rawImportsResult] = await Promise.all([
       dataClient.from("tenants").select("id, nome").eq("id", membership.tenant_id).maybeSingle(),
-      dataClient
-        .from("comercial_vendas")
-        .select("*")
-        .eq("tenant_id", membership.tenant_id)
-        .order("data_compra", { ascending: false, nullsFirst: false })
-        .limit(500),
-      dataClient
-        .from("comercial_recebiveis")
-        .select("*")
-        .eq("tenant_id", membership.tenant_id)
-        .order("data_prevista", { ascending: true, nullsFirst: false })
-        .limit(1000),
-      dataClient
-        .from("comercial_alunos")
-        .select("*")
-        .eq("tenant_id", membership.tenant_id)
-        .order("ultima_compra_at", { ascending: false, nullsFirst: false })
-        .limit(500),
+      fetchTenantRows({
+        client: dataClient,
+        table: "comercial_vendas",
+        tenantId: membership.tenant_id,
+        orderColumn: "data_compra",
+        ascending: false,
+        nullsFirst: false,
+      }),
+      fetchTenantRows({
+        client: dataClient,
+        table: "comercial_recebiveis",
+        tenantId: membership.tenant_id,
+        orderColumn: "data_prevista",
+        ascending: true,
+        nullsFirst: false,
+      }),
+      fetchTenantRows({
+        client: dataClient,
+        table: "comercial_alunos",
+        tenantId: membership.tenant_id,
+        orderColumn: "ultima_compra_at",
+        ascending: false,
+        nullsFirst: false,
+      }),
       dataClient
         .from("comercial_produtos")
         .select("*")
         .eq("tenant_id", membership.tenant_id)
         .order("nome"),
+      dataClient
+        .from("comercial_hotmart_raw")
+        .select("*")
+        .eq("tenant_id", membership.tenant_id)
+        .order("received_at", { ascending: false })
+        .limit(50),
     ]);
 
-    if (vendasResult.error) throw new Error(vendasResult.error.message);
-    if (recebiveisResult.error) throw new Error(recebiveisResult.error.message);
-    if (alunosResult.error) throw new Error(alunosResult.error.message);
     if (produtosResult.error) throw new Error(produtosResult.error.message);
+    if (rawImportsResult.error) throw new Error(rawImportsResult.error.message);
 
-    const vendas = asNumberRows(vendasResult.data) as ComercialVenda[];
-    const recebiveis = asNumberRows(recebiveisResult.data) as ComercialRecebivel[];
-    const alunos = alunosResult.data as ComercialAluno[];
+    const vendas = asNumberRows(vendasResult) as ComercialVenda[];
+    const recebiveis = asNumberRows(recebiveisResult) as ComercialRecebivel[];
+    const alunos = alunosResult as ComercialAluno[];
     const produtos = produtosResult.data as ComercialProduto[];
+    const rawImports = rawImportsResult.data as ComercialRawImport[];
 
     return {
       tenant: tenantResult.data,
       allowedModules,
       diagnostic: null,
-      updatedAt: latestDate([...vendas, ...recebiveis, ...alunos, ...produtos]),
+      updatedAt: latestDate([...vendas, ...recebiveis, ...alunos, ...produtos, ...rawImports]),
       canWrite,
       vendas,
       recebiveis,
       alunos,
       produtos,
+      rawImports,
     };
   } catch (error) {
     return {
@@ -175,5 +225,6 @@ function emptyContext(diagnostic: string): ComercialContext {
     recebiveis: [],
     alunos: [],
     produtos: [],
+    rawImports: [],
   };
 }
