@@ -1,0 +1,96 @@
+export type ComercialTenant = {
+  id: string;
+  nome: string;
+};
+
+export type ComercialProduto = {
+  id: string;
+  tenant_id: string;
+  plataforma: "hotmart" | "cademi" | "hotmart_club" | "manual";
+  hotmart_product_id: string | null;
+  nome: string;
+  curso_id: string | null;
+  centro_resultado_id: string | null;
+  dias_acesso: number | null;
+  ativo: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ComercialAluno = {
+  id: string;
+  tenant_id: string;
+  nome: string | null;
+  email: string;
+  telefone: string | null;
+  origem: string;
+  primeira_compra_at: string | null;
+  ultima_compra_at: string | null;
+  status_acesso: "ativo" | "expirado" | "reembolsado" | "cancelado" | "nao_validado";
+  acesso_expira_em: string | null;
+  ultimo_acesso_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ComercialVenda = {
+  id: string;
+  tenant_id: string;
+  transaction_id: string;
+  aluno_id: string | null;
+  produto_id: string | null;
+  hotmart_product_id: string | null;
+  produto_nome: string | null;
+  comprador_nome: string | null;
+  comprador_email: string | null;
+  status: string;
+  forma_pagamento: string | null;
+  parcelas: number;
+  moeda: string;
+  valor_bruto: number;
+  valor_liquido: number | null;
+  taxas: number | null;
+  coproducao: number | null;
+  data_compra: string | null;
+  data_aprovacao: string | null;
+  data_reembolso: string | null;
+  data_chargeback: string | null;
+  source_sck: string | null;
+  origem: string;
+  raw_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ComercialRecebivel = {
+  id: string;
+  tenant_id: string;
+  venda_id: string | null;
+  transaction_id: string;
+  parcela_numero: number;
+  total_parcelas: number;
+  status: "previsto" | "disponivel" | "recebido" | "atrasado" | "cancelado" | "reembolsado";
+  data_prevista: string | null;
+  data_recebimento: string | null;
+  valor_bruto: number;
+  valor_liquido: number | null;
+  fonte_previsao: "hotmart" | "projetado" | "manual";
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ComercialContext = {
+  tenant: ComercialTenant | null;
+  allowedModules: string[];
+  diagnostic: string | null;
+  updatedAt: string | null;
+  canWrite: boolean;
+  vendas: ComercialVenda[];
+  recebiveis: ComercialRecebivel[];
+  alunos: ComercialAluno[];
+  produtos: ComercialProduto[];
+};
