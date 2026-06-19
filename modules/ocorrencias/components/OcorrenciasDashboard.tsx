@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowUpDown,
   BadgeCheck,
   BarChart3,
   ClipboardList,
@@ -16,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { ExportButtons } from "@/components/ui/ExportButtons";
 import type {
   OcorrenciaCadastro,
   OcorrenciaCadastroTipo,
@@ -30,6 +32,17 @@ import type {
 
 type TabKey = "visao" | "chamados" | "incidentes" | "marketing" | "planos" | "relatorios" | "admin";
 type PeriodFilter = "7d" | "30d" | "90d" | "all";
+type ChamadoSortKey =
+  | "data_chamado"
+  | "nome_cliente"
+  | "categoria"
+  | "canal"
+  | "erro_motivo"
+  | "origem_falha"
+  | "tipo_falha"
+  | "prioridade"
+  | "status"
+  | "impacto";
 
 const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "visao", label: "Visao Geral" },
@@ -155,6 +168,40 @@ function label(value: string | null | undefined) {
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+
+function isWhatsAppChannel(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim() === "whatsapp";
+}
+
+function formatWhatsApp(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 13);
+  if (!digits) return "";
+
+  const country = digits.slice(0, 2);
+  const area = digits.slice(2, 4);
+  const first = digits.slice(4, 9);
+  const last = digits.slice(9, 13);
+
+  return [country, area, first, last].filter(Boolean).join(last ? "-" : " ");
+}
+
+const chamadoExportColumns = [
+  { header: "Data", value: (row: OcorrenciaChamado) => dateFormat(row.data_chamado) },
+  { header: "Nome", value: (row: OcorrenciaChamado) => row.nome_cliente },
+  { header: "Categoria", value: (row: OcorrenciaChamado) => row.categoria },
+  { header: "Canal", value: (row: OcorrenciaChamado) => row.canal },
+  { header: "Contato", value: (row: OcorrenciaChamado) => isWhatsAppChannel(row.canal) ? row.telefone : row.instagram },
+  { header: "Motivo", value: (row: OcorrenciaChamado) => row.erro_motivo },
+  { header: "Origem", value: (row: OcorrenciaChamado) => label(row.origem_falha) },
+  { header: "Falha", value: (row: OcorrenciaChamado) => row.tipo_falha },
+  { header: "Prioridade", value: (row: OcorrenciaChamado) => label(row.prioridade) },
+  { header: "Status", value: (row: OcorrenciaChamado) => label(row.status) },
+  { header: "Impacto", value: (row: OcorrenciaChamado) => money(impactoDefensavel(row).value) },
+];
 
 function periodStart(period: PeriodFilter) {
   if (period === "all") return null;
@@ -519,7 +566,18 @@ export function OcorrenciasDashboard({ context }: { context: OcorrenciasContext 
             </Card>
           ) : null}
           <Card className="overflow-hidden">
-            <TableHeader title="Chamados registrados" count={`${filteredChamados.length} registros`} />
+            <TableHeader
+              title="Chamados registrados"
+              count={`${filteredChamados.length} registros`}
+              actions={
+                <ExportButtons
+                  label="Chamados registrados"
+                  filename="chamados-registrados"
+                  columns={chamadoExportColumns}
+                  rows={filteredChamados}
+                />
+              }
+            />
             <ChamadosTable chamados={filteredChamados} canWrite={context.canWrite} onEdit={editChamado} onDelete={(id) => deleteEntity("chamado", id)} />
           </Card>
         </section>
@@ -715,10 +773,37 @@ function ChamadoForm({ form, setForm, cadastros, onSubmit, onCancel, editing }: 
             {prioridadeOptions.map((option) => <option key={option} value={option}>{label(option)}</option>)}
           </select>
         </Field>
-        <Field label="Canal"><SelectFromCadastro value={form.canal} onChange={(value) => setForm((f: any) => ({ ...f, canal: value }))} cadastros={cadastros} tipo="canal" fallback={["Instagram", "WhatsApp", "E-mail"]} /></Field>
+        <Field label="Canal">
+          <SelectFromCadastro
+            value={form.canal}
+            onChange={(value) => setForm((f: any) => ({ ...f, canal: value }))}
+            cadastros={cadastros}
+            tipo="canal"
+            fallback={["Instagram", "WhatsApp", "E-mail"]}
+          />
+        </Field>
         <Field label="Plataforma"><SelectFromCadastro value={form.plataforma_erro} onChange={(value) => setForm((f: any) => ({ ...f, plataforma_erro: value }))} cadastros={cadastros} tipo="plataforma" fallback={["Meta Ads", "Instagram", "Cademi", "Hotmart", "Greenn"]} /></Field>
         <Field label="Cliente"><input className="input" value={form.nome_cliente} onChange={(e) => setForm((f: any) => ({ ...f, nome_cliente: e.target.value }))} /></Field>
-        <Field label="Instagram"><input className="input" value={form.instagram} onChange={(e) => setForm((f: any) => ({ ...f, instagram: e.target.value }))} /></Field>
+        {isWhatsAppChannel(form.canal) ? (
+          <Field label="WhatsApp">
+            <input
+              inputMode="tel"
+              className="input"
+              value={form.telefone}
+              onChange={(e) => setForm((f: any) => ({ ...f, telefone: formatWhatsApp(e.target.value) }))}
+              placeholder="55 11 97400-0000"
+            />
+          </Field>
+        ) : (
+          <Field label="Instagram">
+            <input
+              className="input"
+              value={form.instagram}
+              onChange={(e) => setForm((f: any) => ({ ...f, instagram: e.target.value }))}
+              placeholder="@usuario"
+            />
+          </Field>
+        )}
         <Field label="Campanha"><input className="input" value={form.campanha_nome} onChange={(e) => setForm((f: any) => ({ ...f, campanha_nome: e.target.value }))} /></Field>
         <Field label="Produto/curso"><SelectFromCadastro value={form.produto_curso} onChange={(value) => setForm((f: any) => ({ ...f, produto_curso: value }))} cadastros={cadastros} tipo="produto" fallback={["Curso AASI", "Formacao", "Mentoria", "Clinica Aura"]} /></Field>
         <Field label="Valor informado"><input type="number" step="0.01" className="input" value={form.valor_informado_marketing} onChange={(e) => setForm((f: any) => ({ ...f, valor_informado_marketing: e.target.value }))} placeholder="76.00" /></Field>
@@ -775,33 +860,62 @@ function PlanoForm({ form, setForm, onSubmit }: any) {
   );
 }
 
-function TableHeader({ title, count }: { title: string; count: string }) {
+function TableHeader({ title, count, actions }: { title: string; count: string; actions?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-brand-sand px-5 py-4">
+    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-brand-sand px-5 py-4">
       <h2 className="text-xl font-black text-brand-teal">{title}</h2>
-      <span className="text-sm font-black text-brand-clay">{count}</span>
+      <div className="flex flex-wrap items-center gap-4">
+        {actions}
+        <span className="text-sm font-black text-brand-clay">{count}</span>
+      </div>
     </div>
   );
 }
 
 function ChamadosTable({ chamados, canWrite, onEdit, onDelete }: { chamados: OcorrenciaChamado[]; canWrite: boolean; onEdit: (chamado: OcorrenciaChamado) => void; onDelete: (id: string) => void }) {
+  const [sort, setSort] = useState<{ key: ChamadoSortKey; direction: "asc" | "desc" }>({
+    key: "data_chamado",
+    direction: "desc",
+  });
+  const sortedChamados = useMemo(() => {
+    return [...chamados].sort((left, right) => {
+      const leftValue = chamadoSortValue(left, sort.key);
+      const rightValue = chamadoSortValue(right, sort.key);
+      const comparison =
+        typeof leftValue === "number" && typeof rightValue === "number"
+          ? leftValue - rightValue
+          : String(leftValue).localeCompare(String(rightValue), "pt-BR", { numeric: true, sensitivity: "base" });
+      return sort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [chamados, sort]);
+
+  function toggleSort(key: ChamadoSortKey) {
+    setSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  }
+
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] text-left text-sm">
+      <table className="w-full min-w-[1320px] text-left text-sm">
         <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
           <tr>
-            <th className="px-4 py-3">Data</th>
-            <th className="px-4 py-3">Motivo</th>
-            <th className="px-4 py-3">Origem</th>
-            <th className="px-4 py-3">Falha</th>
-            <th className="px-4 py-3">Prioridade</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Impacto</th>
+            <SortableHeader label="Data" sortKey="data_chamado" onSort={toggleSort} />
+            <SortableHeader label="Nome" sortKey="nome_cliente" onSort={toggleSort} />
+            <SortableHeader label="Categoria" sortKey="categoria" onSort={toggleSort} />
+            <SortableHeader label="Canal" sortKey="canal" onSort={toggleSort} />
+            <SortableHeader label="Motivo" sortKey="erro_motivo" onSort={toggleSort} />
+            <SortableHeader label="Origem" sortKey="origem_falha" onSort={toggleSort} />
+            <SortableHeader label="Falha" sortKey="tipo_falha" onSort={toggleSort} />
+            <SortableHeader label="Prioridade" sortKey="prioridade" onSort={toggleSort} />
+            <SortableHeader label="Status" sortKey="status" onSort={toggleSort} />
+            <SortableHeader label="Impacto" sortKey="impacto" onSort={toggleSort} />
             <th className="px-4 py-3">Acoes</th>
           </tr>
         </thead>
         <tbody>
-          {chamados.map((chamado) => (
+          {sortedChamados.map((chamado) => (
             <ChamadoRow key={chamado.id} chamado={chamado} canWrite={canWrite} onEdit={onEdit} onDelete={onDelete} />
           ))}
         </tbody>
@@ -815,6 +929,12 @@ function ChamadoRow({ chamado, canWrite, onEdit, onDelete }: { chamado: Ocorrenc
   return (
     <tr className="border-b border-brand-sand/70">
       <td className="px-4 py-3 font-bold text-brand-teal">{dateFormat(chamado.data_chamado)}</td>
+      <td className="px-4 py-3 font-bold text-brand-teal">{chamado.nome_cliente ?? "-"}</td>
+      <td className="px-4 py-3 text-brand-teal/75">{chamado.categoria}</td>
+      <td className="px-4 py-3">
+        <p className="font-bold text-brand-teal">{chamado.canal}</p>
+        <p className="text-xs text-brand-teal/50">{isWhatsAppChannel(chamado.canal) ? chamado.telefone : chamado.instagram}</p>
+      </td>
       <td className="max-w-[320px] truncate px-4 py-3 text-brand-teal">{chamado.erro_motivo}</td>
       <td className="px-4 py-3"><Badge value={chamado.origem_falha} /></td>
       <td className="px-4 py-3 text-brand-teal/75">{chamado.tipo_falha ?? "-"}</td>
@@ -834,6 +954,30 @@ function ChamadoRow({ chamado, canWrite, onEdit, onDelete }: { chamado: Ocorrenc
       </td>
     </tr>
   );
+}
+
+function SortableHeader({
+  label: headerLabel,
+  sortKey,
+  onSort,
+}: {
+  label: string;
+  sortKey: ChamadoSortKey;
+  onSort: (key: ChamadoSortKey) => void;
+}) {
+  return (
+    <th className="px-4 py-3">
+      <button type="button" onClick={() => onSort(sortKey)} className="inline-flex items-center gap-1.5 font-black">
+        {headerLabel}
+        <ArrowUpDown className="h-3.5 w-3.5" />
+      </button>
+    </th>
+  );
+}
+
+function chamadoSortValue(chamado: OcorrenciaChamado, key: ChamadoSortKey) {
+  if (key === "impacto") return impactoDefensavel(chamado).value;
+  return chamado[key] ?? "";
 }
 
 function IncidentesTable({ chamados }: { chamados: OcorrenciaChamado[] }) {
