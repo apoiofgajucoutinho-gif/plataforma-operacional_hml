@@ -583,6 +583,7 @@ function interactionSortValue(interaction: InstagramInteraction, key: Interactio
 }
 
 export function InstagramDashboard({ context }: { context: InstagramContext }) {
+  const isMarketing = context.role === "MARKETING_PARTNER";
   const [activeTab, setActiveTab] = useState<TabKey>("insights");
   const [period, setPeriod] = useState<PeriodFilter>("all");
   const [type, setType] = useState<TypeFilter>("all");
@@ -615,7 +616,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
             ? "Instagram: Insights"
             : activeTab === "results"
               ? "Instagram: Resultados"
-              : "Instagram: Directs",
+              : "Instagram: Interacoes",
       }),
       keepalive: true,
     });
@@ -869,7 +870,12 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
   const directMessages = filteredInteractions.filter((interaction) => interaction.source === "direct_message").length;
   const directStoryReplies = filteredInteractions.filter((interaction) => interaction.source === "story_reply").length;
   const directComments = filteredInteractions.filter((interaction) => interaction.source === "post_comment").length;
-  const directFollowers = filteredInteractions.filter((interaction) => interaction.source === "new_follower").length;
+  const latestFollowerSnapshot = context.followerSnapshots.at(-1);
+  const previousFollowerSnapshot = context.followerSnapshots.at(-2);
+  const followerGrowth =
+    latestFollowerSnapshot && previousFollowerSnapshot
+      ? latestFollowerSnapshot.followers_total - previousFollowerSnapshot.followers_total
+      : 0;
   const directHighPotential = filteredInteractions.filter((interaction) => interaction.potential === "alto").length;
   const directPending = filteredInteractions.filter((interaction) => interaction.status === "novo" || interaction.status === "analisado").length;
   const directHighPriorityOpen = filteredInteractions.filter((interaction) => interactionPriority(interaction) === "alta" && interaction.status !== "respondido" && interaction.status !== "arquivado").length;
@@ -975,7 +981,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
           Resultados
         </TabButton>
         <TabButton isActive={activeTab === "directs"} onClick={() => setActiveTab("directs")}>
-          Directs
+          Interações
         </TabButton>
       </div>
 
@@ -1226,14 +1232,27 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
         </>
       ) : (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-7">
+          <section className={clsx("grid gap-4 sm:grid-cols-2", isMarketing ? "lg:grid-cols-6" : "lg:grid-cols-4 xl:grid-cols-8")}>
             <Metric icon={<MessageCircle className="h-5 w-5" />} label="Interacoes" value={filteredInteractions.length} helper="no filtro aplicado" />
             <Metric icon={<Sparkles className="h-5 w-5" />} label="Alta prioridade" value={directHighPriorityOpen} helper="sem resposta" />
             <Metric icon={<AlertTriangle className="h-5 w-5" />} label="Alertas" value={directRiskAlerts} helper="risco/reclamacao" />
-            <Metric icon={<Mail className="h-5 w-5" />} label="Directs" value={directMessages} helper="mensagens privadas" />
-            <Metric icon={<Send className="h-5 w-5" />} label="Stories" value={directStoryReplies} helper="respostas recebidas" />
+            {!isMarketing ? (
+              <>
+                <Metric icon={<Mail className="h-5 w-5" />} label="Directs" value={directMessages} helper="mensagens privadas" />
+                <Metric icon={<Send className="h-5 w-5" />} label="Stories" value={directStoryReplies} helper="respostas recebidas" />
+              </>
+            ) : null}
             <Metric icon={<MessageCircle className="h-5 w-5" />} label="Comentarios" value={directComments} helper="comentarios de posts" />
-            <Metric icon={<UserPlus className="h-5 w-5" />} label="Seguidores" value={directFollowers} helper="eventos/variacao" />
+            <Metric
+              icon={<UserPlus className="h-5 w-5" />}
+              label="Novos seguidores"
+              value={followerGrowth > 0 ? `+${numberFormat(followerGrowth)}` : numberFormat(followerGrowth)}
+              helper={
+                latestFollowerSnapshot
+                  ? `${numberFormat(latestFollowerSnapshot.followers_total)} seguidores totais`
+                  : "histórico ainda não disponível"
+              }
+            />
             <Metric icon={<Radio className="h-5 w-5" />} label="Pendentes" value={directPending} helper={`${directRespondedToday} respondidos hoje`} />
           </section>
 
@@ -1278,8 +1297,8 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold text-brand-clay">{numberFormat(filteredInteractions.length)} interacoes</span>
                 <ExportButtons
-                  label="Exportar directs"
-                  filename="instagram-directs"
+                  label="Exportar interações"
+                  filename="instagram-interacoes"
                   columns={directColumns}
                   rows={filteredInteractions}
                 />

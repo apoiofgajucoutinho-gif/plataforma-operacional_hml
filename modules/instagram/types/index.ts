@@ -38,7 +38,13 @@ export type InstagramInteraction = {
   next_action: string | null;
 };
 
+export type InstagramFollowerSnapshot = {
+  snapshot_date: string;
+  followers_total: number;
+};
+
 export type InstagramContext = {
+  role?: string | null;
   tenant: {
     id: string;
     nome: string;
@@ -50,6 +56,7 @@ export type InstagramContext = {
   } | null;
   posts: InstagramPostMetric[];
   interactions: InstagramInteraction[];
+  followerSnapshots: InstagramFollowerSnapshot[];
   importRun: {
     source: string;
     status: string;
