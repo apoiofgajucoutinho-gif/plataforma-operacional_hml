@@ -956,7 +956,7 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
           </p>
           <h1 className="mt-2 text-3xl font-semibold text-brand-teal sm:text-4xl">Instagram Analytics</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
-            KPIs, insights e resultados migrados da planilha para o Supabase, com layout operacional da plataforma.
+            Indicadores, tendências e oportunidades para otimizar a performance do Instagram.
           </p>
         </div>
         {context.updatedAt ? (
