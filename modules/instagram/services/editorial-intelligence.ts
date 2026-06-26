@@ -14,6 +14,10 @@ export type OpportunityType =
 export type ThemeClassification = "Alta oportunidade" | "Boa oportunidade" | "Observação" | "Baixa aderência ao ciclo" | "Lacuna";
 export type RecommendedAction = "Criar Briefing" | "Adicionar ao Backlog" | "Explorar Melhor" | "Arquivar";
 
+export const EDITORIAL_ENGINE_NAME = "Editorial Intelligence Essentials";
+export const EDITORIAL_ENGINE_TYPE = "RulesDecisionEngine";
+export const EDITORIAL_ENGINE_VERSION = "0.2.0";
+
 export type Opportunity = {
   id: string;
   theme: string;

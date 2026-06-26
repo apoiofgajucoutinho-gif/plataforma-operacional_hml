@@ -31,6 +31,9 @@ import { Card } from "@/components/ui/Card";
 import type { InstagramInteraction, InstagramPostMetric } from "@/modules/instagram/types";
 import {
   RulesDecisionEngine,
+  EDITORIAL_ENGINE_NAME,
+  EDITORIAL_ENGINE_TYPE,
+  EDITORIAL_ENGINE_VERSION,
   average,
   compact,
   executiveSummary,
@@ -49,13 +52,58 @@ import type {
   Gap,
   Opportunity,
   Recommendation,
+  RecommendedAction,
 } from "@/modules/instagram/services/editorial-intelligence";
 
 type Screen = "home" | "form" | "result";
 type ActionStatus = "Briefing criado" | "No backlog" | "Arquivado";
+type UserRole = "ADMIN" | "SUPORTE" | string | null | undefined;
+type ExpertUsefulness = "Sim" | "Parcialmente" | "Não";
+type ExpertDecision = "Criar briefing" | "Adicionar ao backlog" | "Explorar melhor" | "Arquivar" | "Apenas analisar" | "Ainda não decidi";
+type LaterOutcome = "Produzi o conteúdo" | "Ficou para depois" | "Alterei o tema" | "Não utilizei" | "Em andamento" | "Ainda não sei";
+type PerceivedConfidence = "Baixa" | "Média" | "Alta";
+type CycleSameDecision = "Sim" | "Parcialmente" | "Não" | "";
+type CycleTimeSaved = "Nenhum" | "Até 10 minutos" | "10 a 30 minutos" | "Mais de 30 minutos" | "";
+type CycleReuse = "Sim" | "Talvez" | "Não" | "";
+
+type RecommendationValidation = {
+  id: string;
+  cycleId: string;
+  recommendationId: string;
+  theme: string;
+  cycleContext: string;
+  objective: string;
+  editorialPriority: string;
+  capacity: string;
+  engineName: string;
+  engineType: string;
+  engineVersion: string;
+  primaryRule: string;
+  secondaryRules: string[];
+  engineConfidenceScore: number;
+  recommendedDecision: RecommendedAction;
+  usefulness: ExpertUsefulness;
+  reasons: string[];
+  observation: string;
+  expertDecision: ExpertDecision;
+  laterOutcome: LaterOutcome | "";
+  perceivedConfidence: PerceivedConfidence | "";
+  userRole: string;
+  shownAt: string | null;
+  evaluatedAt: string;
+  timeToDecisionMs: number | null;
+};
+
+type CycleFeedback = {
+  sameDecisions: CycleSameDecision;
+  timeSaved: CycleTimeSaved;
+  wouldUseAgain: CycleReuse;
+  comment: string;
+  updatedAt: string | null;
+};
 
 type PersistedEditorialState = {
-  version: 1;
+  version: 1 | 2;
   config: CycleConfig;
   generatedAt: string | null;
   statuses: Record<string, ActionStatus>;
@@ -63,10 +111,132 @@ type PersistedEditorialState = {
   backlogDates: Record<string, string>;
   createdBriefings: Briefing[];
   archivedReasons: Record<string, string>;
+  validations?: Record<string, RecommendationValidation>;
+  cycleFeedback?: CycleFeedback;
   savedAt: string | null;
 };
 
 const STORAGE_KEY = "instagram-editorial-cycle-v1";
+const VALIDATION_REASONS = ["Tema incorreto", "Prioridade incorreta", "Contexto inadequado", "Evidência insuficiente", "Esforço muito alto", "Tema já explorado", "Não faz sentido neste momento", "Recomendação genérica demais", "Falta dado/comentário", "Outro"];
+const EXPERT_DECISIONS: ExpertDecision[] = ["Criar briefing", "Adicionar ao backlog", "Explorar melhor", "Arquivar", "Apenas analisar", "Ainda não decidi"];
+const LATER_OUTCOMES: Array<LaterOutcome | ""> = ["", "Produzi o conteúdo", "Ficou para depois", "Alterei o tema", "Não utilizei", "Em andamento", "Ainda não sei"];
+const PERCEIVED_CONFIDENCE: Array<PerceivedConfidence | ""> = ["", "Baixa", "Média", "Alta"];
+const EMPTY_CYCLE_FEEDBACK: CycleFeedback = { sameDecisions: "", timeSaved: "", wouldUseAgain: "", comment: "", updatedAt: null };
+
+function cycleIdFrom(generatedAt: string | null, config: CycleConfig) {
+  return `${generatedAt ?? "draft"}-${config.period}-${config.context || "sem-contexto"}`;
+}
+
+function statusDecision(status?: ActionStatus): ExpertDecision {
+  if (status === "Briefing criado") return "Criar briefing";
+  if (status === "No backlog") return "Adicionar ao backlog";
+  if (status === "Arquivado") return "Arquivar";
+  return "Ainda não decidi";
+}
+
+function decisionScore(validation: RecommendationValidation) {
+  if (validation.usefulness === "Não") return 0;
+  const byDecision: Record<ExpertDecision, number> = {
+    "Criar briefing": 1,
+    "Adicionar ao backlog": 0.7,
+    "Explorar melhor": 0.5,
+    "Arquivar": 0,
+    "Apenas analisar": 0.2,
+    "Ainda não decidi": 0,
+  };
+  const baseline = validation.usefulness === "Sim" ? 0.8 : validation.usefulness === "Parcialmente" ? 0.3 : 0;
+  return Math.max(baseline, byDecision[validation.expertDecision]);
+}
+
+function confidenceScore(value: RecommendationValidation["perceivedConfidence"]) {
+  if (value === "Alta") return 1;
+  if (value === "Média") return 0.66;
+  if (value === "Baixa") return 0.33;
+  return 0;
+}
+
+function msToHuman(value: number | null) {
+  if (!value) return "-";
+  const minutes = Math.round(value / 60000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} h`;
+}
+
+function buildValidation(item: Recommendation, config: CycleConfig, generatedAt: string | null, status: ActionStatus | undefined, role: UserRole, usefulness: ExpertUsefulness, reasons: string[], observation: string, expertDecision: ExpertDecision, laterOutcome: LaterOutcome | "", perceivedConfidence: PerceivedConfidence | "") {
+  const evaluatedAt = new Date().toISOString();
+  const shownAt = generatedAt;
+  return {
+    id: `${cycleIdFrom(generatedAt, config)}-${item.id}`,
+    cycleId: cycleIdFrom(generatedAt, config),
+    recommendationId: item.id,
+    theme: item.theme,
+    cycleContext: config.context,
+    objective: config.objective,
+    editorialPriority: config.priority,
+    capacity: config.capacity,
+    engineName: EDITORIAL_ENGINE_NAME,
+    engineType: EDITORIAL_ENGINE_TYPE,
+    engineVersion: EDITORIAL_ENGINE_VERSION,
+    primaryRule: item.rule,
+    secondaryRules: item.rulesTriggered,
+    engineConfidenceScore: item.confidenceScore,
+    recommendedDecision: item.nextAction,
+    usefulness,
+    reasons,
+    observation,
+    expertDecision: expertDecision === "Ainda não decidi" ? statusDecision(status) : expertDecision,
+    laterOutcome,
+    perceivedConfidence,
+    userRole: role || "desconhecido",
+    shownAt,
+    evaluatedAt,
+    timeToDecisionMs: shownAt ? new Date(evaluatedAt).getTime() - new Date(shownAt).getTime() : null,
+  } satisfies RecommendationValidation;
+}
+
+function summarizeValidation(analysis: Analysis, validations: Record<string, RecommendationValidation>, cycleFeedback: CycleFeedback) {
+  const records = Object.values(validations);
+  const generated = analysis.recommendations.length;
+  const evaluated = records.length;
+  const useful = records.filter((item) => item.usefulness === "Sim").length;
+  const partial = records.filter((item) => item.usefulness === "Parcialmente").length;
+  const notUseful = records.filter((item) => item.usefulness === "Não").length;
+  const briefings = records.filter((item) => item.expertDecision === "Criar briefing").length;
+  const backlog = records.filter((item) => item.expertDecision === "Adicionar ao backlog").length;
+  const archived = records.filter((item) => item.expertDecision === "Arquivar").length;
+  const undecided = Math.max(0, generated - records.filter((item) => item.expertDecision !== "Ainda não decidi").length);
+  const confidenceValues = records.map((item) => confidenceScore(item.perceivedConfidence)).filter(Boolean);
+  const iur = evaluated ? Math.round(average(records.map((item) => decisionScore(item))) * 100) : 0;
+  const decisionRate = generated ? records.filter((item) => item.expertDecision !== "Ainda não decidi").length / generated : 0;
+  const usefulnessRate = evaluated ? (useful + partial * 0.5) / evaluated : 0;
+  const perceived = confidenceValues.length ? average(confidenceValues) : 0;
+  const productConfidence = evaluated ? Math.round(average([usefulnessRate, perceived, decisionRate]) * 100) : 0;
+  const timeValues = records.map((item) => item.timeToDecisionMs).filter((item): item is number => Boolean(item));
+  return { records, generated, evaluated, useful, partial, notUseful, briefings, backlog, archived, undecided, iur, productConfidence, perceivedConfidence: confidenceValues.length ? Math.round(perceived * 100) : 0, averageTimeMs: timeValues.length ? Math.round(average(timeValues)) : null, cycleFeedback };
+}
+
+function ruleHealth(records: RecommendationValidation[]) {
+  const grouped = new Map<string, RecommendationValidation[]>();
+  records.forEach((item) => grouped.set(item.primaryRule, [...(grouped.get(item.primaryRule) ?? []), item]));
+  return [...grouped.entries()].map(([rule, items]) => {
+    const iur = Math.round(average(items.map((item) => decisionScore(item))) * 100);
+    const accepted = items.filter((item) => item.usefulness === "Sim").length;
+    const partial = items.filter((item) => item.usefulness === "Parcialmente").length;
+    const rejected = items.filter((item) => item.usefulness === "Não").length;
+    const status = items.length < 5 ? "Sem dados suficientes" : iur >= 75 && rejected <= partial ? "Saudável" : iur >= 50 ? "Atenção" : "Necessita revisão";
+    return { rule, items, iur, accepted, partial, rejected, status, lastUsed: items.sort((a, b) => b.evaluatedAt.localeCompare(a.evaluatedAt))[0]?.evaluatedAt ?? null };
+  });
+}
+
+function reviewSuggestions(records: RecommendationValidation[]) {
+  const suggestions: Array<{ area: string; reason: string; evidence: string; impact: string }> = [];
+  const reasons = new Map<string, number>();
+  records.flatMap((item) => item.reasons).forEach((reason) => reasons.set(reason, (reasons.get(reason) ?? 0) + 1));
+  [...reasons.entries()].filter(([, count]) => count >= 2).forEach(([reason, count]) => suggestions.push({ area: reason.includes("Tema") ? "Classificação de tema" : reason.includes("Contexto") ? "Uso de contexto" : "Regra editorial", reason, evidence: `${count} ocorrência(s) em validações`, impact: "Pode reduzir avaliações parciais ou negativas." }));
+  ruleHealth(records).filter((item) => item.status === "Atenção" || item.status === "Necessita revisão").forEach((item) => suggestions.push({ area: item.rule, reason: item.status, evidence: `IUR ${item.iur}% com ${item.items.length} avaliação(ões)`, impact: "Revisão manual sugerida antes de qualquer mudança no motor." }));
+  return suggestions;
+}
 
 function dateTimeLabel(value: string | null) {
   return value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "-";
@@ -85,7 +255,7 @@ function recommendationSentence(item: Recommendation) {
   return "Arquivar este tema neste ciclo, pois a evidência atual não sustenta uma ação editorial.";
 }
 
-function markdownExport(config: CycleConfig, analysis: Analysis, generatedAt: string | null, briefings: Briefing[], backlog: Recommendation[], statuses: Record<string, ActionStatus>, archivedReasons: Record<string, string>) {
+function markdownExport(config: CycleConfig, analysis: Analysis, generatedAt: string | null, briefings: Briefing[], backlog: Recommendation[], statuses: Record<string, ActionStatus>, archivedReasons: Record<string, string>, validations: Record<string, RecommendationValidation>, cycleFeedback: CycleFeedback) {
   const range = periodRange(config);
   const lines = [
     "# Inteligência Editorial - Ciclo Editorial",
@@ -155,6 +325,15 @@ function markdownExport(config: CycleConfig, analysis: Analysis, generatedAt: st
     "## Lacunas de dados",
     "",
     ...analysis.gaps.flatMap((gap) => [`### ${gap.title}`, `- Impacto: ${gap.impact}`, `- O que fazer: ${gap.action}`, ""]),
+    "## Validação da especialista",
+    "",
+    ...Object.values(validations).flatMap((item) => [`### ${item.theme}`, `- Motor: ${item.engineName} ${item.engineVersion}`, `- Avaliação: ${item.usefulness}`, `- Motivos: ${item.reasons.join(", ") || "Não informado"}`, `- Decisão: ${item.expertDecision}`, `- Resultado posterior: ${item.laterOutcome || "Não informado"}`, `- Confiança percebida: ${item.perceivedConfidence || "Não informada"}`, `- Observação: ${item.observation || "-"}`, ""]),
+    "## Diário do Ciclo",
+    "",
+    `- Tomaria as mesmas decisões sem a ferramenta: ${cycleFeedback.sameDecisions || "Não informado"}`,
+    `- Tempo economizado: ${cycleFeedback.timeSaved || "Não informado"}`,
+    `- Usaria novamente: ${cycleFeedback.wouldUseAgain || "Não informado"}`,
+    `- Comentário geral: ${cycleFeedback.comment || "-"}`,
   ];
   return lines.join("\n");
 }
@@ -169,7 +348,7 @@ function downloadMarkdown(content: string) {
   URL.revokeObjectURL(url);
 }
 
-export function EditorialIntelligence({ authorized, posts, interactions }: { authorized: boolean; posts: InstagramPostMetric[]; interactions: InstagramInteraction[] }) {
+export function EditorialIntelligence({ authorized, role, posts, interactions }: { authorized: boolean; role?: UserRole; posts: InstagramPostMetric[]; interactions: InstagramInteraction[] }) {
   const [screen, setScreen] = useState<Screen>("home");
   const [config, setConfig] = useState(initialConfig);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -189,6 +368,18 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [validations, setValidations] = useState<Record<string, RecommendationValidation>>({});
+  const [validationTarget, setValidationTarget] = useState<Recommendation | null>(null);
+  const [validationDraft, setValidationDraft] = useState<{
+    usefulness: ExpertUsefulness;
+    reasons: string[];
+    observation: string;
+    expertDecision: ExpertDecision;
+    laterOutcome: LaterOutcome | "";
+    perceivedConfidence: PerceivedConfidence | "";
+  }>({ usefulness: "Sim", reasons: [], observation: "", expertDecision: "Ainda não decidi", laterOutcome: "", perceivedConfidence: "" });
+  const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback>(EMPTY_CYCLE_FEEDBACK);
+  const canValidate = role === "ADMIN";
 
   useEffect(() => {
     try {
@@ -205,6 +396,8 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
           setBacklogDates(saved.backlogDates ?? {});
           setCreatedBriefings(saved.createdBriefings ?? []);
           setArchivedReasons(saved.archivedReasons ?? {});
+          setValidations(saved.validations ?? {});
+          setCycleFeedback(saved.cycleFeedback ?? EMPTY_CYCLE_FEEDBACK);
           setSavedAt(saved.savedAt ?? null);
         }
       }
@@ -217,9 +410,9 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
 
   useEffect(() => {
     if (!hydrated || !generatedAt || !analysis) return;
-    const state: PersistedEditorialState = { version: 1, config, generatedAt, statuses, backlog, backlogDates, createdBriefings, archivedReasons, savedAt };
+    const state: PersistedEditorialState = { version: 2, config, generatedAt, statuses, backlog, backlogDates, createdBriefings, archivedReasons, validations, cycleFeedback, savedAt };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [analysis, archivedReasons, backlog, backlogDates, config, createdBriefings, generatedAt, hydrated, savedAt, statuses]);
+  }, [analysis, archivedReasons, backlog, backlogDates, config, createdBriefings, cycleFeedback, generatedAt, hydrated, savedAt, statuses, validations]);
 
   if (!authorized) return <AccessDenied />;
 
@@ -247,7 +440,52 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
     setBacklogDates({});
     setCreatedBriefings([]);
     setArchivedReasons({});
+    setValidations({});
+    setCycleFeedback(EMPTY_CYCLE_FEEDBACK);
     setScreen("result");
+  }
+
+  function syncValidationDecision(item: Recommendation, expertDecision: ExpertDecision) {
+    setValidations((current) => {
+      const existing = current[item.id];
+      if (!existing) return current;
+      return { ...current, [item.id]: { ...existing, expertDecision, evaluatedAt: new Date().toISOString() } };
+    });
+  }
+
+  function openValidation(item: Recommendation, usefulness: ExpertUsefulness) {
+    const existing = validations[item.id];
+    setValidationTarget(item);
+    setValidationDraft({
+      usefulness,
+      reasons: existing?.reasons ?? [],
+      observation: existing?.observation ?? "",
+      expertDecision: existing?.expertDecision ?? statusDecision(statuses[item.id]),
+      laterOutcome: existing?.laterOutcome ?? "",
+      perceivedConfidence: existing?.perceivedConfidence ?? "",
+    });
+  }
+
+  function saveValidationFromDraft() {
+    if (!validationTarget) return;
+    if ((validationDraft.usefulness === "Parcialmente" || validationDraft.usefulness === "Não") && !validationDraft.reasons.length) {
+      setNotice("Selecione pelo menos um motivo para avaliações parciais ou negativas.");
+      return;
+    }
+    const record = buildValidation(validationTarget, config, generatedAt, statuses[validationTarget.id], role, validationDraft.usefulness, validationDraft.reasons, validationDraft.observation, validationDraft.expertDecision, validationDraft.laterOutcome, validationDraft.perceivedConfidence);
+    setValidations((current) => ({ ...current, [validationTarget.id]: record }));
+    setValidationTarget(null);
+    setNotice("Validação registrada localmente para este ciclo.");
+  }
+
+  function quickValidate(item: Recommendation, usefulness: ExpertUsefulness) {
+    if (usefulness !== "Sim") {
+      openValidation(item, usefulness);
+      return;
+    }
+    const record = buildValidation(item, config, generatedAt, statuses[item.id], role, usefulness, [], "", statusDecision(statuses[item.id]), "", "");
+    setValidations((current) => ({ ...current, [item.id]: record }));
+    setNotice("Validação registrada. Você pode editar os detalhes no card.");
   }
 
   function createBriefing(item: Recommendation) {
@@ -266,12 +504,14 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
     };
     setCreatedBriefings((current) => current.some((entry) => entry.id === briefing.id) ? current : [...current, briefing]);
     setStatuses((current) => ({ ...current, [item.id]: "Briefing criado" }));
+    syncValidationDecision(item, "Criar briefing");
   }
 
   function addBacklog(item: Recommendation) {
     setBacklog((current) => current.some((entry) => entry.id === item.id) ? current : [...current, item]);
     setBacklogDates((current) => ({ ...current, [item.id]: current[item.id] ?? new Date().toISOString() }));
     setStatuses((current) => ({ ...current, [item.id]: "No backlog" }));
+    syncValidationDecision(item, "Adicionar ao backlog");
   }
 
   function saveAnalysis() {
@@ -291,7 +531,7 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
 
   function exportAnalysis() {
     if (!analysis) return;
-    downloadMarkdown(markdownExport(config, analysis, generatedAt, createdBriefings, backlog, statuses, archivedReasons));
+    downloadMarkdown(markdownExport(config, analysis, generatedAt, createdBriefings, backlog, statuses, archivedReasons, validations, cycleFeedback));
     setNotice("Análise exportada em Markdown.");
   }
 
@@ -306,6 +546,8 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
     setBacklogDates({});
     setCreatedBriefings([]);
     setArchivedReasons({});
+    setValidations({});
+    setCycleFeedback(EMPTY_CYCLE_FEEDBACK);
     window.localStorage.removeItem(STORAGE_KEY);
     setScreen("form");
   }
@@ -368,7 +610,21 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
 
           <ResultSection title="Recomendações Editoriais" icon={<Target className="h-5 w-5" />}>
             {analysis.recommendations.length ? <div className={analysis.recommendations.length >= 4 ? "flex snap-x gap-4 overflow-x-auto pb-3" : "grid gap-4 xl:grid-cols-3"}>{analysis.recommendations.map((item) => (
-              <RecommendationCard key={item.id} carousel={analysis.recommendations.length >= 4} item={item} status={statuses[item.id]} createBriefing={() => createBriefing(item)} addBacklog={() => addBacklog(item)} explain={() => setExplainTarget(item)} explore={() => setExploreTarget(item)} archive={() => { setArchiveTarget(item); setArchiveReason(""); }} />
+              <RecommendationCard
+                key={item.id}
+                carousel={analysis.recommendations.length >= 4}
+                item={item}
+                status={statuses[item.id]}
+                validation={validations[item.id]}
+                canValidate={canValidate}
+                createBriefing={() => createBriefing(item)}
+                addBacklog={() => addBacklog(item)}
+                explain={() => setExplainTarget(item)}
+                explore={() => setExploreTarget(item)}
+                archive={() => { setArchiveTarget(item); setArchiveReason(""); }}
+                quickValidate={(usefulness) => quickValidate(item, usefulness)}
+                openValidation={(usefulness) => openValidation(item, usefulness)}
+              />
             ))}</div> : <EmptyText>Nenhuma recomendação foi ativada pelas regras neste período.</EmptyText>}
           </ResultSection>
 
@@ -392,6 +648,16 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
           <ResultSection title="Lacunas de dados" icon={<AlertCircle className="h-5 w-5" />}>
             <div className="grid gap-3 md:grid-cols-2">{analysis.gaps.map((gap) => <GapCard key={gap.title} gap={gap} />)}</div>
           </ResultSection>
+
+          <CycleDiary
+            analysis={analysis}
+            validations={validations}
+            cycleFeedback={cycleFeedback}
+            setCycleFeedback={setCycleFeedback}
+            canValidate={canValidate}
+          />
+
+          <ValidationCenter analysis={analysis} validations={validations} cycleFeedback={cycleFeedback} />
         </>
       ) : null}
 
@@ -399,7 +665,8 @@ export function EditorialIntelligence({ authorized, posts, interactions }: { aut
       {postsTarget ? <RelatedPostsModal item={postsTarget} close={() => setPostsTarget(null)} /> : null}
       {explainTarget ? <ExplainRecommendationModal item={explainTarget} config={config} close={() => setExplainTarget(null)} /> : null}
       {exploreTarget ? <ExploreModal item={exploreTarget} comments={analysis.sanitizedComments} averages={{ reach: average(analysis.posts.map((post) => post.alcance ?? 0)), saved: average(analysis.posts.map((post) => post.salvos ?? 0)), comments: average(analysis.posts.map((post) => post.comentarios)) }} close={() => setExploreTarget(null)} createBriefing={() => { createBriefing(exploreTarget); setExploreTarget(null); }} addBacklog={() => { addBacklog(exploreTarget); setExploreTarget(null); }} archive={() => { setExploreTarget(null); setArchiveTarget(exploreTarget); }} /> : null}
-      {archiveTarget ? <ArchiveModal reason={archiveReason} setReason={setArchiveReason} close={() => setArchiveTarget(null)} confirm={() => { setStatuses((current) => ({ ...current, [archiveTarget.id]: "Arquivado" })); setArchivedReasons((current) => ({ ...current, [archiveTarget.id]: archiveReason || "Não informado" })); setBacklog((current) => current.filter((item) => item.id !== archiveTarget.id)); setArchiveTarget(null); }} /> : null}
+      {archiveTarget ? <ArchiveModal reason={archiveReason} setReason={setArchiveReason} close={() => setArchiveTarget(null)} confirm={() => { setStatuses((current) => ({ ...current, [archiveTarget.id]: "Arquivado" })); setArchivedReasons((current) => ({ ...current, [archiveTarget.id]: archiveReason || "Não informado" })); setBacklog((current) => current.filter((item) => item.id !== archiveTarget.id)); syncValidationDecision(archiveTarget, "Arquivar"); setArchiveTarget(null); }} /> : null}
+      {validationTarget ? <ValidationModal item={validationTarget} draft={validationDraft} setDraft={setValidationDraft} close={() => setValidationTarget(null)} save={saveValidationFromDraft} /> : null}
     </div>
   );
 }
@@ -417,7 +684,7 @@ function CycleHeader({ config, analysis, generatedAt, savedAt }: { config: Cycle
   return <Card className="sticky top-3 z-20 border-[#E9CBD1] bg-white/95 p-5 shadow-soft"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-black uppercase text-brand-clay">Ciclo Editorial</p><h2 className="mt-1 text-xl font-semibold text-brand-teal">Qual direção editorial faz sentido agora?</h2></div><SourceBadges /></div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6"><CycleItem label="Período" value={`${formatDate(range.start)} a ${formatDate(range.end)}`} /><CycleItem label="Filtro" value={filterLabel(config.period)} /><CycleItem label="Gerado em" value={dateTimeLabel(generatedAt)} /><CycleItem label="Contexto" value={config.context} /><CycleItem label="Objetivo" value={config.objective} /><CycleItem label="Prioridade" value={config.priority} /><CycleItem label="Capacidade" value={`${config.capacity} conteúdos`} /><CycleItem label="Posts analisados" value={String(analysis.posts.length)} /><CycleItem label="Comentários válidos" value={String(analysis.comments.length)} /></div><p className="mt-3 text-xs text-brand-teal/55">{savedAt ? `Análise salva neste navegador em ${dateTimeLabel(savedAt)}.` : "O ciclo é preservado localmente neste navegador durante a fase Essentials."}</p></Card>;
 }
 
-function RecommendationCard({ item, status, createBriefing, addBacklog, explain, explore, archive, carousel }: { item: Recommendation; status?: ActionStatus; createBriefing: () => void; addBacklog: () => void; explain: () => void; explore: () => void; archive: () => void; carousel?: boolean }) {
+function RecommendationCard({ item, status, validation, canValidate, createBriefing, addBacklog, explain, explore, archive, quickValidate, openValidation, carousel }: { item: Recommendation; status?: ActionStatus; validation?: RecommendationValidation; canValidate: boolean; createBriefing: () => void; addBacklog: () => void; explain: () => void; explore: () => void; archive: () => void; quickValidate: (usefulness: ExpertUsefulness) => void; openValidation: (usefulness: ExpertUsefulness) => void; carousel?: boolean }) {
   const reasons = item.reasons.slice(0, 3);
   const actionText = recommendationSentence(item);
   return (
@@ -456,6 +723,7 @@ function RecommendationCard({ item, status, createBriefing, addBacklog, explain,
           <div><dt className="font-black uppercase text-brand-clay">Ação principal</dt><dd className="mt-1 font-semibold text-brand-teal">{item.nextAction}</dd></div>
           <div><dt className="font-black uppercase text-brand-clay">Ações secundárias</dt><dd className="mt-1 font-semibold text-brand-teal">Explorar / Backlog</dd></div>
         </dl>
+        <ValidationPanel validation={validation} canValidate={canValidate} quickValidate={quickValidate} openValidation={openValidation} />
         <div className="mt-4 grid grid-cols-2 gap-2">
           <ActionButton icon={<Info />} onClick={explain}>Como chegamos</ActionButton>
           <ActionButton icon={<Search />} onClick={explore}>Explorar Melhor</ActionButton>
@@ -466,6 +734,108 @@ function RecommendationCard({ item, status, createBriefing, addBacklog, explain,
       </div>
     </article>
   );
+}
+
+
+function ValidationPanel({ validation, canValidate, quickValidate, openValidation }: { validation?: RecommendationValidation; canValidate: boolean; quickValidate: (usefulness: ExpertUsefulness) => void; openValidation: (usefulness: ExpertUsefulness) => void }) {
+  return <div className="mt-4 rounded-md border border-brand-sand bg-brand-cream/35 p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-[11px] font-black uppercase tracking-wide text-brand-clay">Validação da especialista</p>
+      {validation ? <span className="rounded-full bg-white px-2 py-1 text-[11px] font-black uppercase text-brand-teal">{validation.usefulness}</span> : <span className="text-xs text-brand-teal/55">Pendente</span>}
+    </div>
+    <p className="mt-2 text-xs leading-5 text-brand-teal/65">Esta recomendação foi útil para tomar uma decisão?</p>
+    {validation ? <div className="mt-2 grid gap-1 text-xs text-brand-teal/70"><p><strong>Decisão:</strong> {validation.expertDecision}</p><p><strong>Confiança:</strong> {validation.perceivedConfidence || "Não informada"}</p>{validation.reasons.length ? <p><strong>Motivos:</strong> {validation.reasons.join(", ")}</p> : null}</div> : null}
+    <div className="mt-3 flex flex-wrap gap-2">
+      {(["Sim", "Parcialmente", "Não"] as ExpertUsefulness[]).map((option) => <button key={option} type="button" disabled={!canValidate} onClick={() => option === "Sim" ? quickValidate(option) : openValidation(option)} className={`rounded-full border px-3 py-1.5 text-xs font-bold ${validation?.usefulness === option ? "border-brand-teal bg-brand-teal text-white" : "border-brand-sand bg-white text-brand-teal"} ${canValidate ? "hover:bg-brand-cream" : "cursor-not-allowed opacity-60"}`}>{option}</button>)}
+      <button type="button" disabled={!canValidate} onClick={() => openValidation(validation?.usefulness ?? "Sim")} className="rounded-full border border-brand-sand bg-white px-3 py-1.5 text-xs font-bold text-brand-clay disabled:cursor-not-allowed disabled:opacity-60">Detalhar</button>
+    </div>
+    {!canValidate ? <p className="mt-2 text-[11px] text-brand-teal/50">Perfil Suporte visualiza a validação, mas não edita.</p> : null}
+  </div>;
+}
+
+function CycleDiary({ analysis, validations, cycleFeedback, setCycleFeedback, canValidate }: { analysis: Analysis; validations: Record<string, RecommendationValidation>; cycleFeedback: CycleFeedback; setCycleFeedback: (value: CycleFeedback) => void; canValidate: boolean }) {
+  const summary = summarizeValidation(analysis, validations, cycleFeedback);
+  function updateFeedback(key: keyof CycleFeedback, value: string) {
+    if (!canValidate) return;
+    setCycleFeedback({ ...cycleFeedback, [key]: value, updatedAt: new Date().toISOString() });
+  }
+  return <ResultSection title="Diário do Ciclo" icon={<Clipboard className="h-5 w-5" />}>
+    <p className="mb-4 text-sm leading-6 text-brand-teal/70">Registro leve para validar se a ferramenta ajudou a decidir, priorizar e economizar tempo. Nesta Beta, tudo fica salvo localmente neste navegador.</p>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+      <Metric label="Recomendações" value={String(summary.generated)} />
+      <Metric label="Avaliadas" value={String(summary.evaluated)} />
+      <Metric label="Úteis" value={String(summary.useful)} />
+      <Metric label="Parciais" value={String(summary.partial)} />
+      <Metric label="Não úteis" value={String(summary.notUseful)} />
+      <Metric label="Tempo médio" value={msToHuman(summary.averageTimeMs)} />
+    </div>
+    <div className="mt-5 grid gap-4 lg:grid-cols-3">
+      <Field label="Sem a ferramenta, tomaria as mesmas decisões?">
+        <Select value={cycleFeedback.sameDecisions} onChange={(value) => updateFeedback("sameDecisions", value)} options={["", "Sim", "Parcialmente", "Não"]} />
+      </Field>
+      <Field label="Quanto tempo economizou neste ciclo?">
+        <Select value={cycleFeedback.timeSaved} onChange={(value) => updateFeedback("timeSaved", value)} options={["", "Nenhum", "Até 10 minutos", "10 a 30 minutos", "Mais de 30 minutos"]} />
+      </Field>
+      <Field label="Usaria novamente no próximo ciclo?">
+        <Select value={cycleFeedback.wouldUseAgain} onChange={(value) => updateFeedback("wouldUseAgain", value)} options={["", "Sim", "Talvez", "Não"]} />
+      </Field>
+      <label className="grid gap-2 text-sm font-semibold text-brand-teal lg:col-span-3">Comentário geral
+        <textarea disabled={!canValidate} value={cycleFeedback.comment} onChange={(event) => updateFeedback("comment", event.target.value)} className="min-h-24 w-full rounded-md border border-brand-sand bg-white/80 p-3 text-sm text-brand-teal outline-none focus:ring-2 focus:ring-brand-sky disabled:opacity-70" placeholder="O que fez sentido, o que confundiu ou o que precisa ser revisto?" />
+      </label>
+    </div>
+  </ResultSection>;
+}
+
+function ValidationCenter({ analysis, validations, cycleFeedback }: { analysis: Analysis; validations: Record<string, RecommendationValidation>; cycleFeedback: CycleFeedback }) {
+  const summary = summarizeValidation(analysis, validations, cycleFeedback);
+  const health = ruleHealth(summary.records);
+  const suggestions = reviewSuggestions(summary.records);
+  return <ResultSection title="Centro de Validação" icon={<FlaskConical className="h-5 w-5" />}>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <Metric label="IUR" value={`${summary.iur}%`} />
+      <Metric label="Confiança de produto" value={`${summary.productConfidence}%`} />
+      <Metric label="Briefings" value={String(summary.briefings)} />
+      <Metric label="Sem decisão" value={String(summary.undecided)} />
+    </div>
+    <div className="mt-4 rounded-md border border-brand-sand bg-brand-cream/40 p-4 text-sm leading-6 text-brand-teal/75">
+      <p><strong>Engine Insights Lite:</strong> {EDITORIAL_ENGINE_NAME} ({EDITORIAL_ENGINE_TYPE}) v{EDITORIAL_ENGINE_VERSION}.</p>
+      <p>IUR mede utilidade percebida das recomendações já avaliadas. Confiança de produto combina utilidade, confiança percebida e taxa de decisão do ciclo.</p>
+    </div>
+    <div className="mt-5 overflow-x-auto rounded-md border border-brand-sand">
+      <table className="min-w-full text-left text-sm text-brand-teal">
+        <thead className="bg-[#F3DDE2] text-[11px] uppercase text-brand-clay"><tr><th className="px-3 py-2">Regra</th><th className="px-3 py-2">Uso</th><th className="px-3 py-2">IUR</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Última avaliação</th></tr></thead>
+        <tbody>{health.length ? health.map((item) => <tr key={item.rule} className="border-t border-brand-sand"><td className="px-3 py-2 font-semibold">{item.rule}</td><td className="px-3 py-2">{item.items.length}</td><td className="px-3 py-2">{item.iur}%</td><td className="px-3 py-2">{item.status}</td><td className="px-3 py-2">{dateTimeLabel(item.lastUsed)}</td></tr>) : <tr><td colSpan={5} className="px-3 py-4 text-brand-teal/60">Nenhuma regra validada ainda.</td></tr>}</tbody>
+      </table>
+    </div>
+    <div className="mt-5 grid gap-3 md:grid-cols-2">
+      {suggestions.length ? suggestions.map((item) => <article key={`${item.area}-${item.reason}`} className="rounded-md border border-brand-sand p-4"><p className="text-[11px] font-black uppercase text-brand-clay">Sugestão de revisão</p><h3 className="mt-1 font-semibold text-brand-teal">{item.area}</h3><p className="mt-2 text-sm text-brand-teal/70"><strong>Motivo:</strong> {item.reason}</p><p className="mt-1 text-sm text-brand-teal/70"><strong>Evidência:</strong> {item.evidence}</p><p className="mt-1 text-sm text-brand-teal/70"><strong>Impacto:</strong> {item.impact}</p></article>) : <EmptyText>As validações ainda não geraram sugestões de revisão. Isso é esperado no início da Beta.</EmptyText>}
+    </div>
+  </ResultSection>;
+}
+
+function ValidationModal({ item, draft, setDraft, close, save }: { item: Recommendation; draft: { usefulness: ExpertUsefulness; reasons: string[]; observation: string; expertDecision: ExpertDecision; laterOutcome: LaterOutcome | ""; perceivedConfidence: PerceivedConfidence | "" }; setDraft: (value: { usefulness: ExpertUsefulness; reasons: string[]; observation: string; expertDecision: ExpertDecision; laterOutcome: LaterOutcome | ""; perceivedConfidence: PerceivedConfidence | "" }) => void; close: () => void; save: () => void }) {
+  function toggleReason(reason: string) {
+    const reasons = draft.reasons.includes(reason) ? draft.reasons.filter((item) => item !== reason) : [...draft.reasons, reason];
+    setDraft({ ...draft, reasons });
+  }
+  return <Modal title="Validar recomendação" close={close}>
+    <div className="space-y-4 text-sm text-brand-teal/75">
+      <div className="rounded-md border border-brand-sand bg-brand-cream/45 p-3"><p className="text-[11px] font-black uppercase text-brand-clay">Tema</p><h3 className="mt-1 font-semibold text-brand-teal">{item.theme}</h3><p className="mt-1">{item.title}</p></div>
+      <Field label="Esta recomendação foi útil?">
+        <Select value={draft.usefulness} onChange={(value) => setDraft({ ...draft, usefulness: value as ExpertUsefulness })} options={["Sim", "Parcialmente", "Não"]} />
+      </Field>
+      <div><p className="mb-2 font-semibold text-brand-teal">Motivos</p><div className="grid gap-2 sm:grid-cols-2">{VALIDATION_REASONS.map((reason) => <label key={reason} className="flex items-center gap-2 rounded-md border border-brand-sand bg-white/80 px-3 py-2 text-xs font-semibold text-brand-teal"><input type="checkbox" checked={draft.reasons.includes(reason)} onChange={() => toggleReason(reason)} />{reason}</label>)}</div></div>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Field label="Decisão tomada"><Select value={draft.expertDecision} onChange={(value) => setDraft({ ...draft, expertDecision: value as ExpertDecision })} options={EXPERT_DECISIONS} /></Field>
+        <Field label="Resultado posterior"><Select value={draft.laterOutcome} onChange={(value) => setDraft({ ...draft, laterOutcome: value as LaterOutcome | "" })} options={LATER_OUTCOMES} /></Field>
+        <Field label="Confiança percebida"><Select value={draft.perceivedConfidence} onChange={(value) => setDraft({ ...draft, perceivedConfidence: value as PerceivedConfidence | "" })} options={PERCEIVED_CONFIDENCE} /></Field>
+      </div>
+      <label className="grid gap-2 font-semibold text-brand-teal">Observação
+        <textarea value={draft.observation} onChange={(event) => setDraft({ ...draft, observation: event.target.value })} className="min-h-24 rounded-md border border-brand-sand bg-white/80 p-3 text-sm outline-none focus:ring-2 focus:ring-brand-sky" placeholder="Explique o que ajudou ou o que não fez sentido." />
+      </label>
+      <div className="flex flex-col gap-2 sm:flex-row"><Button onClick={save}>Salvar validação</Button><Button variant="secondary" onClick={close}>Cancelar</Button></div>
+    </div>
+  </Modal>;
 }
 
 function OpportunityCard({ item, onOpenPosts }: { item: Opportunity; onOpenPosts: () => void }) {
@@ -501,12 +871,12 @@ function ExploreModal({ item, comments, averages, close, createBriefing, addBack
 }
 
 function SourceInfoModal({ analysis, close }: { analysis: Analysis; close: () => void }) {
-  return <Modal title="Como esta análise foi construída?" close={close}><div className="grid gap-3 sm:grid-cols-2"><InfoBox title="Coleta" tone="green" body="Posts, métricas e comentários públicos reais já existentes no sistema." /><InfoBox title="Análise" tone="amber" body="Editorial Intelligence Essentials: motor de regras transparente, determinístico e sem IA." /></div><div className="mt-5 space-y-4 text-sm leading-6 text-brand-teal/75"><div><strong>Dados usados:</strong> {analysis.posts.length} posts, {analysis.comments.length} comentários válidos, alcance, salvamentos, compartilhamentos, comentários e formato.</div><div><strong>Interações:</strong> {analysis.interactionsStatus.message}</div><div><strong>Critério de segurança:</strong> usa somente comentários públicos de post, com origem confiável, texto não vazio e vínculo com publicação do período. Não usa DMs, Stories, seguidores, nomes, usernames ou payload bruto.</div><div><strong>Regras avaliadas:</strong> resposta pública acima da média, utilidade educativa por salvamentos, alcance acima da média, aderência ao contexto, objetivo, prioridade e capacidade de produção.</div><div><strong>Regras acionadas:</strong> {analysis.recommendations.flatMap((item) => item.rulesTriggered).join("; ") || "Nenhuma regra priorizada."}</div><div><strong>Limitações:</strong> não usa IA, não cria conteúdo final, não publica e não envia nada ao marketing.</div></div></Modal>;
+  return <Modal title="Como esta análise foi construída?" close={close}><div className="grid gap-3 sm:grid-cols-2"><InfoBox title="Coleta" tone="green" body="Posts, métricas e comentários públicos reais já existentes no sistema." /><InfoBox title="Análise" tone="amber" body={`${EDITORIAL_ENGINE_NAME} (${EDITORIAL_ENGINE_TYPE}) v${EDITORIAL_ENGINE_VERSION}: motor de regras transparente, determinístico e sem IA.`} /></div><div className="mt-5 space-y-4 text-sm leading-6 text-brand-teal/75"><div><strong>Dados usados:</strong> {analysis.posts.length} posts, {analysis.comments.length} comentários válidos, alcance, salvamentos, compartilhamentos, comentários e formato.</div><div><strong>Interações:</strong> {analysis.interactionsStatus.message}</div><div><strong>Critério de segurança:</strong> usa somente comentários públicos de post, com origem confiável, texto não vazio e vínculo com publicação do período. Não usa DMs, Stories, seguidores, nomes, usernames ou payload bruto.</div><div><strong>Regras avaliadas:</strong> resposta pública acima da média, utilidade educativa por salvamentos, alcance acima da média, aderência ao contexto, objetivo, prioridade e capacidade de produção.</div><div><strong>Regras acionadas:</strong> {analysis.recommendations.flatMap((item) => item.rulesTriggered).join("; ") || "Nenhuma regra priorizada."}</div><div><strong>Limitações:</strong> não usa IA, não cria conteúdo final, não publica e não envia nada ao marketing.</div></div></Modal>;
 }
 
 function ExplainRecommendationModal({ item, config, close }: { item: Recommendation; config: CycleConfig; close: () => void }) {
   const penalties = [...item.rulesReduced, ...item.gaps];
-  return <Modal title="Como chegamos nesta recomendação?" close={close}><div className="space-y-4 text-sm leading-6 text-brand-teal/75"><div><strong>Tema editorial:</strong> {item.theme}</div><div><strong>Sinal detectado:</strong> {item.signal}</div><div><strong>Regra acionada:</strong> {item.rule}</div><div><strong>Dados avaliados:</strong> {item.dataUsed.join(", ") || "Sem dados suficientes"}.</div><div><strong>Contexto:</strong> {config.context || "-"}</div><div><strong>Objetivo:</strong> {config.objective || "-"}</div><div><strong>Prioridade:</strong> {config.priority || "-"}</div><div><strong>Capacidade:</strong> {config.capacity} conteúdos.</div><div><strong>Score:</strong> {item.confidenceScore}% - confiança {item.confidence}.</div><div><strong>Decisão:</strong> {item.action}. Próximo passo: {item.nextAction}.</div><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-950"><p className="text-[11px] font-black uppercase">Pontos positivos</p><ul className="mt-2 space-y-1">{item.confidenceReasons.map((reason) => <li key={reason}>OK {reason}</li>)}</ul></div><div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950"><p className="text-[11px] font-black uppercase">Penalidades e lacunas</p><ul className="mt-2 space-y-1">{penalties.length ? penalties.map((gap) => <li key={gap}>Atenção: {gap}</li>) : <li>Nenhum redutor relevante.</li>}</ul></div></div><div><strong>Validação necessária:</strong> {item.gaps.join("; ") || "Revisão humana de contexto e linguagem antes de transformar em briefing."}</div></div></Modal>;
+  return <Modal title="Como chegamos nesta recomendação?" close={close}><div className="space-y-4 text-sm leading-6 text-brand-teal/75"><div><strong>Tema editorial:</strong> {item.theme}</div><div><strong>Sinal detectado:</strong> {item.signal}</div><div><strong>Motor:</strong> {EDITORIAL_ENGINE_NAME} ({EDITORIAL_ENGINE_TYPE}) v{EDITORIAL_ENGINE_VERSION}</div><div><strong>Regra acionada:</strong> {item.rule}</div><div><strong>Dados avaliados:</strong> {item.dataUsed.join(", ") || "Sem dados suficientes"}.</div><div><strong>Contexto:</strong> {config.context || "-"}</div><div><strong>Objetivo:</strong> {config.objective || "-"}</div><div><strong>Prioridade:</strong> {config.priority || "-"}</div><div><strong>Capacidade:</strong> {config.capacity} conteúdos.</div><div><strong>Score:</strong> {item.confidenceScore}% - confiança {item.confidence}.</div><div><strong>Decisão:</strong> {item.action}. Próximo passo: {item.nextAction}.</div><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-950"><p className="text-[11px] font-black uppercase">Pontos positivos</p><ul className="mt-2 space-y-1">{item.confidenceReasons.map((reason) => <li key={reason}>OK {reason}</li>)}</ul></div><div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-950"><p className="text-[11px] font-black uppercase">Penalidades e lacunas</p><ul className="mt-2 space-y-1">{penalties.length ? penalties.map((gap) => <li key={gap}>Atenção: {gap}</li>) : <li>Nenhum redutor relevante.</li>}</ul></div></div><div><strong>Validação necessária:</strong> {item.gaps.join("; ") || "Revisão humana de contexto e linguagem antes de transformar em briefing."}</div></div></Modal>;
 }
 
 function ObservationCard({ item, addBacklog, explore }: { item: Recommendation; addBacklog: () => void; explore: () => void }) {
@@ -525,7 +895,7 @@ function AccessDenied() { return <Card className="border-[#E9CBD1] p-6"><div cla
 function CycleItem({ label, value }: { label: string; value: string }) { return <div><p className="text-[10px] font-black uppercase text-brand-clay">{label}</p><p className="mt-1 text-sm font-semibold text-brand-teal">{value || "-"}</p></div>; }
 function StatusBadge({ status }: { status: string }) { const className = status === "Briefing criado" ? "bg-emerald-100 text-emerald-800" : status === "No backlog" ? "bg-blue-100 text-blue-800" : status === "Arquivado" ? "bg-slate-200 text-slate-700" : "bg-amber-100 text-amber-800"; return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black uppercase ${className}`}>{status}</span>; }
 function Notice({ message, close }: { message: string; close: () => void }) { return <div className="flex items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900"><span>{message}</span><button aria-label="Fechar aviso" onClick={close}><X className="h-4 w-4" /></button></div>; }
-function SourceBadges() { return <div className="flex flex-wrap gap-2"><span title="Posts, métricas e comentários reais já existentes no sistema." className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-800"><Database className="h-3.5 w-3.5" />Coleta: Dados do Instagram</span><span title="Motor determinístico, transparente e sem IA." className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase text-amber-800"><FlaskConical className="h-3.5 w-3.5" />Análise: Editorial Intelligence Essentials</span></div>; }
+function SourceBadges() { return <div className="flex flex-wrap gap-2"><span title="Posts, métricas e comentários reais já existentes no sistema." className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black uppercase text-emerald-800"><Database className="h-3.5 w-3.5" />Coleta: Dados do Instagram</span><span title={`Motor determinístico, transparente e sem IA. ${EDITORIAL_ENGINE_TYPE} v${EDITORIAL_ENGINE_VERSION}.`} className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-black uppercase text-amber-800"><FlaskConical className="h-3.5 w-3.5" />Análise: {EDITORIAL_ENGINE_NAME} v{EDITORIAL_ENGINE_VERSION}</span></div>; }
 function Badge({ children }: { children: ReactNode }) { return <span className="inline-flex rounded-full bg-brand-clay/15 px-2.5 py-1 text-[11px] font-black uppercase text-brand-clay">{children}</span>; }
 function ResultSection({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) { return <Card className="border-[#E9CBD1] p-5"><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-brand-teal">{icon}<h2 className="text-lg font-semibold">{title}</h2></div><SourceBadges /></div>{children}</Card>; }
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-md bg-brand-cream/55 p-3"><p className="text-[11px] font-black uppercase text-brand-clay">{label}</p><p className="mt-2 text-lg font-semibold text-brand-teal">{value}</p></div>; }

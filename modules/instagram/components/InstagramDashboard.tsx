@@ -1130,6 +1130,7 @@ export function InstagramDashboard({
       {activeTab === "editorial" ? (
         <EditorialIntelligence
           authorized={editorialAuthorized && !editorialAccessDenied}
+          role={context.role}
           posts={context.posts}
           interactions={context.interactions}
         />
