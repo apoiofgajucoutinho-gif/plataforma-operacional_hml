@@ -24,6 +24,7 @@ import { clsx } from "clsx";
 import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
 import type { ExportColumn } from "@/lib/client/table-export";
+import { EditorialIntelligence } from "@/modules/instagram/components/EditorialIntelligence";
 import type {
   EngagementClassification,
   InstagramContext,
@@ -35,7 +36,7 @@ import type {
   InstagramPostType,
 } from "@/modules/instagram/types";
 
-type TabKey = "insights" | "results" | "directs";
+type TabKey = "insights" | "results" | "directs" | "editorial";
 type PeriodFilter = "all" | "today" | "7d" | "15d" | "30d";
 type TypeFilter = "all" | InstagramPostType;
 type InteractionSourceFilter = "all" | InstagramInteractionSource;
@@ -582,9 +583,19 @@ function interactionSortValue(interaction: InstagramInteraction, key: Interactio
   return "";
 }
 
-export function InstagramDashboard({ context }: { context: InstagramContext }) {
+export function InstagramDashboard({
+  context,
+  initialTab = "insights",
+  editorialAuthorized = false,
+  editorialAccessDenied = false,
+}: {
+  context: InstagramContext;
+  initialTab?: TabKey;
+  editorialAuthorized?: boolean;
+  editorialAccessDenied?: boolean;
+}) {
   const isMarketing = context.role === "MARKETING_PARTNER";
-  const [activeTab, setActiveTab] = useState<TabKey>("insights");
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const [period, setPeriod] = useState<PeriodFilter>("all");
   const [type, setType] = useState<TypeFilter>("all");
   const [year, setYear] = useState("all");
@@ -616,7 +627,9 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
             ? "Instagram: Insights"
             : activeTab === "results"
               ? "Instagram: Resultados"
-              : "Instagram: Interacoes",
+              : activeTab === "directs"
+                ? "Instagram: Interacoes"
+                : "Instagram: Inteligencia Editorial",
       }),
       keepalive: true,
     });
@@ -641,6 +654,19 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
     interactionSortKey,
     interactionSortDirection,
   ]);
+
+  function changeTab(tab: TabKey) {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+
+    if (tab === "editorial") {
+      url.searchParams.set("tab", "editorial-intelligence");
+    } else {
+      url.searchParams.delete("tab");
+    }
+
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
 
   function clearDirectQuickFilters() {
     setInteractionQuickFilter(null);
@@ -974,17 +1000,26 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        <TabButton isActive={activeTab === "insights"} onClick={() => setActiveTab("insights")}>
+        <TabButton isActive={activeTab === "insights"} onClick={() => changeTab("insights")}>
           Insights
         </TabButton>
-        <TabButton isActive={activeTab === "results"} onClick={() => setActiveTab("results")}>
+        <TabButton isActive={activeTab === "results"} onClick={() => changeTab("results")}>
           Resultados
         </TabButton>
-        <TabButton isActive={activeTab === "directs"} onClick={() => setActiveTab("directs")}>
+        <TabButton isActive={activeTab === "directs"} onClick={() => changeTab("directs")}>
           Interações
         </TabButton>
+        {editorialAuthorized ? (
+          <TabButton isActive={activeTab === "editorial"} onClick={() => changeTab("editorial")}>
+            Inteligência Editorial
+            <span className="rounded-full bg-brand-clay/15 px-2 py-0.5 text-[10px] font-black uppercase text-brand-clay">
+              Beta
+            </span>
+          </TabButton>
+        ) : null}
       </div>
 
+      {activeTab !== "editorial" ? (
       <Card className="border-[#E9CBD1] bg-white/90 p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs font-bold uppercase tracking-wide text-brand-clay">Periodo</span>
@@ -1090,8 +1125,15 @@ export function InstagramDashboard({ context }: { context: InstagramContext }) {
           )}
         </div>
       </Card>
+      ) : null}
 
-      {activeTab === "insights" ? (
+      {activeTab === "editorial" ? (
+        <EditorialIntelligence
+          authorized={editorialAuthorized && !editorialAccessDenied}
+          posts={context.posts}
+          interactions={context.interactions}
+        />
+      ) : activeTab === "insights" ? (
         <>
           <SectionTitle icon={<Sparkles className="h-4 w-4" />} title="Visao Geral" />
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 2xl:grid-cols-8">

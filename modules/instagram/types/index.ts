@@ -26,6 +26,8 @@ export type InstagramInteraction = {
   source: InstagramInteractionSource;
   marketing_type: string;
   external_id: string | null;
+  post_id: string | null;
+  origem: string | null;
   profile_username: string | null;
   profile_name: string | null;
   message_text: string | null;

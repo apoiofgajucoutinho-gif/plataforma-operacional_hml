@@ -1,0 +1,279 @@
+{
+  "name": "Instagram Directs / Webhook v1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "instagram-directs-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-meta-verify",
+      "name": "Webhook Verificacao Meta",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        -160
+      ],
+      "webhookId": "instagram-directs-webhook-verify"
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = items[0]?.json?.query || items[0]?.json || {};\nconst expectedToken = $env.INSTAGRAM_DIRECTS_VERIFY_TOKEN || 'fga_directs_2026';\nconst mode = query['hub.mode'];\nconst token = query['hub.verify_token'];\nconst challenge = query['hub.challenge'];\n\nif (mode !== 'subscribe' || token !== expectedToken || !challenge) {\n  throw new Error('Falha na verificacao do webhook Meta. Confira o Verify Token.');\n}\n\nreturn [{ json: { challenge: String(challenge) } }];"
+      },
+      "id": "validar-challenge",
+      "name": "Validar Challenge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "responder-challenge",
+      "name": "Responder Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -200,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "instagram-directs-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-directs-post",
+      "name": "Webhook Directs Meta",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        160
+      ],
+      "webhookId": "instagram-directs-webhook-post"
+    },
+    {
+      "parameters": {
+        "jsCode": "function text(value) {\n  return String(value || '').trim();\n}\n\nfunction lower(value) {\n  return text(value).toLowerCase();\n}\n\nfunction firstValue(...values) {\n  for (const value of values) {\n    if (value !== undefined && value !== null && text(value) !== '') return value;\n  }\n  return null;\n}\n\nfunction isRiskText(value) {\n  const content = lower(value);\n  return /(erro|falha|problema|bug|reclama[cç][aã]o|ruim|incomplet|pl[aá]gio|indevid|link errado|valor errado|pre[cç]o errado|n[aã]o funciona|reembolso|chargeback|cobran[cç]a|devolu[cç][aã]o|cancelar|cancelamento)/.test(content);\n}\n\nfunction isCommercialText(value) {\n  const content = lower(value);\n  return /(valor|pre[cç]o|matr[ií]cula|inscri[cç][aã]o|link|comprar|compra|pagamento|boleto|pix|cart[aã]o|agenda|consulta|palestra|or[cç]amento|quero|interesse|como funciona|curso|forma[cç][aã]o)/.test(content);\n}\n\nfunction topicFor(value) {\n  const content = lower(value);\n  if (isRiskText(content)) return 'Risco / Reclamacao';\n  if (/(jiu|jitsu|kimono|luta|tatame|faixa)/.test(content)) return 'Jiu Jitsu';\n  if (/(fam[ií]lia|filh|m[aã]e|pai|marido|espos|casa|crian[cç]a)/.test(content)) return 'Familia';\n  if (/(curso|forma[cç][aã]o|aasi|imers[aã]o|mentoria|aula|alun)/.test(content)) return 'Curso / Formacao';\n  if (/(consulta|cl[ií]nica|paciente|audiometria|zumbido|aparelho|audiologia|fono)/.test(content)) return 'Consulta / Clinica';\n  if (isCommercialText(content)) return 'Interesse comercial';\n  return 'Sem tema definido';\n}\n\nfunction potentialFor(value) {\n  if (isRiskText(value)) return 'alto';\n  if (isCommercialText(value)) return 'alto';\n  if (text(value)) return 'medio';\n  return 'nao_classificado';\n}\n\nfunction actionFor(value) {\n  if (isRiskText(value)) return 'Priorizar resposta humana, corrigir link/valor se aplicavel e registrar acao tomada.';\n  if (isCommercialText(value)) return 'Responder com orientacao objetiva, link correto e proximo passo de compra ou atendimento.';\n  return 'Responder ou marcar como analisado apos avaliar o contexto da conversa.';\n}\n\nfunction eventTime(event) {\n  if (event.timestamp) return new Date(Number(event.timestamp)).toISOString();\n  return new Date().toISOString();\n}\n\nconst body = items[0]?.json?.body || items[0]?.json || {};\nconst entries = Array.isArray(body.entry) ? body.entry : [];\nconst rows = [];\n\nfor (const entry of entries) {\n  const messaging = Array.isArray(entry.messaging) ? entry.messaging : [];\n\n  for (const event of messaging) {\n    const message = event.message || {};\n    const textMessage = firstValue(\n      message.text,\n      event.postback?.title,\n      message.attachments?.length ? '[Anexo recebido]' : null,\n      message.sticker_id ? '[Figurinha recebida]' : null,\n      ''\n    );\n\n    const senderId = firstValue(event.sender?.id, message.from?.id);\n    const recipientId = firstValue(event.recipient?.id);\n    const externalId = firstValue(message.mid, event.message?.mid, event.id, `${senderId}-${event.timestamp || Date.now()}`);\n\n    if (!senderId || !externalId) continue;\n\n    rows.push({\n      tenant_name: firstValue($env.PLATAFORMA_TENANT_NAME, 'Juliana Coutinho'),\n      account_name: firstValue($env.INSTAGRAM_ACCOUNT_NAME, 'Juliana Coutinho'),\n      username: firstValue($env.INSTAGRAM_USERNAME, 'fga.jucoutinho'),\n      source: 'direct',\n      marketing_type: 'interacao_marketing',\n      external_id: externalId,\n      profile_username: senderId,\n      profile_name: firstValue(event.sender?.name, senderId),\n      message_text: textMessage,\n      media_id: firstValue(event.thread_id, recipientId),\n      post_id: null,\n      post_permalink: null,\n      interaction_at: eventTime(event),\n      status: 'novo',\n      potential: potentialFor(textMessage),\n      product_topic: topicFor(textMessage),\n      next_action: actionFor(textMessage),\n      origem: 'n8n_instagram_directs_webhook',\n      raw_payload: {\n        source: 'instagram_webhook',\n        entry_id: entry.id,\n        sender_id: senderId,\n        recipient_id: recipientId,\n        event\n      }\n    });\n  }\n}\n\nif (!rows.length) {\n  return [{ json: { rows: [], skipped: true, reason: 'Webhook recebido, mas sem mensagem de Direct importavel.' } }];\n}\n\nreturn [{ json: { rows, count: rows.length } }];"
+      },
+      "id": "normalizar-directs-webhook",
+      "name": "Normalizar Directs Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "tem-registros",
+              "leftValue": "={{ Array.isArray($json.rows) && $json.rows.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "tem-registros-webhook",
+      "name": "Tem registros?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.SUPABASE_URL || 'https://oerdsmgiebquecqwcbox.supabase.co').replace(/\\/$/, '') + '/rest/v1/instagram_interactions_import_rows' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.rows) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "upsert-supabase-directs-webhook",
+      "name": "Upsert Supabase Directs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, rows: $items('Normalizar Directs Webhook')[0].json.count || 0 } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "responder-ok-post",
+      "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        340,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, skipped: true, reason: $json.reason || 'Sem mensagem importavel.' } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "responder-sem-registros",
+      "name": "Responder Sem Registros",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        80,
+        260
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Verificacao Meta": {
+      "main": [
+        [
+          {
+            "node": "Validar Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Challenge": {
+      "main": [
+        [
+          {
+            "node": "Responder Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Directs Meta": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Directs Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Directs Webhook": {
+      "main": [
+        [
+          {
+            "node": "Tem registros?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem registros?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Supabase Directs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder Sem Registros",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Supabase Directs": {
+      "main": [
+        [
+          {
+            "node": "Responder OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "instagram-directs-webhook-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "instagram-directs-webhook-v1",
+  "tags": []
+}

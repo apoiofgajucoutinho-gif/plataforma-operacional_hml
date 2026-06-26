@@ -1,0 +1,139 @@
+{
+  "name": "Instagram Directs / Interacoes - Supabase v1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "instagram-directs-interactions",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c53a6f4a-6fa6-43a3-9cd9-3c9f5d5323fd",
+      "name": "Webhook Instagram Interacoes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "instagram-directs-interactions"
+    },
+    {
+      "parameters": {
+        "jsCode": "function firstValue(...values) {\n  for (const value of values) {\n    if (value !== undefined && value !== null && String(value).trim() !== '') return value;\n  }\n  return null;\n}\n\nfunction normalizeSource(value) {\n  const source = String(value || '').toLowerCase();\n  if (['comment', 'comments', 'post_comment', 'comentario', 'comentarios'].includes(source)) return 'post_comment';\n  if (['new_follower', 'follower', 'follow', 'seguidor', 'novo_seguidor'].includes(source)) return 'new_follower';\n  return 'story_reply';\n}\n\nfunction classifyPotential(text) {\n  const value = String(text || '').toLowerCase();\n  if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento)/.test(value)) return 'alto';\n  if (/(curso|formacao|aasi|aura|imersao|zumbido|interesse|quero|como funciona)/.test(value)) return 'medio';\n  if (value.trim()) return 'baixo';\n  return 'nao_classificado';\n}\n\nfunction pushRow(rows, row, rawPayload) {\n  const messageText = firstValue(row.message_text, row.text, row.message, row.comment_text, row.caption, '');\n  const source = normalizeSource(row.source || row.field || row.type);\n  rows.push({\n    tenant_name: firstValue(row.tenant_name, $env.PLATAFORMA_TENANT_NAME, 'Juliana Coutinho'),\n    account_name: firstValue(row.account_name, $env.INSTAGRAM_ACCOUNT_NAME, 'Juliana Coutinho'),\n    username: firstValue(row.username, $env.INSTAGRAM_USERNAME, 'fga.jucoutinho'),\n    source,\n    marketing_type: 'interacao_marketing',\n    external_id: firstValue(row.external_id, row.id, row.mid, row.comment_id, row.follower_id),\n    profile_username: firstValue(row.profile_username, row.username_from, row.from_username, row.sender_username, row.sender?.username, row.from?.username),\n    profile_name: firstValue(row.profile_name, row.name_from, row.from_name, row.sender_name, row.sender?.name, row.from?.name),\n    message_text: messageText,\n    media_id: firstValue(row.media_id, row.post_id, row.story_id),\n    post_id: firstValue(row.post_id, row.media_id),\n    post_permalink: firstValue(row.post_permalink, row.permalink),\n    interaction_at: firstValue(row.interaction_at, row.timestamp, row.created_time, row.time, new Date().toISOString()),\n    status: firstValue(row.status, 'novo'),\n    potential: firstValue(row.potential, classifyPotential(messageText)),\n    product_topic: firstValue(row.product_topic, null),\n    next_action: firstValue(row.next_action, null),\n    origem: 'n8n_instagram_directs',\n    raw_payload: rawPayload || row\n  });\n}\n\nconst rows = [];\n\nfor (const item of items) {\n  const body = item.json.body || item.json;\n\n  if (Array.isArray(body)) {\n    for (const entry of body) pushRow(rows, entry, entry);\n    continue;\n  }\n\n  if (Array.isArray(body.rows)) {\n    for (const row of body.rows) pushRow(rows, row, row);\n    continue;\n  }\n\n  if (Array.isArray(body.entry)) {\n    for (const entry of body.entry) {\n      if (Array.isArray(entry.messaging)) {\n        for (const message of entry.messaging) {\n          pushRow(rows, {\n            source: 'story_reply',\n            external_id: firstValue(message.message?.mid, message.id),\n            profile_username: firstValue(message.sender?.username, message.sender?.id),\n            profile_name: firstValue(message.sender?.name),\n            message_text: firstValue(message.message?.text, message.postback?.title),\n            media_id: firstValue(message.message?.reply_to?.mid, message.referral?.media_id),\n            post_permalink: firstValue(message.referral?.ref),\n            interaction_at: message.timestamp ? new Date(Number(message.timestamp)).toISOString() : new Date().toISOString()\n          }, message);\n        }\n      }\n\n      if (Array.isArray(entry.changes)) {\n        for (const change of entry.changes) {\n          const value = change.value || {};\n          const field = change.field || value.item || value.verb;\n          const source = String(field || '').toLowerCase().includes('follow') ? 'new_follower' : 'post_comment';\n          pushRow(rows, {\n            source,\n            external_id: firstValue(value.comment_id, value.id, value.from?.id),\n            profile_username: firstValue(value.from?.username, value.from?.id),\n            profile_name: firstValue(value.from?.name),\n            message_text: firstValue(value.message, value.text, source === 'new_follower' ? 'Novo seguidor' : ''),\n            media_id: firstValue(value.media_id, value.post_id),\n            post_id: firstValue(value.post_id, value.media_id),\n            post_permalink: firstValue(value.permalink),\n            interaction_at: firstValue(value.created_time, value.timestamp, new Date().toISOString())\n          }, change);\n        }\n      }\n    }\n    continue;\n  }\n\n  pushRow(rows, body, body);\n}\n\nif (!rows.length) {\n  return [{ json: { skipped: true, reason: 'Nenhuma interacao de marketing encontrada no payload.' } }];\n}\n\nreturn rows.map((row) => ({ json: row }));"
+      },
+      "id": "d92db4fd-3ac0-4a03-95c8-6dc476f4ea0e",
+      "name": "Normalizar Interacoes Marketing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL + '/rest/v1/instagram_interactions_import_rows' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($input.all().map((item) => item.json)) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "5c37e209-47ef-4fc9-b427-731f93d78bb4",
+      "name": "Inserir Supabase Directs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true, \"rows\": $items('Normalizar Interacoes Marketing').length }",
+        "options": {}
+      },
+      "id": "12cdcb7d-61b2-4b54-bc29-4daaf7a21751",
+      "name": "Responder OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Instagram Interacoes": {
+      "main": [
+        [
+          {
+            "node": "Normalizar Interacoes Marketing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar Interacoes Marketing": {
+      "main": [
+        [
+          {
+            "node": "Inserir Supabase Directs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inserir Supabase Directs": {
+      "main": [
+        [
+          {
+            "node": "Responder OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8b8f0d82-0e28-4af8-adfa-8bd5df1fdc17",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "instagram-directs-interactions-v1",
+  "tags": []
+}
+

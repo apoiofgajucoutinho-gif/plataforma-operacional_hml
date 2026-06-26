@@ -45,6 +45,23 @@ async function getAllowedModules(tenantId: string, role: string) {
   return (data ?? []).map((item) => item.module as string);
 }
 
+export async function getInstagramAccessContext() {
+  const userClient = await createClient();
+  const {
+    data: { user },
+  } = await userClient.auth.getUser();
+
+  if (!user) redirect("/login");
+
+  const { membership } = await getMembershipByUserId(user.id);
+  if (!membership) return { role: null, allowedModules: [] as string[] };
+
+  return {
+    role: membership.role as string,
+    allowedModules: await getAllowedModules(membership.tenant_id, membership.role),
+  };
+}
+
 export async function getInstagramContext(): Promise<InstagramContext> {
   const userClient = await createClient();
   const {
@@ -218,7 +235,7 @@ export async function getInstagramContext(): Promise<InstagramContext> {
   const { data: interactions } = await dataClient
     .from("instagram_interactions")
     .select(
-      "id, source, marketing_type, external_id, profile_username, profile_name, message_text, media_id, post_permalink, interaction_at, status, potential, product_topic, next_action",
+      "id, source, marketing_type, external_id, post_id, origem, profile_username, profile_name, message_text, media_id, post_permalink, interaction_at, status, potential, product_topic, next_action",
     )
     .eq("tenant_id", membership.tenant_id)
     .eq("account_id", account.id)

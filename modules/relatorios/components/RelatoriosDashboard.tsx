@@ -49,7 +49,7 @@ const frequenciaLabels: Record<RelatorioFrequencia, string> = {
   imediato: "Imediato",
 };
 
-const moduleOptions = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "adocao"];
+const moduleOptions = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "atividades", "adocao"];
 const blockOptions: Array<{ key: string; label: string }> = [
   { key: "agenda", label: "Agenda" },
   { key: "financeiro", label: "Financeiro operacional" },
@@ -57,6 +57,7 @@ const blockOptions: Array<{ key: string; label: string }> = [
   { key: "instagram", label: "Directs e interacoes" },
   { key: "ads", label: "Ads" },
   { key: "objetivos", label: "Objetivos e metas" },
+  { key: "atividades", label: "Atividades e rotinas" },
 ];
 
 const periodLabels: Record<RelatorioPeriodo, string> = {
@@ -94,6 +95,7 @@ const defaultScheduleFilters: RelatorioFiltros = {
     instagram: { enabled: false, periodo: "ultimos_7d" },
     ads: { enabled: false, periodo: "ultimos_7d" },
     objetivos: { enabled: false, periodo: "mes_atual" },
+    atividades: { enabled: false, periodo: "hoje" },
   },
 };
 

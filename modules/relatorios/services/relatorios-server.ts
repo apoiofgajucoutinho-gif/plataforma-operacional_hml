@@ -22,6 +22,7 @@ const defaultBlocks = {
   instagram: { enabled: false, periodo: "ultimos_7d" },
   ads: { enabled: false, periodo: "ultimos_7d" },
   objetivos: { enabled: false, periodo: "mes_atual" },
+  atividades: { enabled: false, periodo: "hoje" },
 } satisfies NonNullable<RelatorioFiltros["blocos"]>;
 
 const templateDefaults: Record<string, RelatorioFiltros> = {
@@ -32,6 +33,7 @@ const templateDefaults: Record<string, RelatorioFiltros> = {
       agenda: { enabled: true, periodo: "proximos_7d" },
       financeiro: { enabled: true, periodo: "mes_atual" },
       ocorrencias: { enabled: true, periodo: "pendentes" },
+      atividades: { enabled: true, periodo: "proximos_7d" },
       instagram: { enabled: true, periodo: "ultimos_7d" },
       ads: { enabled: true, periodo: "ultimos_7d" },
       objetivos: { enabled: true, periodo: "mes_atual" },
@@ -44,6 +46,7 @@ const templateDefaults: Record<string, RelatorioFiltros> = {
       agenda: { enabled: true, periodo: "proximos_7d" },
       financeiro: { enabled: true, periodo: "hoje" },
       ocorrencias: { enabled: true, periodo: "pendentes" },
+      atividades: { enabled: true, periodo: "hoje" },
       instagram: { enabled: true, periodo: "hoje" },
       objetivos: { enabled: true, periodo: "mes_atual" },
     },
@@ -55,6 +58,7 @@ const templateDefaults: Record<string, RelatorioFiltros> = {
       agenda: { enabled: true, periodo: "hoje" },
       financeiro: { enabled: true, periodo: "proximos_7d" },
       ocorrencias: { enabled: true, periodo: "pendentes" },
+      atividades: { enabled: true, periodo: "hoje" },
       instagram: { enabled: true, periodo: "ultimos_7d" },
     },
   },
@@ -545,6 +549,7 @@ export async function buildOperationalSummary({
   const financialPeriod = getPeriodRange(block.financeiro.periodo);
   const interactionPeriod = getPeriodRange(block.instagram.periodo);
   const adsPeriod = getPeriodRange(block.ads.periodo);
+  const activitiesPeriod = getPeriodRange(block.atividades.periodo);
   const reminderEnd = addMinutes(filters.antecedencia_minutos ?? 60);
 
   const [
@@ -554,6 +559,7 @@ export async function buildOperationalSummary({
     financialResult,
     adsResult,
     goalsResult,
+    activitiesResult,
   ] = await Promise.all([
     block.agenda.enabled
       ? dataClient
@@ -614,6 +620,17 @@ export async function buildOperationalSummary({
           .eq("ativo", true)
           .limit(30)
       : Promise.resolve({ data: [] }),
+    block.atividades.enabled
+      ? dataClient
+          .from("atividades_tarefas")
+          .select("id, titulo, time_responsavel, responsavel_nome, status, prioridade, prazo, validacao_obrigatoria")
+          .eq("tenant_id", tenantId)
+          .not("status", "in", '("concluida","cancelada","ignorada")')
+          .gte("prazo", activitiesPeriod.start.slice(0, 10))
+          .lt("prazo", activitiesPeriod.end.slice(0, 10))
+          .order("prazo", { ascending: true })
+          .limit(30)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const agendaEvents = agendaResult.data ?? [];
@@ -622,6 +639,7 @@ export async function buildOperationalSummary({
   const financialRows = financialResult.data ?? [];
   const adsRows = adsResult.data ?? [];
   const goalsRows = goalsResult.data ?? [];
+  const activitiesRows = activitiesResult.data ?? [];
 
   const entradas = financialRows
     .filter((row: { tipo: string; status: string }) => row.tipo === "entrada" && row.status === "realizado")
@@ -636,10 +654,11 @@ export async function buildOperationalSummary({
   const adsLeads = adsRows.reduce((sum: number, row: { leads?: unknown }) => sum + toNumber(row.leads), 0);
   const urgentOccurrences = openOccurrences.filter((row: { prioridade: string }) => row.prioridade === "urgente").length;
   const highPotentialInteractions = openInteractions.filter((row: { potential: string }) => row.potential === "alto").length;
+  const lateActivities = activitiesRows.filter((row: { prazo?: string | null }) => row.prazo && row.prazo < todayIso()).length;
   const hasAlert =
     tipoResumo === "lembrete_agendamento"
       ? agendaEvents.length > 0
-      : urgentOccurrences > 0 || highPotentialInteractions > 0 || predictedPayables > 0 || agendaEvents.length > 0;
+      : urgentOccurrences > 0 || highPotentialInteractions > 0 || predictedPayables > 0 || agendaEvents.length > 0 || lateActivities > 0;
 
   const subject =
     tipoResumo === "lembrete_agendamento"
@@ -704,6 +723,15 @@ export async function buildOperationalSummary({
     lines.push("");
   }
 
+  if (block.atividades.enabled) {
+    lines.push(`*Atividades*`);
+    lines.push(`${activitiesPeriod.label}: ${activitiesRows.length} atividade(s), ${lateActivities} atrasada(s).`);
+    activitiesRows.slice(0, filters.nivel_detalhe === "detalhado" ? 10 : 5).forEach((item: { titulo: string; time_responsavel: string; responsavel_nome?: string | null; prioridade: string; prazo?: string | null }) => {
+      lines.push(`- ${item.prioridade.toUpperCase()}: ${item.titulo} (${item.time_responsavel}${item.responsavel_nome ? ` / ${item.responsavel_nome}` : ""}) - prazo ${item.prazo ?? "-"}`);
+    });
+    lines.push("");
+  }
+
   if (block.ads.enabled || block.objetivos.enabled) {
     lines.push(`*Ads e metas*`);
     if (block.ads.enabled) lines.push(`Investimento Ads (${adsPeriod.label}): ${formatMoney(adsSpend)}. Leads registrados: ${adsLeads}.`);
@@ -736,6 +764,8 @@ export async function buildOperationalSummary({
       urgentOccurrences,
       openInteractions: openInteractions.length,
       highPotentialInteractions,
+      activities: activitiesRows.length,
+      lateActivities,
       entradas,
       saidas,
       predictedPayables,

@@ -1,0 +1,247 @@
+{
+  "name": "Instagram Directs / Comentarios Collector v1",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-comments",
+      "name": "A cada 1 hora",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/v23.0/' + ($env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '17841400108793586') + '/media' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,caption,media_type,timestamp,comments_count,permalink"
+            },
+            {
+              "name": "limit",
+              "value": "={{ $env.INSTAGRAM_DIRECTS_POST_LIMIT || 50 }}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_INSTAGRAM_ACCESS_TOKEN || $env.META_ADS_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "get-recent-posts",
+      "name": "Buscar posts recentes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const posts = Array.isArray(items[0]?.json?.data) ? items[0].json.data : [];\n\nreturn posts\n  .filter((post) => Number(post.comments_count || 0) > 0)\n  .map((post) => ({\n    json: {\n      post_id: post.id,\n      post_permalink: post.permalink || '',\n      post_caption: post.caption || '',\n      post_timestamp: post.timestamp || null,\n      comments_count: Number(post.comments_count || 0)\n    }\n  }));"
+      },
+      "id": "prepare-posts",
+      "name": "Preparar posts com comentarios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/v23.0/' + $json.post_id + '/comments' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,text,timestamp,username,from,like_count"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_INSTAGRAM_ACCESS_TOKEN || $env.META_ADS_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "get-comments",
+      "name": "Buscar comentarios do post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function normalize(text) {\n  return String(text || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();\n}\n\nfunction cleanWords(text) {\n  const value = normalize(text).replace(/[^a-z0-9\\s]/g, ' ').trim();\n  return value ? value.split(/\\s+/) : [];\n}\n\nfunction isCommercialText(value) {\n  return /(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|curso|formacao|aasi|aura|palestra|orcamento)/.test(value);\n}\n\nfunction isRiskText(value) {\n  return /(erro|errado|incorreto|falha|falhou|bug|problema|reclamacao|reclamar|ruim|pessimo|incompleto|incompleta|plagio|plagiado|copiado|enganoso|indevido|indevida|valor indevido|preco errado|link errado|link incorreto|nao funciona|nao funcionou|nao recebi|nao abre|quebrado|cancelamento|reembolso|devolucao|chargeback)/.test(value);\n}\n\nfunction isJiuJitsuTopic(value) {\n  return /(jiu jitsu|jiujitsu|luta|tatame|faixa|treino|kimono|campeonato|graduacao)/.test(value);\n}\n\nfunction isFamilyTopic(value) {\n  return /(familia|filho|filha|mae|pai|marido|esposa|minha filha|meu filho|minha mae|meu pai)/.test(value);\n}\n\nfunction isCtaEngagement(text, postCaption) {\n  const value = normalize(text);\n  const caption = normalize(postCaption);\n  const words = cleanWords(text);\n  const compact = words.join(' ');\n\n  if (!compact) return false;\n  if (/(crianca|criancas|mapa|perfeito|excelente|chapeu|potencial evocado|estado estavel)/.test(value)) return true;\n  if (words.length <= 3 && compact.length >= 3 && caption.includes(compact)) return true;\n\n  return words.length <= 2 && !isCommercialText(value);\n}\n\nfunction classifyTopic(text, postCaption) {\n  const value = normalize(text);\n  if (isRiskText(value)) return 'Risco / Reclamacao';\n  if (/(valor|preco|matricula|inscricao|comprar|link)/.test(value)) return 'Preco / Inscricao';\n  if (/(agenda|consulta|atendimento|avaliacao|aura|clinica)/.test(value)) return 'Consulta / Clinica';\n  if (/(curso|formacao|imersao|aasi|aula)/.test(value)) return 'Curso / Formacao';\n  if (/(palestra|evento|congresso|workshop)/.test(value)) return 'Palestra / Evento';\n  if (/(zumbido|aparelho|perda auditiva|audicao|audiologia)/.test(value)) return 'Duvida tecnica';\n  if (isJiuJitsuTopic(value)) return 'Jiu Jitsu';\n  if (isFamilyTopic(value)) return 'Familia';\n  if (isCtaEngagement(text, postCaption)) return 'Engajamento por CTA';\n  if (/(amei|parabens|top|lindo|obrigada|obrigado|perfeito|excelente)/.test(value)) return 'Engajamento geral';\n  return 'Sem tema definido';\n}\n\nfunction classifyPotential(text, postCaption) {\n  const value = normalize(text);\n  const topic = classifyTopic(text, postCaption);\n  if (topic === 'Risco / Reclamacao') return 'alto';\n  if (['Engajamento por CTA', 'Engajamento geral', 'Jiu Jitsu', 'Familia'].includes(topic)) return 'baixo';\n  if (/(valor|preco|matricula|inscricao|link|comprar|agenda|consulta|palestra|orcamento)/.test(value)) return 'alto';\n  if (/(curso|formacao|aasi|imersao|zumbido|interesse|quero|como funciona|aura|consulta|clinica|atendimento)/.test(value)) return 'medio';\n  if (value.trim()) return 'baixo';\n  return 'nao_classificado';\n}\n\nfunction suggestAction(text, postCaption) {\n  const topic = classifyTopic(text, postCaption);\n  if (topic === 'Risco / Reclamacao') return 'Priorizar resposta humana, corrigir link/valor se aplicavel e registrar acao tomada.';\n  if (topic === 'Preco / Inscricao') return 'Responder com link, condicao e proximo passo de compra.';\n  if (topic === 'Consulta / Clinica') return 'Responder com orientacao de atendimento clinico e confirmar necessidade.';\n  if (topic === 'Curso / Formacao') return 'Responder com detalhes do curso e direcionar para inscricao/lista.';\n  if (topic === 'Palestra / Evento') return 'Responder solicitando objetivo, data e formato do evento.';\n  if (topic === 'Duvida tecnica') return 'Responder com acolhimento e direcionar para conteudo ou consulta.';\n  if (topic === 'Jiu Jitsu') return 'Responder de forma leve e fortalecer conexao pessoal/comunidade.';\n  if (topic === 'Familia') return 'Responder com acolhimento e manter relacionamento, sem tratar como lead direto.';\n  if (topic === 'Engajamento por CTA') return 'Curtir ou responder curto; nao priorizar como lead comercial.';\n  if (topic === 'Engajamento geral') return 'Agradecer e manter relacionamento.';\n  return 'Analisar contexto antes de responder.';\n}\n\nconst posts = $items('Preparar posts com comentarios');\nconst rows = [];\n\nitems.forEach((item, index) => {\n  const post = posts[index]?.json || {};\n  const comments = Array.isArray(item.json.data) ? item.json.data : [];\n\n  comments.forEach((comment) => {\n    const text = comment.text || '';\n    const postCaption = post.post_caption || '';\n    rows.push({\n      json: {\n        tenant_name: $env.PLATAFORMA_TENANT_NAME || 'Juliana Coutinho',\n        account_name: $env.INSTAGRAM_ACCOUNT_NAME || 'Juliana Coutinho',\n        username: $env.INSTAGRAM_USERNAME || 'fga.jucoutinho',\n        source: 'post_comment',\n        marketing_type: 'interacao_marketing',\n        external_id: comment.id,\n        profile_username: comment.username || comment.from?.username || comment.from?.id || null,\n        profile_name: comment.from?.name || null,\n        message_text: text,\n        media_id: post.post_id || null,\n        post_id: post.post_id || null,\n        post_permalink: post.post_permalink || null,\n        interaction_at: comment.timestamp || new Date().toISOString(),\n        status: 'novo',\n        potential: classifyPotential(text, postCaption),\n        product_topic: classifyTopic(text, postCaption),\n        next_action: suggestAction(text, postCaption),\n        origem: 'n8n_instagram_comments_collector',\n        raw_payload: {\n          comment,\n          post\n        }\n      }\n    });\n  });\n});\n\nreturn rows;"
+      },
+      "id": "normalize-comments",
+      "name": "Normalizar comentarios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const validRows = items\n  .map((item) => item.json)\n  .filter((row) => row && row.external_id && row.source && row.interaction_at);\n\nconst batchSize = Number($env.INSTAGRAM_DIRECTS_BATCH_SIZE || 25);\nconst batches = [];\n\nfor (let index = 0; index < validRows.length; index += batchSize) {\n  batches.push({\n    json: {\n      batch_number: Math.floor(index / batchSize) + 1,\n      rows: validRows.slice(index, index + batchSize)\n    }\n  });\n}\n\nreturn batches;"
+      },
+      "id": "build-supabase-batches",
+      "name": "Montar lotes Supabase",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.SUPABASE_URL || 'https://oerdsmgiebquecqwcbox.supabase.co').replace(/\\/$/, '') + '/rest/v1/instagram_interactions_import_rows' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.rows) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "insert-supabase",
+      "name": "Inserir Supabase Directs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "A cada 1 hora": {
+      "main": [
+        [
+          {
+            "node": "Buscar posts recentes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar posts recentes": {
+      "main": [
+        [
+          {
+            "node": "Preparar posts com comentarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar posts com comentarios": {
+      "main": [
+        [
+          {
+            "node": "Buscar comentarios do post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar comentarios do post": {
+      "main": [
+        [
+          {
+            "node": "Normalizar comentarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar comentarios": {
+      "main": [
+        [
+          {
+            "node": "Montar lotes Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar lotes Supabase": {
+      "main": [
+        [
+          {
+            "node": "Inserir Supabase Directs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7251870d-47e7-4c85-b4aa-3ee9ff35a22a",
+  "id": "instagram-directs-comments-collector-v1",
+  "tags": []
+}

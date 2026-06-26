@@ -6,6 +6,22 @@ import {
   updateRelatorioEnvioStatus,
 } from "@/modules/relatorios/services/relatorios-server";
 
+function normalizeTelegramError(errorText: string) {
+  if (errorText.includes("bot can't send messages to the bot")) {
+    return "Telegram recusou o envio porque o Telegram chat ID configurado pertence a um bot. Use o chat ID de uma pessoa ou grupo onde o bot esteja presente.";
+  }
+
+  if (errorText.includes("chat not found")) {
+    return "Telegram nao encontrou o chat. Confirme se o chat ID esta correto e se o bot ja recebeu uma mensagem ou esta no grupo.";
+  }
+
+  if (errorText.includes("bot was blocked by the user")) {
+    return "Telegram recusou o envio porque o usuario bloqueou o bot ou ainda nao iniciou conversa com ele.";
+  }
+
+  return errorText || "Falha ao enviar mensagem no Telegram.";
+}
+
 async function sendTelegramMessage(chatId: string, text: string) {
   if (!env.telegramBotToken) {
     throw new Error("TELEGRAM_BOT_TOKEN nao configurado na Vercel.");
@@ -34,7 +50,7 @@ async function sendTelegramMessage(chatId: string, text: string) {
 
   if (!plainResponse.ok) {
     const errorText = await plainResponse.text();
-    throw new Error(errorText || "Falha ao enviar mensagem no Telegram.");
+    throw new Error(normalizeTelegramError(errorText));
   }
 
   return plainResponse.json();
@@ -44,10 +60,12 @@ export async function POST(request: Request) {
   const body = await request.json();
   const scheduleId = String(body.scheduleId ?? "");
   if (!scheduleId) return NextResponse.json({ error: "scheduleId obrigatorio." }, { status: 400 });
+  let logId: string | null = null;
 
   try {
     const auth = await assertRelatoriosWriteAccess();
     const dispatch = await getRelatorioDispatchByScheduleId(scheduleId);
+    logId = dispatch.log.id;
 
     if (dispatch.schedule.tenant_id !== auth.tenantId) {
       return NextResponse.json({ error: "Agendamento nao pertence ao tenant atual." }, { status: 403 });
@@ -80,8 +98,17 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, data: envio });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha ao enviar report agora.";
+    if (logId) {
+      await updateRelatorioEnvioStatus({
+        logId,
+        status: "erro",
+        error: message,
+      });
+    }
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Falha ao enviar report agora." },
+      { error: message },
       { status: 400 },
     );
   }

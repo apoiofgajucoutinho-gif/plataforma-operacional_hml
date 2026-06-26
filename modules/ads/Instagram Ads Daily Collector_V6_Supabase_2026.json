@@ -1,0 +1,399 @@
+{
+  "name": "Instagram Ads Daily Collector_V6_Supabase_2026",
+  "nodes": [
+    {
+      "id": "manual-backfill",
+      "name": "Executar Backfill 2026",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4240,
+        560
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "calc-backfill",
+      "name": "Calcular Periodo 2026",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4000,
+        560
+      ],
+      "parameters": {
+        "jsCode": "const start = new Date('2026-01-01T00:00:00');\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst ranges = [];\n\nlet cursor = new Date(start);\nwhile (cursor <= today) {\n  const since = new Date(cursor);\n  const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);\n  const until = monthEnd > today ? today : monthEnd;\n\n  ranges.push({\n    json: {\n      since: fmt(since),\n      until: fmt(until),\n      mode: 'backfill_2026',\n      periodo: String(cursor.getMonth() + 1).padStart(2, '0') + '/' + cursor.getFullYear()\n    }\n  });\n\n  cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);\n}\n\nconsole.log(`[FGA Ads 2026] Backfill em ${ranges.length} lote(s) mensais.`);\nreturn ranges;"
+      }
+    },
+    {
+      "id": "schedule",
+      "name": "20h30 Daily",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -4240,
+        160
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 20,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "calc-incremental",
+      "name": "Calcular Incremental",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4000,
+        160
+      ],
+      "parameters": {
+        "jsCode": "const LOOKBACK_DAYS = Number($env.META_ADS_LOOKBACK_DAYS || 7);\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst since = new Date(today.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);\nconst fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst sinceStr = fmt(since);\nconst untilStr = fmt(today);\nconsole.log(`[FGA Ads incremental] Buscando de ${sinceStr} ate ${untilStr}`);\nreturn [{ json: { since: sinceStr, until: untilStr, mode: 'incremental' } }];"
+      }
+    },
+    {
+      "id": "meta-backfill",
+      "name": "Meta Ads API - Backfill 2026",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3760,
+        560
+      ],
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/v23.0/' + (($env.META_AD_ACCOUNT_ID || 'act_3360327820914673').startsWith('act_') ? ($env.META_AD_ACCOUNT_ID || 'act_3360327820914673') : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,reach,clicks,ctr,cpc,cpm,frequency,spend,objective,date_start,date_stop,actions"
+            },
+            {
+              "name": "level",
+              "value": "ad"
+            },
+            {
+              "name": "time_range",
+              "value": "={{ JSON.stringify({ since: $json.since, until: $json.until }) }}"
+            },
+            {
+              "name": "time_increment",
+              "value": "1"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "meta-incremental",
+      "name": "Meta Ads API - Incremental",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3760,
+        160
+      ],
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/v23.0/' + (($env.META_AD_ACCOUNT_ID || 'act_3360327820914673').startsWith('act_') ? ($env.META_AD_ACCOUNT_ID || 'act_3360327820914673') : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,reach,clicks,ctr,cpc,cpm,frequency,spend,objective,date_start,date_stop,actions"
+            },
+            {
+              "name": "level",
+              "value": "ad"
+            },
+            {
+              "name": "time_range",
+              "value": "={{ JSON.stringify({ since: $json.since, until: $json.until }) }}"
+            },
+            {
+              "name": "time_increment",
+              "value": "1"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "pagination",
+      "name": "Tratar Paginacao",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3480,
+        360
+      ],
+      "parameters": {
+        "jsCode": "let allData = [];\nconst maxPages = Number($env.META_ADS_MAX_PAGES || 100);\n\nfor (const item of items) {\n  const response = item.json;\n  let batchData = Array.isArray(response.data) ? [...response.data] : [];\n  let nextUrl = response.paging?.next || null;\n  let pageCount = 1;\n\n  while (nextUrl && pageCount < maxPages) {\n    pageCount++;\n    console.log(`[FGA Ads] Pagina ${pageCount}...`);\n\n    let pageResp;\n    try {\n      pageResp = await $http.request({ method: 'GET', url: nextUrl });\n    } catch (error) {\n      throw new Error(`Falha ao buscar pagina ${pageCount} da Meta Ads API: ${error.message}`);\n    }\n\n    const pageData = pageResp.data ?? pageResp;\n    batchData = batchData.concat(Array.isArray(pageData.data) ? pageData.data : []);\n    nextUrl = pageData.paging?.next || null;\n    await new Promise(resolve => setTimeout(resolve, 300));\n  }\n\n  allData = allData.concat(batchData);\n  console.log(`[FGA Ads] Lote coletado: ${batchData.length} registros em ${pageCount} pagina(s).`);\n}\n\nconsole.log(`[FGA Ads] Total coletado: ${allData.length} registros.`);\nreturn allData.map(row => ({ json: row }));"
+      }
+    },
+    {
+      "id": "transform",
+      "name": "Normalizar para Supabase",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3200,
+        360
+      ],
+      "parameters": {
+        "jsCode": "function actionValue(actions, types) {\n  if (!Array.isArray(actions)) return 0;\n  return actions\n    .filter(action => types.has(String(action.action_type || '').toLowerCase()))\n    .reduce((sum, action) => sum + Number(action.value || 0), 0);\n}\n\nconst leadTypes = new Set([\n  'lead',\n  'onsite_conversion.lead_grouped',\n  'offsite_conversion.fb_pixel_lead',\n  'omni_lead',\n]);\nconst conversionTypes = new Set([\n  'purchase',\n  'offsite_conversion.fb_pixel_purchase',\n  'onsite_conversion.purchase',\n  'complete_registration',\n]);\n\nreturn items.map(item => {\n  const d = item.json;\n  const ctr = Number(d.ctr || 0);\n  const cpc = Number(d.cpc || 0);\n  const cpm = Number(d.cpm || 0);\n  const freq = Number(d.frequency || 0);\n  const spend = Number(d.spend || 0);\n  const clicks = Number(d.clicks || 0);\n  const impressions = Number(d.impressions || 0);\n  const reach = Number(d.reach || 0);\n  const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];\n  const tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();\n\n  if (!tenantId) {\n    throw new Error('Configure PLATAFORMA_TENANT_ID no ambiente do n8n.');\n  }\n\n  const campanha = String(d.campaign_name || '').trim();\n  const conjunto = String(d.adset_name || '').trim();\n  const anuncio = String(d.ad_name || '').trim();\n  const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();\n  const leads = actionValue(d.actions, leadTypes);\n  const conversoes = actionValue(d.actions, conversionTypes);\n\n  let performance_status = 'OK';\n  if (cpm > 50 && ctr < 1) performance_status = 'PUBLICO RUIM';\n  else if (freq > 3) performance_status = 'SATURADO';\n  else if (ctr < 1) performance_status = 'CTR BAIXO';\n\n  const performance_score = (ctr * 40) + ((clicks > 0 ? ctr : 0) * 40) - (cpc * 10) - (freq * 10);\n  const rowKey = [dataRef, campanha, conjunto, anuncio].join('|');\n\n  return {\n    json: {\n      tenant_id: tenantId,\n      data_referencia: dataRef,\n      campanha,\n      conjunto: conjunto || null,\n      anuncio,\n      status,\n      objetivo: d.objective || null,\n      alcance: Math.round(reach),\n      impressoes: Math.round(impressions),\n      cliques: Math.round(clicks),\n      ctr,\n      cpc,\n      cpm,\n      frequencia: freq,\n      valor_gasto: spend,\n      conversoes: Math.round(conversoes),\n      leads: Math.round(leads),\n      performance_status,\n      performance_score: Math.round(performance_score * 100) / 100,\n      origem: 'n8n_meta_ads',\n      row_key: rowKey,\n      raw_payload: d,\n      imported_at: new Date().toISOString()\n    }\n  };\n});"
+      }
+    },
+    {
+      "id": "valid",
+      "name": "Registro valido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2920,
+        360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid_campaign",
+              "leftValue": "={{ $json.campanha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "valid_ad",
+              "leftValue": "={{ $json.anuncio }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "valid_spend",
+              "leftValue": "={{ $json.valor_gasto }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "upsert",
+      "name": "Upsert Supabase Ads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2640,
+        280
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL.replace(/\\/$/, '') + '/rest/v1/instagram_ads_daily?on_conflict=tenant_id,row_key' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "notes": "Usa REST upsert para atualizar linhas existentes por tenant_id,row_key. Nao exponha SUPABASE_SERVICE_ROLE_KEY fora do n8n."
+    },
+    {
+      "id": "discarded",
+      "name": "Log Descartados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2640,
+        520
+      ],
+      "parameters": {
+        "jsCode": "const count = items.length;\nconsole.log(`[FGA Ads] ${count} registro(s) descartado(s).`);\nreturn [{ json: { discarded_count: count, timestamp: new Date().toISOString() } }];"
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Executar Backfill 2026": {
+      "main": [
+        [
+          {
+            "node": "Calcular Periodo 2026",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Periodo 2026": {
+      "main": [
+        [
+          {
+            "node": "Meta Ads API - Backfill 2026",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "20h30 Daily": {
+      "main": [
+        [
+          {
+            "node": "Calcular Incremental",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Incremental": {
+      "main": [
+        [
+          {
+            "node": "Meta Ads API - Incremental",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Ads API - Backfill 2026": {
+      "main": [
+        [
+          {
+            "node": "Tratar Paginacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Ads API - Incremental": {
+      "main": [
+        [
+          {
+            "node": "Tratar Paginacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tratar Paginacao": {
+      "main": [
+        [
+          {
+            "node": "Normalizar para Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar para Supabase": {
+      "main": [
+        [
+          {
+            "node": "Registro valido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registro valido?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Supabase Ads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Descartados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
