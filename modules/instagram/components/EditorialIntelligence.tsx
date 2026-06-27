@@ -685,7 +685,56 @@ function CycleHeader({ config, analysis, generatedAt, savedAt }: { config: Cycle
   const periodLabel = `${formatDate(range.start)} a ${formatDate(range.end)}`;
   const savedLabel = savedAt ? `Análise salva neste navegador em ${dateTimeLabel(savedAt)}.` : "O ciclo é preservado localmente neste navegador durante a fase Essentials.";
 
-  return <Card className="relative z-0 mb-6 border-[#E9CBD1] bg-white/95 p-4 shadow-soft sm:p-5 lg:sticky lg:top-3 lg:z-20 lg:mb-0"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-black uppercase text-brand-clay">Ciclo Editorial</p><h2 className="mt-1 text-lg font-semibold text-brand-teal sm:text-xl">Qual direção editorial faz sentido agora?</h2></div><div className="hidden sm:block"><SourceBadges /></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:hidden"><CycleItem label="Período" value={periodLabel} /><CycleItem label="Contexto" value={config.context} /><CycleItem label="Objetivo" value={config.objective} /><CycleItem label="Capacidade" value={`${config.capacity} conteúdos`} /><CycleItem label="Posts analisados" value={String(analysis.posts.length)} /><CycleItem label="Comentários válidos" value={String(analysis.comments.length)} /></div><button type="button" onClick={() => setDetailsOpen((current) => !current)} className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-md border border-brand-sand bg-white/80 px-4 text-sm font-semibold text-brand-teal sm:w-auto lg:hidden">{detailsOpen ? "Ocultar detalhes do ciclo" : "Ver detalhes do ciclo"}</button>{detailsOpen ? <div className="mt-4 grid gap-3 border-t border-brand-sand pt-4 sm:grid-cols-2 lg:hidden"><CycleItem label="Filtro" value={filterLabel(config.period)} /><CycleItem label="Gerado em" value={dateTimeLabel(generatedAt)} /><CycleItem label="Prioridade" value={config.priority} /><div className="sm:col-span-2"><SourceBadges /></div><p className="text-xs text-brand-teal/55 sm:col-span-2">{savedLabel}</p></div> : null}<div className="mt-4 hidden gap-3 lg:grid lg:grid-cols-4 xl:grid-cols-6"><CycleItem label="Período" value={periodLabel} /><CycleItem label="Filtro" value={filterLabel(config.period)} /><CycleItem label="Gerado em" value={dateTimeLabel(generatedAt)} /><CycleItem label="Contexto" value={config.context} /><CycleItem label="Objetivo" value={config.objective} /><CycleItem label="Prioridade" value={config.priority} /><CycleItem label="Capacidade" value={`${config.capacity} conteúdos`} /><CycleItem label="Posts analisados" value={String(analysis.posts.length)} /><CycleItem label="Comentários válidos" value={String(analysis.comments.length)} /></div><p className="mt-3 hidden text-xs text-brand-teal/55 lg:block">{savedLabel}</p></Card>;
+  return <>
+    <section className="mb-6 block rounded-md border border-[#E9CBD1] bg-white/95 p-4 shadow-sm lg:hidden">
+      <div className="space-y-3">
+        <div>
+          <p className="text-xs font-black uppercase text-brand-clay">Ciclo Editorial</p>
+          <h2 className="mt-1 text-lg font-semibold leading-snug text-brand-teal">Qual direção editorial faz sentido agora?</h2>
+        </div>
+        <div className="grid gap-3">
+          <CycleItem label="Período" value={periodLabel} />
+          <CycleItem label="Contexto" value={config.context} />
+          <CycleItem label="Objetivo" value={config.objective} />
+        </div>
+        <button type="button" onClick={() => setDetailsOpen((current) => !current)} className="inline-flex h-10 w-full items-center justify-center rounded-md border border-brand-sand bg-white px-4 text-sm font-semibold text-brand-teal">
+          {detailsOpen ? "Ocultar detalhes" : "Ver detalhes"}
+        </button>
+      </div>
+      {detailsOpen ? <div className="mt-4 grid gap-3 border-t border-brand-sand pt-4">
+        <CycleItem label="Filtro" value={filterLabel(config.period)} />
+        <CycleItem label="Gerado em" value={dateTimeLabel(generatedAt)} />
+        <CycleItem label="Prioridade" value={config.priority} />
+        <CycleItem label="Capacidade" value={`${config.capacity} conteúdos`} />
+        <CycleItem label="Posts analisados" value={String(analysis.posts.length)} />
+        <CycleItem label="Comentários válidos" value={String(analysis.comments.length)} />
+        <div><SourceBadges /></div>
+        <p className="text-xs leading-5 text-brand-teal/55">{savedLabel}</p>
+      </div> : null}
+    </section>
+
+    <Card className="hidden border-[#E9CBD1] bg-white/95 p-5 shadow-soft lg:sticky lg:top-3 lg:z-20 lg:block">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-black uppercase text-brand-clay">Ciclo Editorial</p>
+          <h2 className="mt-1 text-xl font-semibold text-brand-teal">Qual direção editorial faz sentido agora?</h2>
+        </div>
+        <SourceBadges />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-4 xl:grid-cols-6">
+        <CycleItem label="Período" value={periodLabel} />
+        <CycleItem label="Filtro" value={filterLabel(config.period)} />
+        <CycleItem label="Gerado em" value={dateTimeLabel(generatedAt)} />
+        <CycleItem label="Contexto" value={config.context} />
+        <CycleItem label="Objetivo" value={config.objective} />
+        <CycleItem label="Prioridade" value={config.priority} />
+        <CycleItem label="Capacidade" value={`${config.capacity} conteúdos`} />
+        <CycleItem label="Posts analisados" value={String(analysis.posts.length)} />
+        <CycleItem label="Comentários válidos" value={String(analysis.comments.length)} />
+      </div>
+      <p className="mt-3 text-xs text-brand-teal/55">{savedLabel}</p>
+    </Card>
+  </>;
 }
 
 function RecommendationCard({ item, status, validation, canValidate, createBriefing, addBacklog, explain, explore, archive, quickValidate, openValidation, carousel }: { item: Recommendation; status?: ActionStatus; validation?: RecommendationValidation; canValidate: boolean; createBriefing: () => void; addBacklog: () => void; explain: () => void; explore: () => void; archive: () => void; quickValidate: (usefulness: ExpertUsefulness) => void; openValidation: (usefulness: ExpertUsefulness) => void; carousel?: boolean }) {
