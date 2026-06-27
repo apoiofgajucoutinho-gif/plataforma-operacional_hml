@@ -889,7 +889,34 @@ function GapCard({ gap }: { gap: Gap }) { return <article className="rounded-md 
 function InfoCell({ label, value }: { label: string; value: string }) { return <div><p className="text-[11px] font-black uppercase text-brand-clay">{label}</p><p className="mt-1 font-semibold text-brand-teal">{value || "-"}</p></div>; }
 function InfoBox({ title, body, tone }: { title: string; body: string; tone: "green" | "amber" }) { const classes = tone === "green" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"; return <div className={`rounded-md border p-4 ${classes}`}><p className="text-xs font-black uppercase">{title}</p><p className="mt-2 text-sm leading-6">{body}</p></div>; }
 function ArchiveModal({ reason, setReason, close, confirm }: { reason: string; setReason: (value: string) => void; close: () => void; confirm: () => void }) { return <Modal title="Arquivar recomendação" close={close}><p className="text-sm text-brand-teal/70">O motivo é opcional e permanece apenas no estado local desta versão.</p><Select value={reason} onChange={setReason} options={["","Não faz sentido agora","Tema já trabalhado","Baixa prioridade","Falta evidência","Desalinhado com momento","Outro"]} /><Button className="mt-4 w-full" onClick={confirm}>Arquivar</Button></Modal>; }
-function Modal({ title, close, children }: { title: string; close: () => void; children: ReactNode }) { return <div className="fixed inset-0 z-50 flex items-end justify-center bg-brand-teal/55 p-4 sm:items-center" role="dialog" aria-modal="true"><Card className="max-h-[90vh] w-full max-w-2xl overflow-y-auto border-brand-sand p-5"><div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold text-brand-teal">{title}</h2><button aria-label="Fechar" onClick={close}><X className="h-5 w-5 text-brand-teal" /></button></div>{children}</Card></div>; }
+function Modal({ title, close, children }: { title: string; close: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") close();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [close]);
+
+  return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-brand-teal/60 p-3 sm:p-4" role="dialog" aria-modal="true" onClick={close}>
+    <Card className="flex max-h-[calc(100svh-1.5rem)] min-h-0 w-full max-w-2xl flex-col overflow-hidden border-brand-sand p-0 shadow-2xl sm:max-h-[min(90vh,52rem)]" onClick={(event) => event.stopPropagation()}>
+      <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-3 border-b border-brand-sand bg-white/95 px-4 py-3 backdrop-blur sm:px-5">
+        <h2 className="min-w-0 pr-2 text-base font-semibold leading-snug text-brand-teal sm:text-lg">{title}</h2>
+        <button type="button" aria-label="Fechar modal" onClick={close} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-brand-sand bg-white text-brand-teal shadow-sm hover:bg-brand-cream focus:outline-none focus:ring-2 focus:ring-brand-sky">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-5 sm:py-5">
+        {children}
+      </div>
+    </Card>
+  </div>;
+}
 function EditorialHeader() { return <Card className="border-[#E9CBD1] p-5"><div className="flex flex-wrap items-center gap-3"><h2 className="text-2xl font-semibold text-brand-teal">Inteligência Editorial</h2><Badge>BETA • Editorial Intelligence Essentials</Badge></div><p className="mt-2 text-sm leading-6 text-brand-teal/70">Transforme dados recentes do Instagram em direção editorial para o próximo ciclo.</p><div className="mt-4 flex items-start gap-2 rounded-md border border-brand-sand bg-brand-cream/50 p-3 text-sm text-brand-teal/75"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-brand-clay" /><span>Esta funcionalidade está em validação. As recomendações usam regras determinísticas, exigem revisão humana e nenhuma IA é chamada nesta versão.</span></div></Card>; }
 function AccessDenied() { return <Card className="border-[#E9CBD1] p-6"><div className="flex items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 text-brand-clay" /><div><h2 className="text-lg font-semibold text-brand-teal">Acesso restrito</h2><p className="mt-2 text-sm text-brand-teal/70">Esta funcionalidade está disponível apenas para perfis autorizados durante a fase Essentials.</p></div></div></Card>; }
 function CycleItem({ label, value }: { label: string; value: string }) { return <div><p className="text-[10px] font-black uppercase text-brand-clay">{label}</p><p className="mt-1 text-sm font-semibold text-brand-teal">{value || "-"}</p></div>; }
