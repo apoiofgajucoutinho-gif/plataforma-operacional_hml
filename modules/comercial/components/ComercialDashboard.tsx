@@ -13,6 +13,7 @@ import {
   Clock3,
   Copy,
   ExternalLink,
+  Eye,
   GraduationCap,
   PackageCheck,
   Radar,
@@ -22,6 +23,7 @@ import {
   TrendingUp,
   Users,
   WalletCards,
+  X,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
@@ -35,13 +37,40 @@ import type {
 } from "@/modules/comercial/types";
 
 type TabKey = "launch" | "overview" | "sales" | "receivables" | "students" | "products" | "reconciliation" | "admin";
-type PeriodKey = "7d" | "15d" | "30d" | "month" | "all";
+type PeriodKey = "today" | "yesterday" | "7d" | "15d" | "30d" | "month" | "all";
 type LaunchPeriodKey = "today" | "yesterday" | "7d" | "15d" | "30d" | "month" | "launch" | "all" | "custom";
 type TableKey = "sales" | "receivables" | "students";
 type LaunchSalesSortKey = "latest" | "gross_desc" | "status" | "product" | "buyer";
 type LaunchProductSortKey = "revenue_desc" | "sales_desc" | "pending_desc" | "share_desc" | "name";
 type LaunchStatusSortKey = "order" | "count_desc" | "revenue_desc";
 type LaunchSourceSortKey = "revenue_desc" | "sales_desc" | "ticket_desc" | "source";
+type HypothesisResult = "pendente" | "confirmada" | "parcial" | "descartada";
+type EventDomain = "commercial" | "learning" | "unknown";
+type CommercialGlobalFiltersState = {
+  product: string;
+  status: string;
+  payment: string;
+  source: string;
+};
+
+type LaunchHypothesisFeedback = {
+  id: string;
+  hypothesis: string;
+  result: HypothesisResult;
+  comment: string;
+  updatedAt: string;
+  user: string;
+};
+
+type HotmartLossClassification = {
+  motivoOriginalHotmart: string;
+  categoriaMotivoNorwyn: string;
+  recuperabilidade: "Alta" | "Media" | "Baixa" | "Indefinida";
+  hipoteseOperacional: string;
+  acaoSugerida: string;
+  origemProvavel: "Cliente/Pagamento" | "Plataforma/Gateway" | "Comercial/Operacional" | "Indefinida" | "Nao informado";
+  evidencias: string[];
+};
 
 const PAGE_SIZE = 20;
 
@@ -57,6 +86,8 @@ const tabs: Array<{ key: TabKey; label: string }> = [
 ];
 
 const periods: Array<{ key: PeriodKey; label: string }> = [
+  { key: "today", label: "Hoje" },
+  { key: "yesterday", label: "Ontem" },
   { key: "7d", label: "7 dias" },
   { key: "15d", label: "15 dias" },
   { key: "30d", label: "30 dias" },
@@ -104,6 +135,56 @@ const launchSourceSortOptions: Array<{ key: LaunchSourceSortKey; label: string }
   { key: "ticket_desc", label: "Maior ticket" },
   { key: "source", label: "Origem A-Z" },
 ];
+
+const commercialStatusValues = new Set([
+  "APPROVED",
+  "COMPLETE",
+  "STARTED",
+  "WAITING_PAYMENT",
+  "PRINTED_BILLET",
+  "PROCESSING_TRANSACTION",
+  "UNDER_ANALISYS",
+  "UNDER_ANALYSIS",
+  "PRE_ORDER",
+  "OVERDUE",
+  "CANCELLED",
+  "CANCELED",
+  "EXPIRED",
+  "NO_FUNDS",
+  "BLOCKED",
+  "PROTESTED",
+  "REFUNDED",
+  "PARTIALLY_REFUNDED",
+  "CHARGEBACK",
+  "PURCHASE_APPROVED",
+  "PURCHASE_COMPLETE",
+  "PURCHASE_CANCELED",
+  "PURCHASE_CANCELLED",
+  "PURCHASE_REFUNDED",
+  "PURCHASE_CHARGEBACK",
+  "PURCHASE_BILLET_PRINTED",
+  "PURCHASE_DELAYED",
+  "PURCHASE_PROTEST",
+  "PURCHASE_EXPIRED",
+]);
+
+const learningEventValues = new Set([
+  "CLUB_FIRST_ACCESS",
+  "CLUB_MODULE_COMPLETED",
+  "CLUB_COURSE_COMPLETED",
+  "CLUB_LESSON_COMPLETED",
+  "CLUB_LESSON_STARTED",
+  "COURSE_STARTED",
+  "COURSE_COMPLETED",
+  "LESSON_STARTED",
+  "LESSON_COMPLETED",
+  "MODULE_STARTED",
+  "MODULE_COMPLETED",
+  "QUIZ_COMPLETED",
+  "CERTIFICATE_GENERATED",
+  "LOGIN",
+  "FIRST_ACCESS",
+]);
 
 function formatMoney(value: number | null | undefined) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
@@ -217,16 +298,300 @@ function normalizeStatus(status: string | null | undefined) {
 
 function commercialGroupFromStatus(status: string | null | undefined): ComercialStatusGroup {
   const normalized = normalizeStatus(status);
-  if (["APPROVED", "COMPLETE"].includes(normalized)) return "confirmed";
-  if (["STARTED", "WAITING_PAYMENT", "PRINTED_BILLET", "PROCESSING_TRANSACTION", "UNDER_ANALISYS", "UNDER_ANALYSIS", "PRE_ORDER", "OVERDUE"].includes(normalized)) return "pending";
-  if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(normalized)) return "refunded";
-  if (normalized === "CHARGEBACK") return "chargeback";
-  if (["CANCELLED", "CANCELED", "EXPIRED", "NO_FUNDS", "BLOCKED", "PROTESTED"].includes(normalized)) return "lost";
+  if (["APPROVED", "COMPLETE", "PURCHASE_APPROVED", "PURCHASE_COMPLETE"].includes(normalized)) return "confirmed";
+  if (["STARTED", "WAITING_PAYMENT", "PRINTED_BILLET", "PROCESSING_TRANSACTION", "UNDER_ANALISYS", "UNDER_ANALYSIS", "PRE_ORDER", "OVERDUE", "PURCHASE_BILLET_PRINTED", "PURCHASE_DELAYED"].includes(normalized)) return "pending";
+  if (["REFUNDED", "PARTIALLY_REFUNDED", "PURCHASE_REFUNDED"].includes(normalized)) return "refunded";
+  if (["CHARGEBACK", "PURCHASE_CHARGEBACK"].includes(normalized)) return "chargeback";
+  if (["CANCELLED", "CANCELED", "EXPIRED", "NO_FUNDS", "BLOCKED", "PROTESTED", "PURCHASE_CANCELED", "PURCHASE_CANCELLED", "PURCHASE_EXPIRED", "PURCHASE_PROTEST"].includes(normalized)) return "lost";
   return "unknown";
 }
 
 function commercialGroup(row: ComercialVenda): ComercialStatusGroup {
   return row.grupo_comercial ?? commercialGroupFromStatus(row.status_normalizado ?? row.status_original ?? row.status);
+}
+
+function rawPayloadForSale(row: ComercialVenda, rawImports: ComercialRawImport[]) {
+  return rawImports.find((item) => item.transaction_id === row.transaction_id)?.payload ?? null;
+}
+
+function findPayloadValue(payload: unknown, keys: string[]): unknown {
+  if (!payload || typeof payload !== "object") return null;
+  const stack: unknown[] = [payload];
+  const normalizedKeys = keys.map((key) => key.toLowerCase());
+
+  while (stack.length) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object") continue;
+    for (const [key, value] of Object.entries(current as Record<string, unknown>)) {
+      if (normalizedKeys.includes(key.toLowerCase()) && value !== null && value !== undefined && value !== "") {
+        return value;
+      }
+      if (value && typeof value === "object") stack.push(value);
+    }
+  }
+
+  return null;
+}
+
+function eventDomainFromValue(value: string | null | undefined): EventDomain {
+  const normalized = normalizeStatus(value);
+  if (commercialStatusValues.has(normalized)) return "commercial";
+  if (learningEventValues.has(normalized) || normalized.startsWith("CLUB_")) return "learning";
+  if (normalized.includes("LESSON") || normalized.includes("MODULE") || normalized.includes("COURSE") || normalized.includes("CERTIFICATE")) {
+    return "learning";
+  }
+  return "unknown";
+}
+
+function eventDomainLabel(domain: EventDomain) {
+  if (domain === "commercial") return "Comercial";
+  if (domain === "learning") return "Educacional";
+  return "Nao mapeado";
+}
+
+function saleEventDomain(row: ComercialVenda, rawImports: ComercialRawImport[] = []): EventDomain {
+  const values = [row.status_normalizado, row.status_original, row.status];
+  if (values.some((value) => eventDomainFromValue(value) === "commercial")) return "commercial";
+  if (values.some((value) => eventDomainFromValue(value) === "learning")) return "learning";
+
+  const payload = rawPayloadForSale(row, rawImports);
+  const eventValue = findPayloadValue(payload, ["event", "event_name", "webhook_event", "type"]);
+  return typeof eventValue === "string" ? eventDomainFromValue(eventValue) : "unknown";
+}
+
+function rawImportEventDomain(row: ComercialRawImport): EventDomain {
+  const event = rawImportEvent(row);
+  const eventDomain = eventDomainFromValue(event);
+  if (eventDomain !== "unknown") return eventDomain;
+  const status = findPayloadValue(row.payload, ["status", "transaction_status", "purchase_status", "event"]);
+  return typeof status === "string" ? eventDomainFromValue(status) : "unknown";
+}
+
+function isCommercialSale(row: ComercialVenda, rawImports: ComercialRawImport[] = []) {
+  return saleEventDomain(row, rawImports) === "commercial";
+}
+
+function stringFromPayload(payload: unknown, keys: string[]) {
+  const value = findPayloadValue(payload, keys);
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+const HOTMART_LOSS_REASON_KEYS = [
+  "cancel_reason",
+  "cancellation_reason",
+  "reason",
+  "reason_code",
+  "status_reason",
+  "decline_reason",
+  "refused_reason",
+  "payment_refused_reason",
+  "refusal_reason",
+  "gateway_message",
+  "gateway_response",
+  "acquirer_message",
+  "acquirer_return_code",
+  "bank_response",
+  "payment_error",
+  "payment_error_code",
+  "error_message",
+  "risk_analysis",
+  "fraud_reason",
+  "antifraud_status",
+  "blocked_reason",
+  "refund_reason",
+  "chargeback_reason",
+  "dispute_reason",
+];
+
+function paymentText(row: ComercialVenda, payload: unknown) {
+  return [
+    row.forma_pagamento,
+    stringFromPayload(payload, ["method", "payment_method", "payment_method_type"]),
+    row.parcelas > 1 ? `${row.parcelas}x` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function classifyHotmartLoss(row: ComercialVenda, rawImports: ComercialRawImport[]): HotmartLossClassification {
+  const status = normalizeStatus(row.status_original ?? row.status);
+  const payment = normalizeStatus(row.forma_pagamento);
+  const payload = rawPayloadForSale(row, rawImports);
+  const motivoOriginalHotmart = stringFromPayload(payload, HOTMART_LOSS_REASON_KEYS) ?? "Nao informado pela Hotmart";
+  const motivo = motivoOriginalHotmart.toLowerCase();
+  const isCreditCard = /CREDIT_CARD|CARD|CARTAO/.test(payment) || /CREDIT_CARD|CARD|CARTAO/i.test(paymentText(row, payload));
+  const isPix = /PIX/.test(payment);
+  const isBillet = /BILLET|BOLETO/.test(payment);
+  let categoriaMotivoNorwyn = "Motivo nao informado";
+
+  if (status === "CANCELLED" || status === "CANCELED") {
+    if (motivoOriginalHotmart === "Nao informado pela Hotmart" && isCreditCard) categoriaMotivoNorwyn = "Cancelamento no cartao sem motivo informado";
+    else if (/restri[cç][aã]o.*cart|card restriction|restricted card|cart[aã]o.*restr/i.test(motivo)) categoriaMotivoNorwyn = "Cartao recusado/restrito";
+    else if (/transa[cç][aã]o recusada|transaction refused|declined|refused/i.test(motivo)) categoriaMotivoNorwyn = "Transacao recusada";
+    else if (/dados.*cart|card data|invalid card|cart[aã]o.*inv[aá]lid/i.test(motivo)) categoriaMotivoNorwyn = "Dados de pagamento incorretos";
+    else if (motivoOriginalHotmart !== "Nao informado pela Hotmart") categoriaMotivoNorwyn = "Cancelamento com motivo Hotmart";
+    else categoriaMotivoNorwyn = "Cancelamento sem motivo informado";
+  } else if (status === "EXPIRED" && isPix) categoriaMotivoNorwyn = "PIX expirado";
+  else if (status === "EXPIRED" && isBillet) categoriaMotivoNorwyn = "Boleto expirado";
+  else if (["WAITING_PAYMENT", "PRINTED_BILLET", "STARTED", "PROCESSING_TRANSACTION", "UNDER_ANALISYS", "UNDER_ANALYSIS", "PRE_ORDER", "OVERDUE"].includes(status)) categoriaMotivoNorwyn = "Pagamento pendente";
+  else if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) categoriaMotivoNorwyn = "Reembolso";
+  else if (status === "CHARGEBACK") categoriaMotivoNorwyn = "Chargeback";
+  else if (status === "BLOCKED") categoriaMotivoNorwyn = "Bloqueio/antifraude";
+  else if (status === "PROTESTED") categoriaMotivoNorwyn = "Protestado";
+  else if (commercialGroup(row) === "lost") categoriaMotivoNorwyn = "Outro";
+
+  const highRecovery = ["PIX expirado", "Boleto expirado", "Pagamento pendente", "Dados de pagamento incorretos", "Transacao recusada"];
+  const mediumRecovery = ["Cancelamento no cartao sem motivo informado", "Cartao recusado/restrito", "Cancelamento sem motivo informado", "Cancelamento com motivo Hotmart"];
+  const lowRecovery = ["Reembolso", "Chargeback", "Bloqueio/antifraude", "Protestado"];
+  const recuperabilidade = highRecovery.includes(categoriaMotivoNorwyn)
+    ? "Alta"
+    : mediumRecovery.includes(categoriaMotivoNorwyn)
+      ? "Media"
+      : lowRecovery.includes(categoriaMotivoNorwyn)
+        ? "Baixa"
+        : "Indefinida";
+
+  let origemProvavel: HotmartLossClassification["origemProvavel"] = "Indefinida";
+  if (["Cartao recusado/restrito", "Transacao recusada", "Dados de pagamento incorretos"].includes(categoriaMotivoNorwyn)) origemProvavel = "Cliente/Pagamento";
+  else if (["PIX expirado", "Boleto expirado", "Pagamento pendente"].includes(categoriaMotivoNorwyn)) origemProvavel = "Cliente/Pagamento";
+  else if (categoriaMotivoNorwyn === "Bloqueio/antifraude") origemProvavel = "Plataforma/Gateway";
+  else if (categoriaMotivoNorwyn.includes("sem motivo informado")) origemProvavel = "Nao informado";
+
+  const hypothesisByCategory: Record<string, string> = {
+    "Cancelamento no cartao sem motivo informado": "Compra cancelada em tentativa por cartao. A Hotmart nao informou o motivo tecnico no payload.",
+    "Cartao recusado/restrito": "A tentativa pode ter sido recusada por restricao do cartao.",
+    "Transacao recusada": "O payload sugere uma transacao recusada, mas a causa exata depende do motivo original informado.",
+    "Dados de pagamento incorretos": "A tentativa pode ter falhado por dados de pagamento preenchidos incorretamente.",
+    "PIX expirado": "Pagamento via PIX expirou antes da confirmacao.",
+    "Boleto expirado": "Pagamento via boleto expirou antes da confirmacao.",
+    "Pagamento pendente": "Pagamento ainda indica pendencia ou processamento e precisa de acompanhamento antes de ser tratado como venda.",
+    Reembolso: "Venda foi reembolsada. A causa comercial precisa ser avaliada pelo motivo original quando ele existir.",
+    Chargeback: "Venda entrou em chargeback e deve ser tratada como risco financeiro.",
+    "Bloqueio/antifraude": "O status sugere bloqueio ou antifraude, mas a causa exata depende do retorno da Hotmart/gateway.",
+    Protestado: "O status sugere protesto e baixa recuperabilidade operacional.",
+  };
+  const actionByCategory: Record<string, string> = {
+    "Cancelamento no cartao sem motivo informado": "Oferecer nova tentativa de pagamento ou alternativa via PIX.",
+    "Cartao recusado/restrito": "Orientar nova tentativa com outro cartao ou PIX.",
+    "Transacao recusada": "Orientar nova tentativa com outro cartao ou PIX.",
+    "Dados de pagamento incorretos": "Orientar revisao dos dados de pagamento.",
+    "PIX expirado": "Reenviar link/QR Code de pagamento se ainda fizer sentido comercial.",
+    "Boleto expirado": "Reenviar link de pagamento ou oferecer PIX.",
+    "Pagamento pendente": "Acompanhar confirmacao antes de considerar venda perdida.",
+    Reembolso: "Nao tratar como recuperacao automatica; avaliar motivo do reembolso.",
+    Chargeback: "Tratar como risco financeiro, nao como oportunidade simples de recuperacao.",
+    "Bloqueio/antifraude": "Nao tratar como recuperacao simples; validar retorno do gateway/Hotmart.",
+    Protestado: "Registrar e acompanhar como risco financeiro.",
+  };
+  const evidencias = [
+    `status = ${row.status_original ?? row.status ?? "-"}`,
+    `grupo_comercial = ${commercialGroupLabels[commercialGroup(row)]}`,
+    `payment_type = ${row.forma_pagamento ?? "-"}`,
+    stringFromPayload(payload, ["method", "payment_method", "payment_method_type"]) ? `method = ${stringFromPayload(payload, ["method", "payment_method", "payment_method_type"])}` : null,
+    row.parcelas ? `installments = ${row.parcelas}` : null,
+    row.source_sck ? `source_sck = ${row.source_sck}` : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    motivoOriginalHotmart,
+    categoriaMotivoNorwyn,
+    recuperabilidade,
+    hipoteseOperacional: hypothesisByCategory[categoriaMotivoNorwyn] ?? "A Hotmart nao informou causa suficiente para afirmar a origem exata da perda.",
+    acaoSugerida: actionByCategory[categoriaMotivoNorwyn] ?? "Analisar manualmente antes de acionar recuperacao.",
+    origemProvavel,
+    evidencias,
+  };
+}
+
+function riskSales(rows: ComercialVenda[]) {
+  return rows.filter((row) => ["pending", "lost", "refunded", "chargeback"].includes(commercialGroup(row)));
+}
+
+function buildRiskRows(rows: ComercialVenda[], rawImports: ComercialRawImport[]) {
+  return riskSales(rows)
+    .map((row) => {
+      const classification = classifyHotmartLoss(row, rawImports);
+
+      return {
+        sale: row,
+        product: row.produto_nome || row.hotmart_product_id || "Produto nao informado",
+        classification,
+        reason: classification.categoriaMotivoNorwyn,
+        reasonDetail: classification.motivoOriginalHotmart,
+        payment: `${row.forma_pagamento ?? "-"} ${row.parcelas > 1 ? `${row.parcelas}x` : ""}`.trim(),
+        value: row.valor_bruto,
+        status: row.status_original ?? row.status,
+        group: commercialGroup(row),
+        suggestion: classification.acaoSugerida,
+        buyer: row.comprador_nome ?? row.comprador_email ?? "Comprador nao informado",
+        priority: row.valor_bruto >= 500 ? "Alta" : row.valor_bruto >= 150 ? "Media" : "Baixa",
+        transactionId: row.transaction_id,
+      };
+    })
+    .sort((a, b) => b.value - a.value || compareText(a.product, b.product));
+}
+
+type LaunchRiskRow = ReturnType<typeof buildRiskRows>[number];
+
+function buildLossReasonRows(riskRows: LaunchRiskRow[]) {
+  const groups = new Map<string, LaunchRiskRow[]>();
+  riskRows.forEach((row) => groups.set(row.classification.categoriaMotivoNorwyn, [...(groups.get(row.classification.categoriaMotivoNorwyn) ?? []), row]));
+  const total = riskRows.length || 1;
+  return Array.from(groups.entries())
+    .map(([reason, rows]) => ({
+      reason,
+      count: rows.length,
+      value: rows.reduce((sum, row) => sum + row.value, 0),
+      share: (rows.length / total) * 100,
+      example: rows[0]?.classification.motivoOriginalHotmart ?? "-",
+    }))
+    .sort((a, b) => b.value - a.value || b.count - a.count);
+}
+
+type LaunchLossReasonRow = ReturnType<typeof buildLossReasonRows>[number];
+
+function buildProductLossRows(riskRows: LaunchRiskRow[]) {
+  const groups = new Map<string, LaunchRiskRow[]>();
+  riskRows.forEach((row) => groups.set(row.product, [...(groups.get(row.product) ?? []), row]));
+  const totalValue = riskRows.reduce((sum, row) => sum + row.value, 0) || 1;
+  return Array.from(groups.entries())
+    .map(([product, rows]) => {
+      const value = rows.reduce((sum, row) => sum + row.value, 0);
+      return {
+        product,
+        losses: rows.length,
+        value,
+        share: (value / totalValue) * 100,
+        topReason: buildLossReasonRows(rows)[0]?.reason ?? "-",
+      };
+    })
+    .sort((a, b) => b.value - a.value || b.losses - a.losses);
+}
+
+type LaunchProductLossRow = ReturnType<typeof buildProductLossRows>[number];
+
+function buildTimelineRows(rows: ComercialVenda[]) {
+  return [...rows]
+    .sort((a, b) => saleTime(b) - saleTime(a))
+    .map((row) => ({
+      sale: row,
+      date: row.data_compra ?? row.data_aprovacao ?? row.last_event_at ?? row.imported_at ?? row.created_at,
+      product: row.produto_nome ?? "Produto nao informado",
+      status: row.status_original ?? row.status,
+      group: commercialGroup(row),
+      value: row.valor_bruto,
+      buyer: row.comprador_nome ?? row.comprador_email ?? "Comprador nao informado",
+      payment: `${row.forma_pagamento ?? "-"} ${row.parcelas > 1 ? `${row.parcelas}x` : ""}`.trim(),
+      transactionId: row.transaction_id,
+    }));
+}
+
+type LaunchTimelineRow = ReturnType<typeof buildTimelineRows>[number];
+
+function groupTone(group: ComercialStatusGroup): "ok" | "warn" | undefined {
+  if (group === "confirmed") return "ok";
+  if (["pending", "lost", "refunded", "chargeback"].includes(group)) return "warn";
+  return undefined;
 }
 
 function hasGap(row: ComercialVenda, gap: string) {
@@ -245,15 +610,64 @@ function filterReceivablesByPeriod(rows: ComercialRecebivel[], period: PeriodKey
   if (period === "all") return rows;
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = period === "7d" ? 7 : period === "15d" ? 15 : period === "30d" ? 30 : new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const end = period === "month"
-    ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
-    : new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
+  const end = period === "today"
+    ? new Date(start.getTime() + 24 * 60 * 60 * 1000)
+    : period === "yesterday"
+      ? start
+      : period === "month"
+        ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
+        : new Date(start.getTime() + (period === "7d" ? 7 : period === "15d" ? 15 : 30) * 24 * 60 * 60 * 1000);
+  const rangeStart = period === "yesterday" ? new Date(start.getTime() - 24 * 60 * 60 * 1000) : start;
 
   return rows.filter((row) => {
     if (!row.data_prevista) return false;
     const date = new Date(`${row.data_prevista}T00:00:00`);
-    return date >= start && date < end;
+    return date >= rangeStart && date < end;
+  });
+}
+
+function filterSalesByPeriod(rows: ComercialVenda[], period: PeriodKey) {
+  if (period === "all") return rows;
+  const now = new Date();
+  const today = startOfLocalDay(now);
+  const start = period === "yesterday" ? new Date(today.getTime() - 24 * 60 * 60 * 1000) : today;
+  const end = period === "today" || period === "yesterday"
+    ? new Date(start.getTime() + 24 * 60 * 60 * 1000)
+    : period === "month"
+      ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
+      : new Date(today.getTime() + (period === "7d" ? 7 : period === "15d" ? 15 : 30) * 24 * 60 * 60 * 1000);
+
+  return rows.filter((row) => inRange(saleDate(row), { start, end, label: "", bucket: "day" }));
+}
+
+function productFilterValue(row: ComercialVenda) {
+  return row.produto_nome?.trim() || row.produto_id || row.hotmart_product_id || "Produto nao informado";
+}
+
+function paymentFilterValue(row: ComercialVenda) {
+  const payment = normalizeStatus(row.forma_pagamento);
+  if (payment.includes("PIX")) return "PIX";
+  if (payment.includes("CARD") || payment.includes("CREDIT") || payment.includes("CARTAO")) return "Cartao";
+  if (payment.includes("BILLET") || payment.includes("BOLETO")) return "Boleto";
+  if (payment.includes("PAYPAL")) return "PayPal";
+  return payment === "UNKNOWN" ? "Nao informado" : "Outros";
+}
+
+function sourceFilterValue(row: ComercialVenda) {
+  return row.source_sck?.trim() || "Sem origem";
+}
+
+function uniqueFilterOptions(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+function applyCommercialGlobalFilters(rows: ComercialVenda[], filters: CommercialGlobalFiltersState) {
+  return rows.filter((row) => {
+    if (filters.product !== "all" && productFilterValue(row) !== filters.product) return false;
+    if (filters.status !== "all" && commercialGroup(row) !== filters.status) return false;
+    if (filters.payment !== "all" && paymentFilterValue(row) !== filters.payment) return false;
+    if (filters.source !== "all" && sourceFilterValue(row) !== filters.source) return false;
+    return true;
   });
 }
 
@@ -352,9 +766,10 @@ function inRange(date: Date | null, range: LaunchRange) {
   return true;
 }
 
-function launchSaleRows(rows: ComercialVenda[], range: LaunchRange) {
+function launchSaleRows(rows: ComercialVenda[], range: LaunchRange, rawImports: ComercialRawImport[] = []) {
   return rows
     .filter((row) => !isTestTransaction(row))
+    .filter((row) => isCommercialSale(row, rawImports))
     .filter((row) => range.start || range.end ? inRange(saleDate(row), range) : Boolean(saleDate(row)))
     .sort((a, b) => (saleDate(b)?.getTime() ?? 0) - (saleDate(a)?.getTime() ?? 0));
 }
@@ -502,6 +917,52 @@ function sortLaunchSources(rows: LaunchSourceRow[], sort: LaunchSourceSortKey) {
   return sorted.sort((a, b) => b.revenue - a.revenue);
 }
 
+function buildCommercialHypotheses({
+  riskRows,
+  productLossRows,
+  lossReasonRows,
+  sourceRows,
+  productRows,
+}: {
+  riskRows: LaunchRiskRow[];
+  productLossRows: LaunchProductLossRow[];
+  lossReasonRows: LaunchLossReasonRow[];
+  sourceRows: LaunchSourceRow[];
+  productRows: LaunchProductRow[];
+}) {
+  const hypotheses: string[] = [];
+  const topLossReason = lossReasonRows[0];
+  const topLossProduct = productLossRows[0];
+  const topSource = sourceRows[0];
+  const topProduct = productRows[0];
+
+  if (topLossReason) {
+    hypotheses.push(`${topLossReason.reason} aparece como principal friccao comercial do periodo.`);
+  }
+
+  if (topLossProduct) {
+    hypotheses.push(`${topLossProduct.product} concentra a maior parte da receita potencial em risco.`);
+  }
+
+  if (topSource && topSource.source !== "Sem source_sck") {
+    hypotheses.push(`${topSource.source} e a origem com melhor leitura de receita bruta confirmada.`);
+  }
+
+  if (topProduct && topProduct.share >= 45) {
+    hypotheses.push(`${topProduct.name} esta puxando o lancamento e pode orientar a mensagem comercial.`);
+  }
+
+  if (riskRows.some((row) => normalizeStatus(row.payment).includes("PIX") || normalizeStatus(row.payment).includes("BILLET") || normalizeStatus(row.payment).includes("BOLETO"))) {
+    hypotheses.push("Pagamentos por PIX/boleto podem exigir acompanhamento mais rapido para evitar perda por prazo.");
+  }
+
+  if (!hypotheses.length) {
+    hypotheses.push("O periodo ainda nao tem volume suficiente para uma hipotese comercial forte.");
+  }
+
+  return Array.from(new Set(hypotheses)).slice(0, 6);
+}
+
 function previousRange(range: LaunchRange): LaunchRange | null {
   if (!range.start || !range.end) return null;
   const duration = range.end.getTime() - range.start.getTime();
@@ -510,7 +971,7 @@ function previousRange(range: LaunchRange): LaunchRange | null {
   return { label: "Período anterior", start: previousStart, end: previousEnd, bucket: range.bucket };
 }
 
-function buildLaunchAlerts(rows: ComercialVenda[], rawImports: ComercialRawImport[], productRows: ReturnType<typeof buildProductRows>) {
+function buildLaunchAlerts(rows: ComercialVenda[], rawImports: ComercialRawImport[], productRows: ReturnType<typeof buildProductRows>, riskRows: LaunchRiskRow[]) {
   const alerts: LaunchAlert[] = [];
   const latestSale = rows[0] ?? null;
   const lastMinutes = latestSale ? minutesSince(latestSale.data_compra ?? latestSale.data_aprovacao ?? latestSale.last_event_at ?? latestSale.imported_at) : null;
@@ -520,6 +981,16 @@ function buildLaunchAlerts(rows: ComercialVenda[], rawImports: ComercialRawImpor
   const missingSource = rows.filter((sale) => !sale.source_sck);
   const financialGap = rows.filter((sale) => sale.valor_liquido === null || sale.valor_liquido === undefined || sale.taxas === null || sale.taxas === undefined || !sale.expected_payment_date);
   const recentRaw = rawImports.filter((row) => withinHours(row.received_at, 1)).length;
+  const riskTotal = riskRows.reduce((sum, row) => sum + row.value, 0);
+  const topRiskProduct = buildProductLossRows(riskRows)[0];
+  const topRiskPayment = Array.from(
+    riskRows.reduce((map, row) => {
+      const key = row.payment || "Sem pagamento";
+      const current = map.get(key) ?? { payment: key, count: 0, value: 0 };
+      map.set(key, { payment: key, count: current.count + 1, value: current.value + row.value });
+      return map;
+    }, new Map<string, { payment: string; count: number; value: number }>()),
+  ).map(([, value]) => value).sort((a, b) => b.count - a.count || b.value - a.value)[0];
 
   alerts.push({
     type: latestSale && lastMinutes !== null && lastMinutes <= 120 ? "informação" : "atenção",
@@ -560,6 +1031,70 @@ function buildLaunchAlerts(rows: ComercialVenda[], rawImports: ComercialRawImpor
     });
   }
 
+  if (riskRows.length) {
+    alerts.push({
+      type: "atenção",
+      title: "Receita em risco",
+      text: `${riskRows.length} oportunidades pendentes/perdidas somam ${formatMoney(riskTotal)} em valor bruto potencial.`,
+      evidence: "Estimativa baseada em receita bruta potencial, nao em receita perdida oficial.",
+      suggestion: "Priorizar casos com motivo de pagamento e maior valor bruto.",
+    });
+  }
+
+  const missingDetailedReason = riskRows.filter((row) => row.classification.motivoOriginalHotmart === "Nao informado pela Hotmart");
+  const cardLosses = riskRows.filter((row) => /CREDIT_CARD|CARD|CARTAO/.test(normalizeStatus(row.payment)));
+  const recoverable = riskRows.filter((row) => ["Alta", "Media"].includes(row.classification.recuperabilidade));
+
+  if (missingDetailedReason.length) {
+    alerts.push({
+      type: "atenção",
+      title: "Motivo Hotmart ausente",
+      text: `${missingDetailedReason.length} perdas nao possuem motivo detalhado informado pela Hotmart.`,
+      evidence: "A categoria Norwyn e uma classificacao operacional derivada de status e pagamento.",
+      suggestion: "Usar a categoria Norwyn como apoio, nao como causa oficial da perda.",
+    });
+  }
+
+  if (cardLosses.length) {
+    alerts.push({
+      type: "atenção",
+      title: "Perdas em cartao",
+      text: `${cardLosses.length} perdas parecem relacionadas a tentativa por cartao.`,
+      evidence: `${formatMoney(cardLosses.reduce((sum, row) => sum + row.value, 0))} em valor bruto potencial associado.`,
+      suggestion: "Oferecer nova tentativa de pagamento ou PIX quando fizer sentido comercial.",
+    });
+  }
+
+  if (recoverable.length) {
+    alerts.push({
+      type: "oportunidade",
+      title: "Recuperacao comercial",
+      text: `${recoverable.length} oportunidades tem recuperabilidade alta ou media.`,
+      evidence: "Classificacao deterministica baseada em status, pagamento e motivo original quando disponivel.",
+      suggestion: "Comecar pelos casos de maior valor e maior recuperabilidade.",
+    });
+  }
+
+  if (topRiskProduct) {
+    alerts.push({
+      type: "atenção",
+      title: "Produto com maior perda",
+      text: `${topRiskProduct.product} concentra ${formatPercent(topRiskProduct.share)} da receita potencial em risco.`,
+      evidence: `${topRiskProduct.losses} oportunidades e ${formatMoney(topRiskProduct.value)} em bruto potencial.`,
+      suggestion: "Validar pagina, preco, link e argumento de recuperacao desse produto.",
+    });
+  }
+
+  if (topRiskPayment) {
+    alerts.push({
+      type: "atenção",
+      title: "Forma de pagamento sensivel",
+      text: `${topRiskPayment.payment} aparece em ${topRiskPayment.count} oportunidades pendentes/perdidas.`,
+      evidence: `${formatMoney(topRiskPayment.value)} em bruto potencial associado.`,
+      suggestion: "Oferecer alternativa de pagamento quando fizer sentido.",
+    });
+  }
+
   if (refunded.length) {
     alerts.push({
       type: "crítico",
@@ -590,7 +1125,7 @@ function buildLaunchAlerts(rows: ComercialVenda[], rawImports: ComercialRawImpor
     });
   }
 
-  return alerts.slice(0, 8);
+  return alerts.slice(0, 10);
 }
 
 export function ComercialDashboard({ context }: { context: ComercialContext }) {
@@ -603,6 +1138,10 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [commercialProductFilter, setCommercialProductFilter] = useState("all");
+  const [commercialStatusFilter, setCommercialStatusFilter] = useState("all");
+  const [commercialPaymentFilter, setCommercialPaymentFilter] = useState("all");
+  const [commercialSourceFilter, setCommercialSourceFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [salesPage, setSalesPage] = useState(1);
   const [receivablesPage, setReceivablesPage] = useState(1);
@@ -622,11 +1161,40 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   }, [activeTab]);
 
   const visibleTabs = context.canWrite ? tabs : tabs.filter((tab) => tab.key !== "admin");
+  const commercialSales = useMemo(
+    () => context.vendas.filter((sale) => !isTestTransaction(sale) && isCommercialSale(sale, context.rawImports)),
+    [context.rawImports, context.vendas],
+  );
+  const learningSales = useMemo(
+    () => context.vendas.filter((sale) => saleEventDomain(sale, context.rawImports) === "learning"),
+    [context.rawImports, context.vendas],
+  );
+  const commercialGlobalFilters = useMemo<CommercialGlobalFiltersState>(
+    () => ({
+      product: commercialProductFilter,
+      status: commercialStatusFilter,
+      payment: commercialPaymentFilter,
+      source: commercialSourceFilter,
+    }),
+    [commercialPaymentFilter, commercialProductFilter, commercialSourceFilter, commercialStatusFilter],
+  );
+  const commercialFilterOptions = useMemo(
+    () => ({
+      products: uniqueFilterOptions(commercialSales.map(productFilterValue)),
+      payments: uniqueFilterOptions(commercialSales.map(paymentFilterValue)),
+      sources: uniqueFilterOptions(commercialSales.map(sourceFilterValue)),
+    }),
+    [commercialSales],
+  );
+  const overviewSales = useMemo(
+    () => applyCommercialGlobalFilters(filterSalesByPeriod(commercialSales, period), commercialGlobalFilters),
+    [commercialGlobalFilters, commercialSales, period],
+  );
   const filteredReceivables = useMemo(() => filterReceivablesByPeriod(context.recebiveis, period), [context.recebiveis, period]);
-  const confirmedSales = context.vendas.filter(isConfirmed);
-  const pendingSales = context.vendas.filter((sale) => commercialGroup(sale) === "pending");
-  const lostSales = context.vendas.filter((sale) => commercialGroup(sale) === "lost");
-  const refundedSales = context.vendas.filter(isRefundedOrChargeback);
+  const confirmedSales = overviewSales.filter(isConfirmed);
+  const pendingSales = overviewSales.filter((sale) => commercialGroup(sale) === "pending");
+  const lostSales = overviewSales.filter((sale) => commercialGroup(sale) === "lost");
+  const refundedSales = overviewSales.filter(isRefundedOrChargeback);
   const grossRevenue = confirmedSales.reduce((sum, sale) => sum + sale.valor_bruto, 0);
   const confirmedSalesWithNet = confirmedSales.filter((sale) => sale.valor_liquido !== null && sale.valor_liquido !== undefined);
   const netRevenue = confirmedSalesWithNet.reduce((sum, sale) => sum + Number(sale.valor_liquido), 0);
@@ -641,11 +1209,11 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const uniqueBuyers = new Set(confirmedSales.map((sale) => sale.comprador_email ?? sale.comprador_nome).filter(Boolean)).size;
   const grossTicket = confirmedSales.length ? grossRevenue / confirmedSales.length : 0;
   const netTicket = confirmedSalesWithNet.length ? netRevenue / confirmedSalesWithNet.length : 0;
-  const unclassifiedSales = context.vendas.filter((sale) => !sale.produto_id).length;
-  const dataGaps = context.vendas.filter((sale) => Array.isArray(sale.data_lacunas) && sale.data_lacunas.length > 0);
+  const unclassifiedSales = commercialSales.filter((sale) => !sale.produto_id).length;
+  const dataGaps = commercialSales.filter((sale) => Array.isArray(sale.data_lacunas) && sale.data_lacunas.length > 0);
   const confirmedWithoutForecast = confirmedSales.filter((sale) => hasGap(sale, "expected_payment_date_missing"));
   const confirmedWithoutNet = confirmedSales.filter((sale) => hasGap(sale, "net_amount_missing") || sale.valor_liquido === null || sale.valor_liquido === undefined);
-  const unmappedStatus = context.vendas.filter((sale) => commercialGroup(sale) === "unknown");
+  const unmappedStatus = commercialSales.filter((sale) => commercialGroup(sale) === "unknown");
   const realtimeImports = context.rawImports.filter((row) => rawImportSource(row) === "Tempo real");
   const recentRealtimeImports = realtimeImports.filter((row) => withinHours(row.received_at, 24));
   const latestRawImport = context.rawImports[0] ?? null;
@@ -658,7 +1226,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   }).length;
 
   const allDates = [
-    ...context.vendas.map((item) => item.data_compra ?? item.data_aprovacao),
+    ...commercialSales.map((item) => item.data_compra ?? item.data_aprovacao),
     ...context.recebiveis.map((item) => item.data_prevista),
     ...context.alunos.map((item) => item.ultima_compra_at),
   ];
@@ -667,14 +1235,14 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
 
   const salesRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return filterByDate(context.vendas, (row) => row.data_compra ?? row.data_aprovacao, yearFilter, monthFilter)
+    return filterByDate(commercialSales, (row) => row.data_compra ?? row.data_aprovacao, yearFilter, monthFilter)
       .filter((row) => statusFilter === "all" || commercialGroup(row) === statusFilter || row.status.toLowerCase() === statusFilter.toLowerCase())
       .filter((row) => {
         if (!term) return true;
         return [row.transaction_id, row.comprador_nome, row.comprador_email, row.produto_nome, row.forma_pagamento]
           .some((value) => String(value ?? "").toLowerCase().includes(term));
       });
-  }, [context.vendas, monthFilter, search, statusFilter, yearFilter]);
+  }, [commercialSales, monthFilter, search, statusFilter, yearFilter]);
 
   const receivableRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -701,7 +1269,10 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
       });
   }, [context.alunos, monthFilter, search, statusFilter, yearFilter]);
   const launchRange = useMemo(() => buildLaunchRange(launchPeriod, launchName, launchStart, launchEnd), [launchEnd, launchName, launchPeriod, launchStart]);
-  const launchRows = useMemo(() => launchSaleRows(context.vendas, launchRange), [context.vendas, launchRange]);
+  const launchRows = useMemo(
+    () => applyCommercialGlobalFilters(launchSaleRows(context.vendas, launchRange, context.rawImports), commercialGlobalFilters),
+    [commercialGlobalFilters, context.rawImports, context.vendas, launchRange],
+  );
   const launchConfirmed = launchRows.filter(isConfirmed);
   const launchPending = launchRows.filter((sale) => commercialGroup(sale) === "pending");
   const launchLost = launchRows.filter((sale) => commercialGroup(sale) === "lost");
@@ -714,10 +1285,14 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const launchProductRows = buildProductRows(launchRows);
   const launchStatusRows = buildStatusRows(launchRows);
   const launchSourceRows = buildSourceRows(launchRows);
+  const launchRiskRows = buildRiskRows(launchRows, context.rawImports);
+  const launchLossReasonRows = buildLossReasonRows(launchRiskRows);
+  const launchProductLossRows = buildProductLossRows(launchRiskRows);
+  const launchTimelineRows = buildTimelineRows(launchRows);
   const launchPreviousRange = previousRange(launchRange);
-  const launchPreviousRows = launchPreviousRange ? launchSaleRows(context.vendas, launchPreviousRange) : [];
+  const launchPreviousRows = launchPreviousRange ? applyCommercialGlobalFilters(launchSaleRows(context.vendas, launchPreviousRange, context.rawImports), commercialGlobalFilters) : [];
   const launchPreviousConfirmed = launchPreviousRows.filter(isConfirmed);
-  const launchAlerts = buildLaunchAlerts(launchRows, context.rawImports, launchProductRows);
+  const launchAlerts = buildLaunchAlerts(launchRows, context.rawImports, launchProductRows, launchRiskRows);
   const launchRawLast24h = context.rawImports.filter((row) => withinHours(row.received_at, 24));
   const launchRawLastHour = context.rawImports.filter((row) => withinHours(row.received_at, 1));
   const launchDataGaps = launchRows.filter((sale) => Array.isArray(sale.data_lacunas) && sale.data_lacunas.length > 0);
@@ -781,6 +1356,12 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
           setLaunchStart={setLaunchStart}
           launchEnd={launchEnd}
           setLaunchEnd={setLaunchEnd}
+          filters={commercialGlobalFilters}
+          filterOptions={commercialFilterOptions}
+          onProductFilter={setCommercialProductFilter}
+          onStatusFilter={setCommercialStatusFilter}
+          onPaymentFilter={setCommercialPaymentFilter}
+          onSourceFilter={setCommercialSourceFilter}
           range={launchRange}
           rows={launchRows}
           confirmed={launchConfirmed}
@@ -795,8 +1376,15 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
           productRows={launchProductRows}
           statusRows={launchStatusRows}
           sourceRows={launchSourceRows}
+          riskRows={launchRiskRows}
+          lossReasonRows={launchLossReasonRows}
+          productLossRows={launchProductLossRows}
+          timelineRows={launchTimelineRows}
           alerts={launchAlerts}
           previousConfirmed={launchPreviousConfirmed}
+          allSales={commercialSales}
+          rawImports={context.rawImports}
+          learningIgnored={learningSales.length}
           rawLast24h={launchRawLast24h.length}
           rawLastHour={launchRawLastHour.length}
           latestRaw={latestRawImport}
@@ -813,6 +1401,14 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
 
       {activeTab === "overview" ? (
         <div className="space-y-6">
+          <CommercialGlobalFilters
+            filters={commercialGlobalFilters}
+            options={commercialFilterOptions}
+            onProduct={setCommercialProductFilter}
+            onStatus={setCommercialStatusFilter}
+            onPayment={setCommercialPaymentFilter}
+            onSource={setCommercialSourceFilter}
+          />
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmedSales.length} helper="APPROVED ou COMPLETE" />
             <Metric icon={<WalletCards />} label="Faturamento bruto" value={formatMoney(grossRevenue)} helper="antes de taxas e deducoes" />
@@ -991,6 +1587,13 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
           <p className="text-sm font-bold text-brand-teal/65">
             Proximo passo: permitir editar produtos, dias de acesso, curso vinculado e centro de resultado pela tela. Por enquanto, o n8n cria produtos automaticamente e deixa pendencias na Conciliacao.
           </p>
+          <div className="mt-5">
+            <h3 className="text-base font-black text-brand-teal">Eventos recebidos</h3>
+            <p className="mt-1 text-sm text-brand-teal/60">
+              Lista preservada para auditoria, incluindo eventos comerciais e educacionais.
+            </p>
+            <RawImportsTable rows={context.rawImports.slice(0, 20)} />
+          </div>
         </DataCard>
       ) : null}
     </section>
@@ -1022,6 +1625,12 @@ function LaunchIntelligencePanel({
   setLaunchStart,
   launchEnd,
   setLaunchEnd,
+  filters,
+  filterOptions,
+  onProductFilter,
+  onStatusFilter,
+  onPaymentFilter,
+  onSourceFilter,
   range,
   rows,
   confirmed,
@@ -1036,8 +1645,15 @@ function LaunchIntelligencePanel({
   productRows,
   statusRows,
   sourceRows,
+  riskRows,
+  lossReasonRows,
+  productLossRows,
+  timelineRows,
   alerts,
   previousConfirmed,
+  allSales,
+  rawImports,
+  learningIgnored,
   rawLast24h,
   rawLastHour,
   latestRaw,
@@ -1059,6 +1675,12 @@ function LaunchIntelligencePanel({
   setLaunchStart: (value: string) => void;
   launchEnd: string;
   setLaunchEnd: (value: string) => void;
+  filters: CommercialGlobalFiltersState;
+  filterOptions: { products: string[]; payments: string[]; sources: string[] };
+  onProductFilter: (value: string) => void;
+  onStatusFilter: (value: string) => void;
+  onPaymentFilter: (value: string) => void;
+  onSourceFilter: (value: string) => void;
   range: LaunchRange;
   rows: ComercialVenda[];
   confirmed: ComercialVenda[];
@@ -1073,8 +1695,15 @@ function LaunchIntelligencePanel({
   productRows: ReturnType<typeof buildProductRows>;
   statusRows: ReturnType<typeof buildStatusRows>;
   sourceRows: ReturnType<typeof buildSourceRows>;
+  riskRows: LaunchRiskRow[];
+  lossReasonRows: LaunchLossReasonRow[];
+  productLossRows: LaunchProductLossRow[];
+  timelineRows: LaunchTimelineRow[];
   alerts: LaunchAlert[];
   previousConfirmed: ComercialVenda[];
+  allSales: ComercialVenda[];
+  rawImports: ComercialRawImport[];
+  learningIgnored: number;
   rawLast24h: number;
   rawLastHour: number;
   latestRaw: ComercialRawImport | null;
@@ -1093,14 +1722,36 @@ function LaunchIntelligencePanel({
   const [productSort, setProductSort] = useState<LaunchProductSortKey>("revenue_desc");
   const [statusSort, setStatusSort] = useState<LaunchStatusSortKey>("order");
   const [sourceSort, setSourceSort] = useState<LaunchSourceSortKey>("revenue_desc");
+  const [selectedSale, setSelectedSale] = useState<ComercialVenda | null>(null);
+  const [hypothesisFeedbacks, setHypothesisFeedbacks] = useState<LaunchHypothesisFeedback[]>([]);
   const topProduct = productRows[0];
+  const riskTotal = riskRows.reduce((sum, row) => sum + row.value, 0);
+  const riskPercent = gross ? (riskTotal / gross) * 100 : 0;
+  const missingLossReasonCount = riskRows.filter((row) => row.classification.motivoOriginalHotmart === "Nao informado pela Hotmart").length;
+  const cardLossCount = riskRows.filter((row) => /CREDIT_CARD|CARD|CARTAO/.test(normalizeStatus(row.payment))).length;
+  const recoverableCount = riskRows.filter((row) => ["Alta", "Media"].includes(row.classification.recuperabilidade)).length;
   const previousGross = grossTotal(previousConfirmed);
   const previousTicket = previousConfirmed.length ? previousGross / previousConfirmed.length : 0;
   const variation = previousGross ? ((gross - previousGross) / previousGross) * 100 : null;
   const latestMinutes = latestSale ? minutesSince(latestSale.data_compra ?? latestSale.data_aprovacao ?? latestSale.last_event_at ?? latestSale.imported_at) : null;
+  const todayRange = buildLaunchRange("today", launchName, launchStart, launchEnd);
+  const yesterdayRange = buildLaunchRange("yesterday", launchName, launchStart, launchEnd);
+  const sevenDayRange = buildLaunchRange("7d", launchName, launchStart, launchEnd);
+  const todayConfirmed = launchSaleRows(allSales, todayRange, rawImports).filter(isConfirmed);
+  const yesterdayConfirmed = launchSaleRows(allSales, yesterdayRange, rawImports).filter(isConfirmed);
+  const sevenDayConfirmed = launchSaleRows(allSales, sevenDayRange, rawImports).filter(isConfirmed);
+  const todayGross = grossTotal(todayConfirmed);
+  const yesterdayGross = grossTotal(yesterdayConfirmed);
+  const sevenDayAverage = grossTotal(sevenDayConfirmed) / 7;
+  const todayVsYesterday = yesterdayGross ? ((todayGross - yesterdayGross) / yesterdayGross) * 100 : null;
+  const todayVsSevenDayAverage = sevenDayAverage ? ((todayGross - sevenDayAverage) / sevenDayAverage) * 100 : null;
+  const launchHypotheses = useMemo(
+    () => buildCommercialHypotheses({ riskRows, productLossRows, lossReasonRows, sourceRows, productRows }),
+    [riskRows, productLossRows, lossReasonRows, sourceRows, productRows],
+  );
   const summary = confirmed.length
-    ? `${range.label} registrou ${confirmed.length} vendas confirmadas, com receita bruta de ${formatMoney(gross)} e ticket médio bruto de ${formatMoney(ticket)}. ${topProduct ? `O produto com maior receita foi ${topProduct.name}.` : "Ainda não há produto dominante."} ${refunded.length ? `Houve ${refunded.length} reembolsos/chargebacks no período.` : "Não há reembolsos ou chargebacks no período."} ${pending.length ? `Existem ${pending.length} pagamentos pendentes que merecem acompanhamento.` : "Não há pagamentos pendentes no período."}`
-    : `${range.label} ainda não possui vendas confirmadas no filtro aplicado. Use a leitura de eventos recentes e pendentes para validar se o lançamento está sem movimentação ou se o filtro precisa ser ajustado.`;
+    ? `${range.label} registrou ${confirmed.length} vendas confirmadas, com receita bruta de ${formatMoney(gross)} e ticket medio bruto de ${formatMoney(ticket)}. ${topProduct ? `O produto com maior receita foi ${topProduct.name}.` : "Ainda nao ha produto dominante."} Receita em risco estimada: ${formatMoney(riskTotal)} (${formatPercent(riskPercent)} da receita bruta confirmada). ${refunded.length ? `Houve ${refunded.length} reembolsos/chargebacks no periodo.` : "Nao ha reembolsos ou chargebacks no periodo."} ${pending.length ? `Existem ${pending.length} pagamentos pendentes que merecem acompanhamento.` : "Nao ha pagamentos pendentes no periodo."}`
+    : `${range.label} ainda nao possui vendas confirmadas no filtro aplicado. Use a leitura de eventos recentes e pendentes para validar se o lancamento esta sem movimentacao ou se o filtro precisa ser ajustado.`;
   const sortedLatestSales = useMemo(() => sortLaunchSales(rows, salesSort), [rows, salesSort]);
   const sortedProductRows = useMemo(() => sortLaunchProducts(productRows, productSort), [productRows, productSort]);
   const sortedStatusRows = useMemo(() => sortLaunchStatus(statusRows, statusSort), [statusRows, statusSort]);
@@ -1119,8 +1770,64 @@ function LaunchIntelligencePanel({
     window.setTimeout(() => setCopiedSummary(false), 1800);
   }
 
+  useEffect(() => {
+    const saved = window.localStorage.getItem("comercial:launch-context");
+    if (!saved) return;
+    try {
+      const parsed = JSON.parse(saved) as { launchName?: string; launchStart?: string; launchEnd?: string; period?: LaunchPeriodKey };
+      if (parsed.launchName) setLaunchName(parsed.launchName);
+      if (parsed.launchStart) setLaunchStart(parsed.launchStart);
+      if (parsed.launchEnd) setLaunchEnd(parsed.launchEnd);
+      if (parsed.period) setPeriod(parsed.period);
+    } catch {
+      window.localStorage.removeItem("comercial:launch-context");
+    }
+  }, [setLaunchEnd, setLaunchName, setLaunchStart, setPeriod]);
+
+  useEffect(() => {
+    window.localStorage.setItem("comercial:launch-context", JSON.stringify({ launchName, launchStart, launchEnd, period }));
+  }, [launchName, launchStart, launchEnd, period]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("comercial:launch-hypotheses-feedback");
+    if (!saved) return;
+    try {
+      setHypothesisFeedbacks(JSON.parse(saved) as LaunchHypothesisFeedback[]);
+    } catch {
+      window.localStorage.removeItem("comercial:launch-hypotheses-feedback");
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("comercial:launch-hypotheses-feedback", JSON.stringify(hypothesisFeedbacks));
+  }, [hypothesisFeedbacks]);
+
+  const feedbackById = useMemo(() => new Map(hypothesisFeedbacks.map((item) => [item.id, item])), [hypothesisFeedbacks]);
+  const learnings = hypothesisFeedbacks.filter((item) => item.result !== "pendente");
+
+  function hypothesisId(hypothesis: string) {
+    return hypothesis.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  }
+
+  function updateHypothesis(hypothesis: string, patch: Partial<LaunchHypothesisFeedback>) {
+    const id = hypothesisId(hypothesis);
+    setHypothesisFeedbacks((current) => {
+      const existing = current.find((item) => item.id === id);
+      const next: LaunchHypothesisFeedback = {
+        id,
+        hypothesis,
+        result: existing?.result ?? "pendente",
+        comment: existing?.comment ?? "",
+        updatedAt: new Date().toISOString(),
+        user: "Local",
+        ...patch,
+      };
+      return existing ? current.map((item) => (item.id === id ? next : item)) : [...current, next];
+    });
+  }
+
   return (
-    <div className="space-y-5 text-[0.94rem]">
+    <div className="space-y-5 text-[0.9rem]">
       <Card className="p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
@@ -1160,6 +1867,15 @@ function LaunchIntelligencePanel({
           </div>
         ) : null}
       </Card>
+
+      <CommercialGlobalFilters
+        filters={filters}
+        options={filterOptions}
+        onProduct={onProductFilter}
+        onStatus={onStatusFilter}
+        onPayment={onPaymentFilter}
+        onSource={onSourceFilter}
+      />
 
       <Card className="p-4">
         <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
@@ -1214,6 +1930,58 @@ function LaunchIntelligencePanel({
         <Metric icon={<Activity />} label="Última venda" value={latestSale ? formatDateTime(latestSale.data_compra ?? latestSale.data_aprovacao) : "-"} helper={latestMinutes !== null ? `há ${latestMinutes} min` : "sem venda no filtro"} />
       </div>
 
+      <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        <DataCard title="Receita em Risco" helper="Estimativa de valor bruto potencial em pendentes, perdidas e reembolsadas.">
+          <div className="grid gap-3 md:grid-cols-3">
+            <MiniMetric label="Valor em risco" value={formatMoney(riskTotal)} helper="bruto potencial" />
+            <MiniMetric label="% sobre bruto" value={formatPercent(riskPercent)} helper="referencia operacional" />
+            <MiniMetric label="Casos" value={riskRows.length} helper="pendentes/perdidos" />
+            <MiniMetric label="Sem motivo Hotmart" value={missingLossReasonCount} helper="lacuna oficial" />
+            <MiniMetric label="Em cartao" value={cardLossCount} helper="parece pagamento" />
+            <MiniMetric label="Recuperaveis" value={recoverableCount} helper="alta/media" />
+          </div>
+          <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold text-amber-800">
+            Este valor nao e perda oficial. A causa exata depende do motivo original retornado pela Hotmart; quando ele nao vier, a categoria Norwyn e apenas apoio operacional.
+          </p>
+        </DataCard>
+        <DataCard title="Comparativo executivo" helper="Leitura rapida do dia contra referencias recentes.">
+          <div className="grid gap-3 md:grid-cols-3">
+            <MiniMetric label="Hoje" value={formatMoney(todayGross)} helper={`${todayConfirmed.length} vendas`} />
+            <MiniMetric label="Ontem" value={todayVsYesterday === null ? "Sem base" : formatPercent(todayVsYesterday)} helper={formatMoney(yesterdayGross)} />
+            <MiniMetric label="Media 7d" value={todayVsSevenDayAverage === null ? "Sem base" : formatPercent(todayVsSevenDayAverage)} helper={formatMoney(sevenDayAverage)} />
+          </div>
+        </DataCard>
+      </div>
+
+      <DataCard title="Oportunidades de Recuperacao" helper="Fila pratica para acompanhar pendentes, perdas e reembolsos de maior impacto.">
+        <LaunchTableToolbar>
+          <span className="text-xs font-black uppercase text-brand-teal/55">{riskRows.length} oportunidades</span>
+          <ExportButtons label="Oportunidades de Recuperacao" filename="comercial_lancamento_oportunidades_recuperacao" columns={launchRiskExportColumns} rows={riskRows} />
+        </LaunchTableToolbar>
+        <RecoveryOpportunitiesDiagnosticTable rows={riskRows} onSelect={setSelectedSale} />
+      </DataCard>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <DataCard title="Principais Motivos de Perda" helper="Classificacao Norwyn por regras em cima de status, pagamento e motivo original Hotmart quando disponivel.">
+          <ExportButtons label="Principais Motivos de Perda" filename="comercial_lancamento_motivos_perda" columns={launchLossReasonExportColumns} rows={lossReasonRows} />
+          <SimpleTable
+            minWidth="680px"
+            headers={["Categoria Norwyn", "Casos", "Valor bruto", "Participacao", "Motivo original"]}
+            rows={lossReasonRows.map((row) => [row.reason, row.count, formatMoney(row.value), formatPercent(row.share), row.example])}
+            empty="Sem motivos de perda no filtro atual."
+          />
+        </DataCard>
+        <DataCard title="Produtos com Maior Perda" helper="Produtos com maior valor bruto potencial em risco.">
+          <ExportButtons label="Produtos com Maior Perda" filename="comercial_lancamento_produtos_perda" columns={launchProductLossExportColumns} rows={productLossRows} />
+          <SimpleTable
+            minWidth="680px"
+            headers={["Produto", "Oportunidades", "Valor bruto", "Participacao", "Principal motivo"]}
+            rows={productLossRows.map((row) => [row.product, row.losses, formatMoney(row.value), formatPercent(row.share), row.topReason])}
+            empty="Sem produtos com perda no filtro atual."
+          />
+        </DataCard>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <DataCard title="Curva do Lançamento" helper={range.bucket === "hour" ? "Evolução por hora no filtro atual." : "Evolução por dia no filtro atual."}>
           <div className="mb-3 flex justify-end">
@@ -1241,7 +2009,15 @@ function LaunchIntelligencePanel({
           <LaunchSortSelect label="Ordenar" value={salesSort} onChange={(value) => setSalesSort(value as LaunchSalesSortKey)} options={launchSalesSortOptions} />
           <ExportButtons label="Últimas Vendas" filename="comercial_lancamento_ultimas_vendas" columns={salesExportColumns} rows={sortedLatestSales} />
         </LaunchTableToolbar>
-        <LatestSalesTable rows={sortedLatestSales.slice(0, 10)} />
+        <LatestSalesTable rows={sortedLatestSales.slice(0, 10)} rawImports={rawImports} onSelect={setSelectedSale} />
+      </DataCard>
+
+      <DataCard title="Linha do Tempo de Vendas" helper="Transações em ordem cronológica para leitura do ritmo comercial.">
+        <LaunchTableToolbar>
+          <span className="text-xs font-black uppercase text-brand-teal/55">{timelineRows.length} transações</span>
+          <ExportButtons label="Linha do Tempo de Vendas" filename="comercial_lancamento_linha_tempo" columns={launchTimelineExportColumns} rows={timelineRows} />
+        </LaunchTableToolbar>
+        <SalesTimelineTable rows={timelineRows} onSelect={setSelectedSale} />
       </DataCard>
 
       <DataCard title="Produtos que puxaram o lançamento" helper="Ordenado por receita bruta confirmada.">
@@ -1298,6 +2074,13 @@ function LaunchIntelligencePanel({
         </div>
       </DataCard>
 
+      <CommercialHypothesesPanel
+        hypotheses={launchHypotheses}
+        feedbackById={feedbackById}
+        learnings={learnings}
+        onUpdate={updateHypothesis}
+      />
+
       <div className="grid gap-4 xl:grid-cols-3">
         <DataCard title="Vendas chegando pelo n8n" helper="Validação operacional dos eventos recentes.">
           <div className="grid gap-3">
@@ -1308,6 +2091,8 @@ function LaunchIntelligencePanel({
         </DataCard>
         <DataCard title="Lacunas de Dados" helper="Impacto direto na leitura financeira e operacional.">
           <ul className="space-y-2 text-sm font-bold text-brand-teal/70">
+            <li>Motivo de cancelamento/recusa ausente: {missingLossReasonCount} - nao permite afirmar a causa exata da perda.</li>
+            <li>Motivo de reembolso/chargeback/antifraude ausente: usar apenas como apoio operacional quando nao houver motivo oficial.</li>
             <li>Líquido ausente: {missingNet} · impede cálculo de lucro líquido real.</li>
             <li>Taxas ausentes: {missingFees} · impede apuração de custos Hotmart.</li>
             <li>Recebíveis oficiais ausentes: {missingForecast} · saldo a receber fica indisponível/projetado.</li>
@@ -1315,6 +2100,7 @@ function LaunchIntelligencePanel({
             <li>Comprador sem e-mail: {missingBuyerEmail} · dificulta identificação.</li>
             <li>Produto não mapeado: {missingProduct} · revisar antes de integrar ao Financeiro.</li>
             <li>Status desconhecido: {unknownStatus} · revisar mapeamento.</li>
+            <li>Eventos educacionais preservados fora dos KPIs comerciais: {learningIgnored} · disponíveis para leitura futura de alunos/progresso.</li>
           </ul>
           <p className="mt-3 text-xs font-bold text-amber-700">{dataGaps} vendas possuem alguma lacuna registrada em data_lacunas.</p>
         </DataCard>
@@ -1331,6 +2117,7 @@ function LaunchIntelligencePanel({
           </div>
         </DataCard>
       </div>
+      {selectedSale ? <TransactionDetailModal sale={selectedSale} rawImports={rawImports} onClose={() => setSelectedSale(null)} /> : null}
     </div>
   );
 }
@@ -1477,6 +2264,69 @@ function CommercialFilters({
   );
 }
 
+function CommercialGlobalFilters({
+  filters,
+  options,
+  onProduct,
+  onStatus,
+  onPayment,
+  onSource,
+}: {
+  filters: CommercialGlobalFiltersState;
+  options: { products: string[]; payments: string[]; sources: string[] };
+  onProduct: (value: string) => void;
+  onStatus: (value: string) => void;
+  onPayment: (value: string) => void;
+  onSource: (value: string) => void;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_180px_180px_1fr]">
+        <select
+          value={filters.product}
+          onChange={(event) => onProduct(event.target.value)}
+          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+        >
+          <option value="all">Todos os produtos</option>
+          {options.products.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+        <select
+          value={filters.status}
+          onChange={(event) => onStatus(event.target.value)}
+          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+        >
+          <option value="all">Todos status</option>
+          {(["confirmed", "pending", "lost", "refunded", "chargeback", "unknown"] as ComercialStatusGroup[]).map((item) => (
+            <option key={item} value={item}>{commercialGroupLabels[item]}</option>
+          ))}
+        </select>
+        <select
+          value={filters.payment}
+          onChange={(event) => onPayment(event.target.value)}
+          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+        >
+          <option value="all">Todos pagamentos</option>
+          {options.payments.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+        <select
+          value={filters.source}
+          onChange={(event) => onSource(event.target.value)}
+          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+        >
+          <option value="all">Todas origens</option>
+          {options.sources.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+      </div>
+    </Card>
+  );
+}
+
 function RealtimeValidationCard({
   latest,
   total,
@@ -1521,6 +2371,7 @@ function RawImportsTable({ rows }: { rows: ComercialRawImport[] }) {
           <tr>
             <th className="px-4 py-3">Recebido</th>
             <th className="px-4 py-3">Origem</th>
+            <th className="px-4 py-3">Tipo do Evento</th>
             <th className="px-4 py-3">Evento</th>
             <th className="px-4 py-3">Transação</th>
             <th className="px-4 py-3">Status</th>
@@ -1531,6 +2382,7 @@ function RawImportsTable({ rows }: { rows: ComercialRawImport[] }) {
             <tr key={row.id} className="border-b border-brand-sand/70">
               <td className="px-4 py-3 font-bold text-brand-teal">{formatDateTime(row.received_at)}</td>
               <td className="px-4 py-3 text-brand-teal/70">{rawImportSource(row)}</td>
+              <td className="px-4 py-3"><Badge value={eventDomainLabel(rawImportEventDomain(row))} tone={rawImportEventDomain(row) === "commercial" ? "ok" : rawImportEventDomain(row) === "unknown" ? "warn" : undefined} /></td>
               <td className="px-4 py-3 text-brand-teal">{rawImportEvent(row)}</td>
               <td className="px-4 py-3 text-brand-teal/70">{row.transaction_id ?? "-"}</td>
               <td className="px-4 py-3"><Badge value={row.status} tone={row.status === "processado" ? "ok" : row.status === "erro" ? "warn" : undefined} /></td>
@@ -1579,10 +2431,10 @@ function SimpleTable({
   );
 }
 
-function LatestSalesTable({ rows }: { rows: ComercialVenda[] }) {
+function LatestSalesTable({ rows, rawImports, onSelect }: { rows: ComercialVenda[]; rawImports?: ComercialRawImport[]; onSelect?: (row: ComercialVenda) => void }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1180px] text-left text-sm">
+      <table className="w-full min-w-[1320px] text-left text-sm">
         <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
           <tr>
             <th className="px-4 py-3">Hora</th>
@@ -1590,6 +2442,7 @@ function LatestSalesTable({ rows }: { rows: ComercialVenda[] }) {
             <th className="px-4 py-3">Produto</th>
             <th className="px-4 py-3">Status</th>
             <th className="px-4 py-3">Grupo</th>
+            <th className="px-4 py-3">Categoria Norwyn</th>
             <th className="px-4 py-3 text-right">Bruto</th>
             <th className="px-4 py-3">Pagamento</th>
             <th className="px-4 py-3">Source</th>
@@ -1599,6 +2452,7 @@ function LatestSalesTable({ rows }: { rows: ComercialVenda[] }) {
         <tbody>
           {rows.map((row) => {
             const group = commercialGroup(row);
+            const classification = classifyHotmartLoss(row, rawImports ?? []);
             return (
               <tr key={row.id} className="border-b border-brand-sand/70">
                 <td className="px-4 py-3 font-bold text-brand-teal">{formatDateTime(row.data_compra ?? row.data_aprovacao)}</td>
@@ -1606,16 +2460,276 @@ function LatestSalesTable({ rows }: { rows: ComercialVenda[] }) {
                 <td className="px-4 py-3 text-brand-teal/75">{row.produto_nome ?? "-"}</td>
                 <td className="px-4 py-3"><Badge value={row.status_original ?? row.status} /></td>
                 <td className="px-4 py-3"><Badge value={commercialGroupLabels[group]} tone={group === "confirmed" ? "ok" : group === "pending" || group === "lost" || group === "chargeback" ? "warn" : undefined} /></td>
+                <td className="px-4 py-3 text-brand-teal/70">{group === "confirmed" ? "-" : classification.categoriaMotivoNorwyn}</td>
                 <td className="px-4 py-3 text-right font-black text-brand-teal">{formatMoney(row.valor_bruto)}</td>
                 <td className="px-4 py-3 text-brand-teal/65">{row.forma_pagamento ?? "-"} {row.parcelas > 1 ? `${row.parcelas}x` : ""}</td>
                 <td className="px-4 py-3 text-brand-teal/65">{row.source_sck ?? "-"}</td>
                 <td className="px-4 py-3 text-brand-teal/65">{row.transaction_id}</td>
+                <td className="px-4 py-3">
+                  {onSelect ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelect(row)}
+                      className="inline-flex h-8 items-center gap-1 rounded-md border border-brand-sand bg-white px-2 text-xs font-black text-brand-teal"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      Ver
+                    </button>
+                  ) : "-"}
+                </td>
               </tr>
             );
           })}
         </tbody>
       </table>
       {!rows.length ? <EmptyState text="Nenhuma venda no filtro atual." /> : null}
+    </div>
+  );
+}
+
+function RecoveryOpportunitiesTable({ rows, onSelect }: { rows: LaunchRiskRow[]; onSelect: (row: ComercialVenda) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1500px] text-left text-sm">
+        <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
+          <tr>
+            <th className="px-4 py-3">Prioridade</th>
+            <th className="px-4 py-3">Comprador</th>
+            <th className="px-4 py-3">Produto</th>
+            <th className="px-4 py-3">Motivo</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3 text-right">Valor potencial</th>
+            <th className="px-4 py-3">Ação sugerida</th>
+            <th className="px-4 py-3">Detalhe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 20).map((row) => (
+            <tr key={row.sale.id} className="border-b border-brand-sand/70">
+              <td className="px-4 py-3"><Badge value={row.priority} tone={row.priority === "Alta" ? "warn" : row.priority === "Baixa" ? "ok" : undefined} /></td>
+              <td className="px-4 py-3 font-bold text-brand-teal">{row.buyer}</td>
+              <td className="px-4 py-3 text-brand-teal/75">{row.product}</td>
+              <td className="px-4 py-3 text-brand-teal/75">{row.reason}</td>
+              <td className="px-4 py-3"><Badge value={commercialGroupLabels[row.group]} tone={groupTone(row.group)} /></td>
+              <td className="px-4 py-3 text-right font-black text-brand-teal">{formatMoney(row.value)}</td>
+              <td className="px-4 py-3 text-brand-teal/70">{row.suggestion}</td>
+              <td className="px-4 py-3">
+                <button type="button" onClick={() => onSelect(row.sale)} className="inline-flex h-8 items-center gap-1 rounded-md border border-brand-sand bg-white px-2 text-xs font-black text-brand-teal">
+                  <Eye className="h-3.5 w-3.5" />
+                  Ver
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length ? <EmptyState text="Sem oportunidades de recuperação no filtro atual." /> : null}
+    </div>
+  );
+}
+
+function RecoveryOpportunitiesDiagnosticTable({ rows, onSelect }: { rows: LaunchRiskRow[]; onSelect: (row: ComercialVenda) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1500px] text-left text-sm">
+        <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
+          <tr>
+            <th className="px-4 py-3">Produto</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Forma de pagamento</th>
+            <th className="px-4 py-3 text-right">Valor bruto potencial</th>
+            <th className="px-4 py-3">Motivo original Hotmart</th>
+            <th className="px-4 py-3">Categoria Norwyn</th>
+            <th className="px-4 py-3">Recuperabilidade</th>
+            <th className="px-4 py-3">Origem provavel</th>
+            <th className="px-4 py-3">Acao sugerida</th>
+            <th className="px-4 py-3">Transacao</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 20).map((row) => (
+            <tr key={row.sale.id} className="border-b border-brand-sand/70">
+              <td className="px-4 py-3 text-brand-teal/75">{row.product}</td>
+              <td className="px-4 py-3"><Badge value={row.status} tone={groupTone(row.group)} /></td>
+              <td className="px-4 py-3 text-brand-teal/65">{row.payment}</td>
+              <td className="px-4 py-3 text-right font-black text-brand-teal">{formatMoney(row.value)}</td>
+              <td className="px-4 py-3 text-brand-teal/70">{row.classification.motivoOriginalHotmart}</td>
+              <td className="px-4 py-3 text-brand-teal/75">{row.classification.categoriaMotivoNorwyn}</td>
+              <td className="px-4 py-3"><Badge value={row.classification.recuperabilidade} tone={row.classification.recuperabilidade === "Alta" ? "ok" : row.classification.recuperabilidade === "Baixa" ? "warn" : undefined} /></td>
+              <td className="px-4 py-3 text-brand-teal/70">{row.classification.origemProvavel}</td>
+              <td className="px-4 py-3 text-brand-teal/70">{row.classification.acaoSugerida}</td>
+              <td className="px-4 py-3">
+                <button type="button" onClick={() => onSelect(row.sale)} className="inline-flex h-8 items-center gap-1 rounded-md border border-brand-sand bg-white px-2 text-xs font-black text-brand-teal">
+                  <Eye className="h-3.5 w-3.5" />
+                  {row.transactionId}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length ? <EmptyState text="Sem oportunidades de recuperacao no filtro atual." /> : null}
+    </div>
+  );
+}
+
+function SalesTimelineTable({ rows, onSelect }: { rows: LaunchTimelineRow[]; onSelect: (row: ComercialVenda) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[980px] text-left text-sm">
+        <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
+          <tr>
+            <th className="px-4 py-3">Data/hora</th>
+            <th className="px-4 py-3">Comprador</th>
+            <th className="px-4 py-3">Produto</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Pagamento</th>
+            <th className="px-4 py-3 text-right">Bruto</th>
+            <th className="px-4 py-3">Detalhe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 20).map((row) => (
+            <tr key={row.sale.id} className="border-b border-brand-sand/70">
+              <td className="px-4 py-3 font-bold text-brand-teal">{formatDateTime(row.date)}</td>
+              <td className="px-4 py-3 text-brand-teal">{row.buyer}</td>
+              <td className="px-4 py-3 text-brand-teal/75">{row.product}</td>
+              <td className="px-4 py-3"><Badge value={row.status} tone={groupTone(row.group)} /></td>
+              <td className="px-4 py-3 text-brand-teal/65">{row.payment}</td>
+              <td className="px-4 py-3 text-right font-black text-brand-teal">{formatMoney(row.value)}</td>
+              <td className="px-4 py-3">
+                <button type="button" onClick={() => onSelect(row.sale)} className="inline-flex h-8 items-center gap-1 rounded-md border border-brand-sand bg-white px-2 text-xs font-black text-brand-teal">
+                  <Eye className="h-3.5 w-3.5" />
+                  Ver
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length ? <EmptyState text="Sem transações na linha do tempo." /> : null}
+    </div>
+  );
+}
+
+function TransactionDetailModal({ sale, rawImports, onClose }: { sale: ComercialVenda; rawImports: ComercialRawImport[]; onClose: () => void }) {
+  const classification = classifyHotmartLoss(sale, rawImports);
+  const rows = [
+    ["Transação", sale.transaction_id],
+    ["Comprador", sale.comprador_nome ?? sale.comprador_email ?? "-"],
+    ["Produto", sale.produto_nome ?? "-"],
+    ["Status original", sale.status_original ?? sale.status],
+    ["Grupo comercial", commercialGroupLabels[commercialGroup(sale)]],
+    ["Pagamento", `${sale.forma_pagamento ?? "-"} ${sale.parcelas > 1 ? `${sale.parcelas}x` : ""}`.trim()],
+    ["Valor bruto", formatMoney(sale.valor_bruto)],
+    ["Valor líquido", sale.valor_liquido === null || sale.valor_liquido === undefined ? "Indisponível no payload" : formatMoney(Number(sale.valor_liquido))],
+    ["Taxas", sale.taxas === null || sale.taxas === undefined ? "Indisponível no payload" : formatMoney(Number(sale.taxas))],
+    ["Source", sale.source_sck ?? "-"],
+    ["Compra", formatDateTime(sale.data_compra ?? sale.data_aprovacao)],
+    ["Lacunas", sale.data_lacunas?.join(", ") || "-"],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
+      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl sm:rounded-2xl sm:p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase text-brand-clay">Detalhe da transação</p>
+            <h3 className="mt-1 text-xl font-black text-brand-teal">{sale.transaction_id}</h3>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full border border-brand-sand bg-white p-2 text-brand-teal">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          {rows.map(([label, value]) => (
+            <div key={label} className="rounded-md border border-brand-sand bg-brand-cream/30 p-3">
+              <p className="text-xs font-black uppercase text-brand-clay">{label}</p>
+              <p className="mt-1 break-words text-sm font-bold text-brand-teal">{value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-black uppercase text-brand-clay">Diagnostico da Perda</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {[
+              ["Motivo original Hotmart", classification.motivoOriginalHotmart],
+              ["Categoria Norwyn", classification.categoriaMotivoNorwyn],
+              ["Hipotese operacional", classification.hipoteseOperacional],
+              ["Recuperabilidade", classification.recuperabilidade],
+              ["Origem provavel", classification.origemProvavel],
+              ["Acao sugerida", classification.acaoSugerida],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-md bg-white/70 p-3">
+                <p className="text-xs font-black uppercase text-brand-clay">{label}</p>
+                <p className="mt-1 text-sm font-bold text-brand-teal">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded-md bg-white/70 p-3">
+            <p className="text-xs font-black uppercase text-brand-clay">Evidencias usadas</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm font-bold text-brand-teal/70">
+              {classification.evidencias.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommercialHypothesesPanel({
+  hypotheses,
+  feedbackById,
+  learnings,
+  onUpdate,
+}: {
+  hypotheses: string[];
+  feedbackById: Map<string, LaunchHypothesisFeedback>;
+  learnings: LaunchHypothesisFeedback[];
+  onUpdate: (hypothesis: string, patch: Partial<LaunchHypothesisFeedback>) => void;
+}) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+      <DataCard title="Hipóteses comerciais" helper="Leitura determinística para validar com a especialista.">
+        <div className="grid gap-3">
+          {hypotheses.map((hypothesis) => {
+            const id = hypothesis.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+            const feedback = feedbackById.get(id);
+            return (
+              <div key={hypothesis} className="rounded-md border border-brand-sand bg-white/70 p-3">
+                <p className="font-black text-brand-teal">{hypothesis}</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-[180px_1fr]">
+                  <select
+                    value={feedback?.result ?? "pendente"}
+                    onChange={(event) => onUpdate(hypothesis, { result: event.target.value as HypothesisResult })}
+                    className="h-10 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+                  >
+                    <option value="pendente">Pendente</option>
+                    <option value="confirmada">Confirmada</option>
+                    <option value="parcial">Parcial</option>
+                    <option value="descartada">Descartada</option>
+                  </select>
+                  <input
+                    value={feedback?.comment ?? ""}
+                    onChange={(event) => onUpdate(hypothesis, { comment: event.target.value })}
+                    placeholder="Comentário local sobre a hipótese"
+                    className="h-10 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </DataCard>
+      <DataCard title="Aprendizados do lançamento" helper="Conclusões preservadas localmente para retro.">
+        <SimpleTable
+          minWidth="520px"
+          headers={["Hipótese", "Resultado", "Comentário"]}
+          rows={learnings.map((item) => [item.hypothesis, item.result, item.comment || "-"])}
+          empty="Nenhum aprendizado registrado ainda."
+        />
+      </DataCard>
     </div>
   );
 }
@@ -1715,6 +2829,50 @@ const launchSourceExportColumns = [
   { header: "Receita bruta", value: (row: LaunchSourceRow) => row.revenue },
   { header: "Ticket", value: (row: LaunchSourceRow) => row.ticket },
   { header: "Participacao", value: (row: LaunchSourceRow) => row.share },
+];
+
+const launchRiskExportColumns = [
+  { header: "Prioridade", value: (row: LaunchRiskRow) => row.priority },
+  { header: "Produto", value: (row: LaunchRiskRow) => row.product },
+  { header: "Status", value: (row: LaunchRiskRow) => row.status },
+  { header: "Grupo", value: (row: LaunchRiskRow) => commercialGroupLabels[row.group] },
+  { header: "Pagamento", value: (row: LaunchRiskRow) => row.payment },
+  { header: "Valor potencial", value: (row: LaunchRiskRow) => row.value },
+  { header: "Motivo original Hotmart", value: (row: LaunchRiskRow) => row.classification.motivoOriginalHotmart },
+  { header: "Categoria Norwyn", value: (row: LaunchRiskRow) => row.classification.categoriaMotivoNorwyn },
+  { header: "Recuperabilidade", value: (row: LaunchRiskRow) => row.classification.recuperabilidade },
+  { header: "Origem provavel", value: (row: LaunchRiskRow) => row.classification.origemProvavel },
+  { header: "Hipotese operacional", value: (row: LaunchRiskRow) => row.classification.hipoteseOperacional },
+  { header: "Acao sugerida", value: (row: LaunchRiskRow) => row.classification.acaoSugerida },
+  { header: "Evidencias", value: (row: LaunchRiskRow) => row.classification.evidencias.join("; ") },
+  { header: "Transacao", value: (row: LaunchRiskRow) => row.transactionId },
+];
+
+const launchLossReasonExportColumns = [
+  { header: "Motivo", value: (row: LaunchLossReasonRow) => row.reason },
+  { header: "Casos", value: (row: LaunchLossReasonRow) => row.count },
+  { header: "Valor bruto", value: (row: LaunchLossReasonRow) => row.value },
+  { header: "Participacao", value: (row: LaunchLossReasonRow) => row.share },
+  { header: "Exemplo", value: (row: LaunchLossReasonRow) => row.example },
+];
+
+const launchProductLossExportColumns = [
+  { header: "Produto", value: (row: LaunchProductLossRow) => row.product },
+  { header: "Oportunidades", value: (row: LaunchProductLossRow) => row.losses },
+  { header: "Valor bruto", value: (row: LaunchProductLossRow) => row.value },
+  { header: "Participacao", value: (row: LaunchProductLossRow) => row.share },
+  { header: "Principal motivo", value: (row: LaunchProductLossRow) => row.topReason },
+];
+
+const launchTimelineExportColumns = [
+  { header: "Data", value: (row: LaunchTimelineRow) => formatDateTime(row.date) },
+  { header: "Comprador", value: (row: LaunchTimelineRow) => row.buyer },
+  { header: "Produto", value: (row: LaunchTimelineRow) => row.product },
+  { header: "Status", value: (row: LaunchTimelineRow) => row.status },
+  { header: "Grupo", value: (row: LaunchTimelineRow) => commercialGroupLabels[row.group] },
+  { header: "Pagamento", value: (row: LaunchTimelineRow) => row.payment },
+  { header: "Bruto", value: (row: LaunchTimelineRow) => row.value },
+  { header: "Transacao", value: (row: LaunchTimelineRow) => row.transactionId },
 ];
 
 const receivableExportColumns = [
