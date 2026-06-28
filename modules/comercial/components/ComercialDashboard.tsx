@@ -91,7 +91,7 @@ const periods: Array<{ key: PeriodKey; label: string }> = [
   { key: "7d", label: "7 dias" },
   { key: "15d", label: "15 dias" },
   { key: "30d", label: "30 dias" },
-  { key: "month", label: "Mes" },
+  { key: "month", label: "Mês" },
   { key: "all", label: "Tudo" },
 ];
 
@@ -630,12 +630,14 @@ function filterSalesByPeriod(rows: ComercialVenda[], period: PeriodKey) {
   if (period === "all") return rows;
   const now = new Date();
   const today = startOfLocalDay(now);
-  const start = period === "yesterday" ? new Date(today.getTime() - 24 * 60 * 60 * 1000) : today;
-  const end = period === "today" || period === "yesterday"
-    ? new Date(start.getTime() + 24 * 60 * 60 * 1000)
+  const start = period === "yesterday"
+    ? addDays(today, -1)
     : period === "month"
-      ? new Date(now.getFullYear(), now.getMonth() + 1, 1)
-      : new Date(today.getTime() + (period === "7d" ? 7 : period === "15d" ? 15 : 30) * 24 * 60 * 60 * 1000);
+      ? new Date(now.getFullYear(), now.getMonth(), 1)
+      : period === "today"
+        ? today
+        : addDays(today, -((period === "7d" ? 7 : period === "15d" ? 15 : 30) - 1));
+  const end = period === "yesterday" ? endOfLocalDay(start) : endOfLocalDay(now);
 
   return rows.filter((row) => inRange(saleDate(row), { start, end, label: "", bucket: "day" }));
 }
@@ -869,6 +871,115 @@ function buildSourceRows(rows: ComercialVenda[]) {
       };
     })
     .sort((a, b) => b.revenue - a.revenue);
+}
+
+function buildPaymentRows(rows: ComercialVenda[]) {
+  const groups = new Map<string, ComercialVenda[]>();
+  rows.forEach((row) => {
+    const key = paymentFilterValue(row);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  });
+  const confirmedTotal = grossTotal(rows.filter(isConfirmed));
+  return Array.from(groups.entries())
+    .map(([payment, sales]) => {
+      const confirmed = sales.filter(isConfirmed);
+      const revenue = grossTotal(confirmed);
+      return {
+        payment,
+        sales: confirmed.length,
+        revenue,
+        pending: sales.filter((sale) => commercialGroup(sale) === "pending").length,
+        lost: sales.filter((sale) => commercialGroup(sale) === "lost").length,
+        share: confirmedTotal ? (revenue / confirmedTotal) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue || b.sales - a.sales || compareText(a.payment, b.payment));
+}
+
+function overviewRange(period: PeriodKey): LaunchRange {
+  const now = new Date();
+  const todayStart = startOfLocalDay(now);
+  if (period === "today") return { label: "Hoje", start: todayStart, end: endOfLocalDay(now), bucket: "hour" };
+  if (period === "yesterday") {
+    const yesterday = addDays(todayStart, -1);
+    return { label: "Ontem", start: yesterday, end: endOfLocalDay(yesterday), bucket: "hour" };
+  }
+  if (period === "month") {
+    return {
+      label: "Mês atual",
+      start: new Date(now.getFullYear(), now.getMonth(), 1),
+      end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+      bucket: "day",
+    };
+  }
+  if (period === "all") return { label: "Todo o histórico", start: null, end: null, bucket: "day" };
+  const days = period === "7d" ? 7 : period === "15d" ? 15 : 30;
+  return { label: `Últimos ${days} dias`, start: addDays(todayStart, -(days - 1)), end: endOfLocalDay(now), bucket: "day" };
+}
+
+function periodLabel(period: PeriodKey) {
+  return periods.find((item) => item.key === period)?.label ?? "Período";
+}
+
+function statusLabel(value: string) {
+  if (value === "all") return "Todos os status";
+  const labels: Record<ComercialStatusGroup, string> = {
+    confirmed: "Confirmadas",
+    pending: "Pendentes",
+    lost: "Perdidas",
+    refunded: "Reembolsos",
+    chargeback: "Chargebacks",
+    unknown: "Não mapeadas",
+  };
+  return labels[value as ComercialStatusGroup] ?? value;
+}
+
+function compactFilterLabel(value: string, fallback: string) {
+  return value === "all" ? fallback : value;
+}
+
+function viewingLabel(period: PeriodKey, filters: CommercialGlobalFiltersState) {
+  return [
+    statusLabel(filters.status),
+    periodLabel(period),
+    compactFilterLabel(filters.product, "Todos os produtos"),
+    compactFilterLabel(filters.payment, "Todos os pagamentos"),
+    compactFilterLabel(filters.source, "Todas as origens"),
+  ].join(" • ");
+}
+
+function buildOverviewSummary({
+  period,
+  confirmed,
+  gross,
+  topProduct,
+  pending,
+  lost,
+  refunded,
+  hasOfficialNet,
+  hasOfficialReceivables,
+}: {
+  period: PeriodKey;
+  confirmed: number;
+  gross: number;
+  topProduct: string | null;
+  pending: number;
+  lost: number;
+  refunded: number;
+  hasOfficialNet: boolean;
+  hasOfficialReceivables: boolean;
+}) {
+  const productText = topProduct ? ` O produto com maior participação foi ${topProduct}.` : "";
+  const riskText = [
+    pending ? `${pending} pendentes` : null,
+    lost ? `${lost} perdas comerciais` : null,
+    refunded ? `${refunded} reembolsos/chargebacks` : null,
+  ].filter(Boolean).join(", ");
+  const dataText = !hasOfficialNet || !hasOfficialReceivables
+    ? " Valores líquidos e recebíveis oficiais ainda não foram informados pela Hotmart neste payload."
+    : " Valores líquidos e recebíveis oficiais estão disponíveis para o filtro atual.";
+
+  return `No período ${periodLabel(period).toLowerCase()}, foram registradas ${confirmed} vendas confirmadas, com receita bruta de ${formatMoney(gross)}.${productText}${riskText ? ` Há ${riskText} no funil.` : ""}${dataText}`;
 }
 
 type LaunchTemporalRow = ReturnType<typeof buildTemporalRows>[number];
@@ -1300,6 +1411,26 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const launchMissingBuyerEmail = launchRows.filter((sale) => !sale.comprador_email);
   const launchMissingProduct = launchRows.filter((sale) => !sale.produto_id);
   const launchUnknownStatus = launchRows.filter((sale) => commercialGroup(sale) === "unknown");
+  const officialReceivables = filteredReceivables.filter((item) => ["previsto", "disponivel"].includes(item.status) && item.fonte_previsao === "hotmart" && item.valor_liquido !== null && item.valor_liquido !== undefined && isTodayOrFuture(item.data_prevista));
+  const hasOfficialNet = confirmedSalesWithNet.length > 0;
+  const hasOfficialReceivables = officialReceivables.length > 0;
+  const overviewTemporalRows = buildTemporalRows(overviewSales, overviewRange(period));
+  const overviewProductRows = buildProductRows(overviewSales);
+  const overviewStatusRows = buildStatusRows(overviewSales);
+  const overviewPaymentRows = buildPaymentRows(overviewSales);
+  const overviewSourceRows = buildSourceRows(overviewSales);
+  const overviewViewingLabel = viewingLabel(period, commercialGlobalFilters);
+  const overviewSummary = buildOverviewSummary({
+    period,
+    confirmed: confirmedSales.length,
+    gross: grossRevenue,
+    topProduct: overviewProductRows[0]?.name ?? null,
+    pending: pendingSales.length,
+    lost: lostSales.length,
+    refunded: refundedSales.length,
+    hasOfficialNet,
+    hasOfficialReceivables,
+  });
 
   useEffect(() => {
     setMonthFilter("all");
@@ -1400,8 +1531,10 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
       ) : null}
 
       {activeTab === "overview" ? (
-        <div className="space-y-6">
-          <CommercialGlobalFilters
+        <div className="space-y-4">
+          <OverviewFilterBar
+            period={period}
+            setPeriod={setPeriod}
             filters={commercialGlobalFilters}
             options={commercialFilterOptions}
             onProduct={setCommercialProductFilter}
@@ -1409,51 +1542,113 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
             onPayment={setCommercialPaymentFilter}
             onSource={setCommercialSourceFilter}
           />
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmedSales.length} helper="APPROVED ou COMPLETE" />
-            <Metric icon={<WalletCards />} label="Faturamento bruto" value={formatMoney(grossRevenue)} helper="antes de taxas e deducoes" />
-            <Metric
-              icon={<CheckCircle2 />}
-              label="Líquido informado"
-              value={formatMoney(netRevenue)}
-              helper={`${confirmedWithoutNet.length} vendas confirmadas sem líquido informado`}
-            />
-            <Metric icon={<CalendarClock />} label="A receber" value={formatMoney(receivableTotal)} helper={`líquido Hotmart no filtro ${periods.find((item) => item.key === period)?.label}`} />
+          <div className="rounded-md border border-brand-sand bg-white/80 px-3 py-2 text-xs font-black uppercase tracking-wide text-brand-teal/75">
+            Visualizando: <span className="text-brand-teal">{overviewViewingLabel}</span>
           </div>
 
-          <div className="inline-flex max-w-full items-center rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black uppercase tracking-wide text-emerald-800">
-            Fonte financeira: Receita Bruta Oficial Hotmart
-          </div>
+          <Card className="p-4">
+            <p className="text-xs font-black uppercase text-brand-clay">Resumo do Período</p>
+            <p className="mt-2 text-sm font-bold leading-relaxed text-brand-teal/75">{overviewSummary}</p>
+            <div className="mt-3 inline-flex max-w-full items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-emerald-800">
+              Fonte financeira: Receita Bruta Oficial Hotmart
+            </div>
+          </Card>
 
           {(confirmedWithoutNet.length > 0 || confirmedWithoutForecast.length > 0) ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
-              <p>Receita líquida indisponível no payload da Hotmart.</p>
-              <p className="mt-1 text-xs font-bold">
-                Recebíveis sem fonte oficial Hotmart permanecem identificados como projetados; valor bruto não é usado como líquido.
-              </p>
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+              Receita líquida e recebíveis oficiais podem estar indisponíveis quando a Hotmart não retorna esses campos no payload.
             </div>
           ) : null}
 
-          <Card className="p-5">
-            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="text-xs font-black uppercase text-brand-clay">Visão de lançamento</p>
-                <h2 className="mt-1 text-xl font-black text-brand-teal">Vendas, funil e lacunas de dados</h2>
-                <p className="mt-1 text-sm text-brand-teal/60">
-                  Separação entre venda confirmada, intenção de compra pendente, perdas e valores que ainda dependem da Hotmart informar líquido/previsão.
-                </p>
-              </div>
-              <PeriodFilter period={period} setPeriod={setPeriod} />
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <MiniMetric label="Pendentes" value={pendingSales.length} helper={formatMoney(pendingGross)} />
-              <MiniMetric label="Boleto/PIX aguardando" value={boletoPixPending.length} helper="intenção de compra" />
-              <MiniMetric label="Canceladas/recusadas" value={lostSales.length} helper="perdas de funil" />
-              <MiniMetric label="Reembolsos/chargebacks" value={refundedSales.length} helper="deduções comerciais" />
-              <MiniMetric label="Compradores únicos" value={uniqueBuyers} helper="confirmados" />
-              <MiniMetric label="Ticket bruto" value={formatMoney(grossTicket)} helper="média confirmada" />
-              <MiniMetric label="Ticket líquido" value={formatMoney(netTicket)} helper="somente vendas com líquido" />
-              <MiniMetric label="Saldo realizado" value={formatMoney(realizedTotal)} helper="líquido Hotmart disponível/recebido" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmedSales.length} helper="no período filtrado" />
+            <Metric icon={<WalletCards />} label="Faturamento bruto" value={formatMoney(grossRevenue)} helper="receita bruta no período filtrado" />
+            <Metric
+              icon={<CheckCircle2 />}
+              label="Líquido informado"
+              value={hasOfficialNet ? formatMoney(netRevenue) : "Indisponível"}
+              helper={hasOfficialNet ? "líquido oficial retornado no filtro" : "Hotmart não informou líquido oficial"}
+            />
+            <Metric
+              icon={<CalendarClock />}
+              label="A receber oficial Hotmart"
+              value={hasOfficialReceivables ? formatMoney(receivableTotal) : "Indisponível"}
+              helper={hasOfficialReceivables ? "previsão oficial no período filtrado" : "sem previsão oficial no payload atual"}
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <MiniMetric label="Pendentes" value={pendingSales.length} helper={formatMoney(pendingGross)} />
+            <MiniMetric label="Boleto/PIX aguardando" value={boletoPixPending.length} helper="intenção de compra" />
+            <MiniMetric label="Canceladas/recusadas" value={lostSales.length} helper="perdas de funil" />
+            <MiniMetric label="Reembolsos/chargebacks" value={refundedSales.length} helper="deduções comerciais" />
+            <MiniMetric label="Compradores únicos" value={uniqueBuyers} helper="confirmados no filtro" />
+            <MiniMetric label="Ticket bruto" value={formatMoney(grossTicket)} helper="media confirmada" />
+            <MiniMetric label="Ticket líquido" value={hasOfficialNet ? formatMoney(netTicket) : "Indisponível"} helper="somente vendas com líquido" />
+            <MiniMetric label="Saldo realizado" value={realizedTotal > 0 ? formatMoney(realizedTotal) : "Indisponível"} helper="líquido Hotmart recebido/disponível" />
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <DataCard title="Receita por período" helper="Receita bruta confirmada dentro dos filtros.">
+              <SimpleTable
+                headers={["Período", "Receita", "Vendas", "Compradores"]}
+                rows={overviewTemporalRows.slice(0, 12).map((row) => [row.label, formatMoney(row.receita), row.vendas, row.compradores])}
+                empty="Sem receita confirmada no filtro atual."
+                minWidth="520px"
+              />
+            </DataCard>
+            <DataCard title="Vendas por período" helper="Quantidade de vendas confirmadas por data ou hora.">
+              <SimpleTable
+                headers={["Período", "Vendas", "Receita", "Ticket bruto"]}
+                rows={overviewTemporalRows.slice(0, 12).map((row) => [row.label, row.vendas, formatMoney(row.receita), row.vendas ? formatMoney(row.receita / row.vendas) : "-"])}
+                empty="Sem vendas confirmadas no filtro atual."
+                minWidth="520px"
+              />
+            </DataCard>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <DataCard title="Produtos" helper="Produtos com maior participação na receita bruta confirmada.">
+              <SimpleTable
+                headers={["Produto", "Vendas", "Receita", "Share"]}
+                rows={overviewProductRows.slice(0, 8).map((row) => [row.name, row.confirmed, formatMoney(row.revenue), formatPercent(row.share)])}
+                empty="Sem produtos no filtro atual."
+                minWidth="620px"
+              />
+            </DataCard>
+            <DataCard title="Status do Funil" helper="Distribuicao comercial sem eventos educacionais.">
+              <SimpleTable
+                headers={["Status", "Eventos", "Receita bruta", "%"]}
+                rows={overviewStatusRows.map((row) => [row.label, row.count, formatMoney(row.revenue), formatPercent(row.percent)])}
+                empty="Sem status no filtro atual."
+                minWidth="560px"
+              />
+            </DataCard>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <DataCard title="Pagamentos" helper="Formas de pagamento das vendas confirmadas no filtro.">
+              <SimpleTable
+                headers={["Pagamento", "Vendas", "Receita", "Pendentes"]}
+                rows={overviewPaymentRows.slice(0, 8).map((row) => [row.payment, row.sales, formatMoney(row.revenue), row.pending])}
+                empty="Sem pagamentos no filtro atual."
+                minWidth="560px"
+              />
+            </DataCard>
+            <DataCard title="Origens" helper="Source/SCK informado pela Hotmart ou ausencia de origem.">
+              <SimpleTable
+                headers={["Origem", "Vendas", "Receita", "Share"]}
+                rows={overviewSourceRows.slice(0, 8).map((row) => [row.source, row.sales, formatMoney(row.revenue), formatPercent(row.share)])}
+                empty="Sem origens no filtro atual."
+                minWidth="560px"
+              />
+            </DataCard>
+          </div>
+
+          <Card className="p-4">
+            <div className="mb-3">
+              <p className="text-xs font-black uppercase text-brand-clay">Lacunas de dados</p>
+              <h2 className="mt-1 text-lg font-black text-brand-teal">Qualidade financeira do payload</h2>
             </div>
             <DataGapList
               total={dataGaps.length}
@@ -1469,26 +1664,8 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
             realtimeCount={realtimeImports.length}
             recentRealtimeCount={recentRealtimeImports.length}
           />
-
-          <Card className="p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-black text-brand-teal">Recebíveis por período</h2>
-                <p className="text-sm text-brand-teal/60">Mostra o que deve cair em conta. Quando a Hotmart não trouxer previsão real, o item fica marcado como projetado.</p>
-              </div>
-              <PeriodFilter period={period} setPeriod={setPeriod} />
-            </div>
-            <ReceivablesTable rows={filteredReceivables.slice(0, 8)} compact />
-          </Card>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <Metric icon={<Users />} label="Alunos na base" value={context.alunos.length} helper="criados a partir das vendas" />
-            <Metric icon={<GraduationCap />} label="Acessos a vencer" value={expiringStudents} helper="proximos 30 dias" />
-            <Metric icon={<AlertTriangle />} label="Pendencias" value={unclassifiedSales} helper="vendas sem produto mapeado" />
-          </div>
         </div>
       ) : null}
-
       {activeTab === "sales" ? (
         <DataCard title="Vendas Hotmart" helper="Histórico e vendas atuais normalizadas pelo n8n.">
           <CommercialFilters
@@ -2124,14 +2301,14 @@ function LaunchIntelligencePanel({
 
 function Metric({ icon, label, value, helper }: { icon: ReactNode; label: string; value: ReactNode; helper: string }) {
   return (
-    <Card className="p-4">
-      <div className="flex items-start justify-between gap-4">
+    <Card className="p-3.5">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-black uppercase text-brand-clay">{label}</p>
-          <p className="mt-2 break-words text-2xl font-black leading-tight text-brand-teal">{value}</p>
-          <p className="mt-2 text-xs font-bold text-brand-teal/55">{helper}</p>
+          <p className="mt-1.5 break-words text-[1.55rem] font-black leading-tight text-brand-teal">{value}</p>
+          <p className="mt-1.5 text-xs font-bold leading-snug text-brand-teal/55">{helper}</p>
         </div>
-        <span className="rounded-lg bg-brand-cream p-2.5 text-brand-teal">{icon}</span>
+        <span className="rounded-lg bg-brand-cream p-2 text-brand-teal">{icon}</span>
       </div>
     </Card>
   );
@@ -2181,12 +2358,92 @@ function PeriodFilter({ period, setPeriod }: { period: PeriodKey; setPeriod: (pe
           key={item.key}
           type="button"
           onClick={() => setPeriod(item.key)}
-          className={`rounded-md border px-4 py-2 text-sm font-black ${period === item.key ? "border-brand-teal bg-brand-teal text-white" : "border-brand-sand bg-white text-brand-teal"}`}
+          className={`h-9 rounded-md border px-3 text-xs font-black ${period === item.key ? "border-brand-teal bg-brand-teal text-white" : "border-brand-sand bg-white text-brand-teal"}`}
         >
           {item.label}
         </button>
       ))}
     </div>
+  );
+}
+
+function OverviewFilterBar({
+  period,
+  setPeriod,
+  filters,
+  options,
+  onProduct,
+  onStatus,
+  onPayment,
+  onSource,
+}: {
+  period: PeriodKey;
+  setPeriod: (period: PeriodKey) => void;
+  filters: CommercialGlobalFiltersState;
+  options: { products: string[]; payments: string[]; sources: string[] };
+  onProduct: (value: string) => void;
+  onStatus: (value: string) => void;
+  onPayment: (value: string) => void;
+  onSource: (value: string) => void;
+}) {
+  return (
+    <Card className="p-3">
+      <div className="grid gap-3 xl:grid-cols-[minmax(360px,1.3fr)_minmax(180px,1fr)_170px_170px_minmax(180px,1fr)]">
+        <div>
+          <p className="mb-1.5 text-[11px] font-black uppercase text-brand-clay">Período</p>
+          <PeriodFilter period={period} setPeriod={setPeriod} />
+        </div>
+        <FilterSelect label="Produto" value={filters.product} onChange={onProduct}>
+          <option value="all">Todos os produtos</option>
+          {options.products.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </FilterSelect>
+        <FilterSelect label="Status" value={filters.status} onChange={onStatus}>
+          <option value="all">Todos os status</option>
+          {(["confirmed", "pending", "lost", "refunded", "chargeback", "unknown"] as ComercialStatusGroup[]).map((item) => (
+            <option key={item} value={item}>{statusLabel(item)}</option>
+          ))}
+        </FilterSelect>
+        <FilterSelect label="Pagamento" value={filters.payment} onChange={onPayment}>
+          <option value="all">Todos os pagamentos</option>
+          {options.payments.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </FilterSelect>
+        <FilterSelect label="Origem" value={filters.source} onChange={onSource}>
+          <option value="all">Todas as origens</option>
+          {options.sources.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </FilterSelect>
+      </div>
+    </Card>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-[11px] font-black uppercase text-brand-clay">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 w-full rounded-md border border-brand-sand bg-white px-2.5 text-xs font-bold text-brand-teal"
+      >
+        {children}
+      </select>
+    </label>
   );
 }
 
@@ -2280,12 +2537,12 @@ function CommercialGlobalFilters({
   onSource: (value: string) => void;
 }) {
   return (
-    <Card className="p-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_180px_180px_1fr]">
+    <Card className="p-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_170px_170px_1fr]">
         <select
           value={filters.product}
           onChange={(event) => onProduct(event.target.value)}
-          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+          className="h-9 rounded-md border border-brand-sand bg-white px-2.5 text-xs font-bold text-brand-teal"
         >
           <option value="all">Todos os produtos</option>
           {options.products.map((item) => (
@@ -2295,7 +2552,7 @@ function CommercialGlobalFilters({
         <select
           value={filters.status}
           onChange={(event) => onStatus(event.target.value)}
-          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+          className="h-9 rounded-md border border-brand-sand bg-white px-2.5 text-xs font-bold text-brand-teal"
         >
           <option value="all">Todos status</option>
           {(["confirmed", "pending", "lost", "refunded", "chargeback", "unknown"] as ComercialStatusGroup[]).map((item) => (
@@ -2305,7 +2562,7 @@ function CommercialGlobalFilters({
         <select
           value={filters.payment}
           onChange={(event) => onPayment(event.target.value)}
-          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+          className="h-9 rounded-md border border-brand-sand bg-white px-2.5 text-xs font-bold text-brand-teal"
         >
           <option value="all">Todos pagamentos</option>
           {options.payments.map((item) => (
@@ -2315,7 +2572,7 @@ function CommercialGlobalFilters({
         <select
           value={filters.source}
           onChange={(event) => onSource(event.target.value)}
-          className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal"
+          className="h-9 rounded-md border border-brand-sand bg-white px-2.5 text-xs font-bold text-brand-teal"
         >
           <option value="all">Todas origens</option>
           {options.sources.map((item) => (
