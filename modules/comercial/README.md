@@ -10,6 +10,45 @@ Modulo local para consolidar vendas Hotmart, recebiveis, alunos e produtos antes
 - O endpoint faz upsert por `tenant_id + transaction_id`.
 - Nenhuma migration deve ser aplicada em homologacao/producao sem validacao previa.
 
+## Regra financeira oficial atual
+
+- O modulo Comercial/Financeiro trabalha hoje com receita bruta oficial da Hotmart como fonte financeira confiavel.
+- Receita liquida fica indisponivel quando a Hotmart nao fornece `net_amount` no payload.
+- Taxas ficam indisponiveis quando a Hotmart nao fornece `fees` no payload.
+- Recebiveis oficiais so sao tratados como oficiais quando a Hotmart fornece `expected_payment_date` e informacoes financeiras suficientes.
+- Recebiveis sem fonte oficial Hotmart permanecem claramente identificados como projetados.
+- O sistema nao copia valor bruto para valor liquido.
+
+## Launch Intelligence Essentials
+
+A aba `Lancamento` transforma os dados reais ja importados da Hotmart em uma leitura operacional do mini lancamento.
+
+Nesta primeira versao:
+
+- Nao usa IA.
+- Nao chama OpenRouter.
+- Nao altera ingestao Hotmart.
+- Nao altera workflows n8n.
+- Nao altera migrations.
+- Usa apenas `comercial_vendas`, `comercial_recebiveis`, `comercial_alunos`, `comercial_produtos` e `comercial_hotmart_raw` ja carregados pelo backend.
+- Exclui transacoes com `transaction_id` iniciado por `TESTE-` dos KPIs principais da aba.
+- Considera confiavel: vendas, receita bruta, status, produto, comprador, forma de pagamento, source_sck quando existir e eventos recentes.
+- Exibe com alerta: receita liquida, saldo realizado, saldo a receber, taxas e recebiveis projetados.
+
+Filtros da aba:
+
+- Hoje
+- Ontem
+- 7 dias
+- 15 dias
+- 30 dias
+- Mes
+- Lancamento
+- Tudo
+- Personalizado
+
+O filtro `Lancamento` permite configurar nome, data inicial e data final em estado local da tela.
+
 ## Variaveis necessarias na plataforma
 
 No `.env.local` ou Vercel:

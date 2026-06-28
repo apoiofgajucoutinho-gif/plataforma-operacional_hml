@@ -4,14 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
+  Activity,
+  BarChart3,
   CalendarClock,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock3,
+  Copy,
+  ExternalLink,
   GraduationCap,
   PackageCheck,
+  Radar,
   ReceiptText,
   RefreshCw,
+  ShieldCheck,
+  TrendingUp,
   Users,
   WalletCards,
 } from "lucide-react";
@@ -26,13 +34,19 @@ import type {
   ComercialStatusGroup,
 } from "@/modules/comercial/types";
 
-type TabKey = "overview" | "sales" | "receivables" | "students" | "products" | "reconciliation" | "admin";
+type TabKey = "launch" | "overview" | "sales" | "receivables" | "students" | "products" | "reconciliation" | "admin";
 type PeriodKey = "7d" | "15d" | "30d" | "month" | "all";
+type LaunchPeriodKey = "today" | "yesterday" | "7d" | "15d" | "30d" | "month" | "launch" | "all" | "custom";
 type TableKey = "sales" | "receivables" | "students";
+type LaunchSalesSortKey = "latest" | "gross_desc" | "status" | "product" | "buyer";
+type LaunchProductSortKey = "revenue_desc" | "sales_desc" | "pending_desc" | "share_desc" | "name";
+type LaunchStatusSortKey = "order" | "count_desc" | "revenue_desc";
+type LaunchSourceSortKey = "revenue_desc" | "sales_desc" | "ticket_desc" | "source";
 
 const PAGE_SIZE = 20;
 
 const tabs: Array<{ key: TabKey; label: string }> = [
+  { key: "launch", label: "Lançamento" },
   { key: "overview", label: "Visão Geral" },
   { key: "sales", label: "Vendas" },
   { key: "receivables", label: "Recebíveis" },
@@ -50,8 +64,53 @@ const periods: Array<{ key: PeriodKey; label: string }> = [
   { key: "all", label: "Tudo" },
 ];
 
+const launchPeriods: Array<{ key: LaunchPeriodKey; label: string }> = [
+  { key: "today", label: "Hoje" },
+  { key: "yesterday", label: "Ontem" },
+  { key: "7d", label: "7 dias" },
+  { key: "15d", label: "15 dias" },
+  { key: "30d", label: "30 dias" },
+  { key: "month", label: "Mês" },
+  { key: "launch", label: "Lançamento" },
+  { key: "all", label: "Tudo" },
+  { key: "custom", label: "Personalizado" },
+];
+
+const launchSalesSortOptions: Array<{ key: LaunchSalesSortKey; label: string }> = [
+  { key: "latest", label: "Mais recentes" },
+  { key: "gross_desc", label: "Maior valor" },
+  { key: "status", label: "Status" },
+  { key: "product", label: "Produto" },
+  { key: "buyer", label: "Comprador" },
+];
+
+const launchProductSortOptions: Array<{ key: LaunchProductSortKey; label: string }> = [
+  { key: "revenue_desc", label: "Maior receita" },
+  { key: "sales_desc", label: "Mais vendas" },
+  { key: "pending_desc", label: "Mais pendentes" },
+  { key: "share_desc", label: "Maior participacao" },
+  { key: "name", label: "Produto A-Z" },
+];
+
+const launchStatusSortOptions: Array<{ key: LaunchStatusSortKey; label: string }> = [
+  { key: "order", label: "Ordem do funil" },
+  { key: "count_desc", label: "Maior volume" },
+  { key: "revenue_desc", label: "Maior receita" },
+];
+
+const launchSourceSortOptions: Array<{ key: LaunchSourceSortKey; label: string }> = [
+  { key: "revenue_desc", label: "Maior receita" },
+  { key: "sales_desc", label: "Mais vendas" },
+  { key: "ticket_desc", label: "Maior ticket" },
+  { key: "source", label: "Origem A-Z" },
+];
+
 function formatMoney(value: number | null | undefined) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
+}
+
+function formatPercent(value: number | null | undefined) {
+  return `${Number(value ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 }
 
 function formatDate(value: string | null | undefined) {
@@ -103,6 +162,44 @@ function withinHours(value: string | null | undefined, hours: number) {
   const date = dateForFilter(value);
   if (!date) return false;
   return Date.now() - date.getTime() <= hours * 60 * 60 * 1000;
+}
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function endOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function toInputDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function parseInputDate(value: string, fallback: Date, end = false) {
+  const date = dateForFilter(value);
+  if (!date) return fallback;
+  return end ? endOfLocalDay(date) : startOfLocalDay(date);
+}
+
+function saleDate(row: ComercialVenda) {
+  return dateForFilter(row.data_compra ?? row.data_aprovacao ?? row.last_event_at ?? row.imported_at ?? row.created_at);
+}
+
+function isTestTransaction(row: ComercialVenda) {
+  return row.transaction_id.toUpperCase().startsWith("TESTE-");
+}
+
+function minutesSince(value: string | null | undefined) {
+  const date = dateForFilter(value);
+  if (!date) return null;
+  return Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
 }
 
 const commercialGroupLabels: Record<ComercialStatusGroup, string> = {
@@ -200,9 +297,309 @@ function pageCount(rowsLength: number) {
   return Math.max(1, Math.ceil(rowsLength / PAGE_SIZE));
 }
 
+type LaunchRange = {
+  label: string;
+  start: Date | null;
+  end: Date | null;
+  bucket: "hour" | "day";
+};
+
+type LaunchAlert = {
+  type: "informação" | "atenção" | "crítico" | "oportunidade";
+  title: string;
+  text: string;
+  evidence: string;
+  suggestion: string;
+};
+
+function buildLaunchRange(period: LaunchPeriodKey, launchName: string, launchStart: string, launchEnd: string): LaunchRange {
+  const now = new Date();
+  const todayStart = startOfLocalDay(now);
+  const todayEnd = endOfLocalDay(now);
+
+  if (period === "today") return { label: "Hoje", start: todayStart, end: todayEnd, bucket: "hour" };
+  if (period === "yesterday") {
+    const yesterday = addDays(todayStart, -1);
+    return { label: "Ontem", start: yesterday, end: endOfLocalDay(yesterday), bucket: "hour" };
+  }
+  if (period === "7d") return { label: "Últimos 7 dias", start: addDays(todayStart, -6), end: todayEnd, bucket: "day" };
+  if (period === "15d") return { label: "Últimos 15 dias", start: addDays(todayStart, -14), end: todayEnd, bucket: "day" };
+  if (period === "30d") return { label: "Últimos 30 dias", start: addDays(todayStart, -29), end: todayEnd, bucket: "day" };
+  if (period === "month") return { label: "Mês atual", start: new Date(now.getFullYear(), now.getMonth(), 1), end: todayEnd, bucket: "day" };
+  if (period === "launch") {
+    return {
+      label: launchName || "Lançamento",
+      start: parseInputDate(launchStart, todayStart),
+      end: parseInputDate(launchEnd, todayEnd, true),
+      bucket: "day",
+    };
+  }
+  if (period === "custom") {
+    return {
+      label: "Personalizado",
+      start: parseInputDate(launchStart, todayStart),
+      end: parseInputDate(launchEnd, todayEnd, true),
+      bucket: "day",
+    };
+  }
+  return { label: "Tudo", start: null, end: null, bucket: "day" };
+}
+
+function inRange(date: Date | null, range: LaunchRange) {
+  if (!date) return false;
+  if (range.start && date < range.start) return false;
+  if (range.end && date > range.end) return false;
+  return true;
+}
+
+function launchSaleRows(rows: ComercialVenda[], range: LaunchRange) {
+  return rows
+    .filter((row) => !isTestTransaction(row))
+    .filter((row) => range.start || range.end ? inRange(saleDate(row), range) : Boolean(saleDate(row)))
+    .sort((a, b) => (saleDate(b)?.getTime() ?? 0) - (saleDate(a)?.getTime() ?? 0));
+}
+
+function uniqueBuyerCount(rows: ComercialVenda[]) {
+  return new Set(rows.map((sale) => sale.comprador_email ?? sale.comprador_nome).filter(Boolean)).size;
+}
+
+function grossTotal(rows: ComercialVenda[]) {
+  return rows.reduce((sum, sale) => sum + sale.valor_bruto, 0);
+}
+
+function buildTemporalRows(rows: ComercialVenda[], range: LaunchRange) {
+  const groups = new Map<string, ComercialVenda[]>();
+  rows.forEach((row) => {
+    const date = saleDate(row);
+    if (!date) return;
+    const key = range.bucket === "hour"
+      ? `${String(date.getHours()).padStart(2, "0")}h`
+      : `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  });
+
+  return Array.from(groups.entries())
+    .map(([label, sales]) => {
+      const confirmed = sales.filter(isConfirmed);
+      return {
+        label,
+        vendas: confirmed.length,
+        receita: grossTotal(confirmed),
+        compradores: uniqueBuyerCount(confirmed),
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildProductRows(rows: ComercialVenda[]) {
+  const groups = new Map<string, ComercialVenda[]>();
+  rows.forEach((row) => {
+    const key = row.produto_nome || row.hotmart_product_id || "Produto não informado";
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  });
+
+  const confirmedTotal = grossTotal(rows.filter(isConfirmed));
+  return Array.from(groups.entries())
+    .map(([name, sales]) => {
+      const confirmed = sales.filter(isConfirmed);
+      const revenue = grossTotal(confirmed);
+      return {
+        name,
+        confirmed: confirmed.length,
+        revenue,
+        buyers: uniqueBuyerCount(confirmed),
+        ticket: confirmed.length ? revenue / confirmed.length : 0,
+        pending: sales.filter((sale) => commercialGroup(sale) === "pending").length,
+        lost: sales.filter((sale) => commercialGroup(sale) === "lost").length,
+        share: confirmedTotal ? (revenue / confirmedTotal) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
+function buildStatusRows(rows: ComercialVenda[]) {
+  const order: ComercialStatusGroup[] = ["confirmed", "pending", "lost", "refunded", "chargeback", "unknown"];
+  const total = rows.length || 1;
+  return order.map((group) => {
+    const sales = rows.filter((row) => commercialGroup(row) === group);
+    const statuses = Array.from(new Set(sales.map((row) => row.status_original ?? row.status))).filter(Boolean);
+    return {
+      group,
+      label: commercialGroupLabels[group],
+      count: sales.length,
+      revenue: grossTotal(sales),
+      percent: (sales.length / total) * 100,
+      statuses,
+    };
+  }).filter((row) => row.count > 0 || row.group !== "unknown");
+}
+
+function buildSourceRows(rows: ComercialVenda[]) {
+  const groups = new Map<string, ComercialVenda[]>();
+  rows.forEach((row) => {
+    const key = row.source_sck?.trim() || "Sem source_sck";
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  });
+  const confirmedTotal = grossTotal(rows.filter(isConfirmed));
+  return Array.from(groups.entries())
+    .map(([source, sales]) => {
+      const confirmed = sales.filter(isConfirmed);
+      const revenue = grossTotal(confirmed);
+      return {
+        source,
+        sales: confirmed.length,
+        revenue,
+        ticket: confirmed.length ? revenue / confirmed.length : 0,
+        share: confirmedTotal ? (revenue / confirmedTotal) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
+type LaunchTemporalRow = ReturnType<typeof buildTemporalRows>[number];
+type LaunchProductRow = ReturnType<typeof buildProductRows>[number];
+type LaunchStatusRow = ReturnType<typeof buildStatusRows>[number];
+type LaunchSourceRow = ReturnType<typeof buildSourceRows>[number];
+
+function saleTime(row: ComercialVenda) {
+  return saleDate(row)?.getTime() ?? 0;
+}
+
+function compareText(a: string | null | undefined, b: string | null | undefined) {
+  return (a ?? "").localeCompare(b ?? "", "pt-BR", { sensitivity: "base" });
+}
+
+function sortLaunchSales(rows: ComercialVenda[], sort: LaunchSalesSortKey) {
+  const sorted = [...rows];
+  if (sort === "gross_desc") return sorted.sort((a, b) => b.valor_bruto - a.valor_bruto);
+  if (sort === "status") return sorted.sort((a, b) => compareText(a.status_original ?? a.status, b.status_original ?? b.status) || saleTime(b) - saleTime(a));
+  if (sort === "product") return sorted.sort((a, b) => compareText(a.produto_nome, b.produto_nome) || saleTime(b) - saleTime(a));
+  if (sort === "buyer") return sorted.sort((a, b) => compareText(a.comprador_nome ?? a.comprador_email, b.comprador_nome ?? b.comprador_email) || saleTime(b) - saleTime(a));
+  return sorted.sort((a, b) => saleTime(b) - saleTime(a));
+}
+
+function sortLaunchProducts(rows: LaunchProductRow[], sort: LaunchProductSortKey) {
+  const sorted = [...rows];
+  if (sort === "sales_desc") return sorted.sort((a, b) => b.confirmed - a.confirmed || b.revenue - a.revenue);
+  if (sort === "pending_desc") return sorted.sort((a, b) => b.pending - a.pending || b.revenue - a.revenue);
+  if (sort === "share_desc") return sorted.sort((a, b) => b.share - a.share || b.revenue - a.revenue);
+  if (sort === "name") return sorted.sort((a, b) => compareText(a.name, b.name));
+  return sorted.sort((a, b) => b.revenue - a.revenue);
+}
+
+function sortLaunchStatus(rows: LaunchStatusRow[], sort: LaunchStatusSortKey) {
+  const sorted = [...rows];
+  if (sort === "count_desc") return sorted.sort((a, b) => b.count - a.count || b.revenue - a.revenue);
+  if (sort === "revenue_desc") return sorted.sort((a, b) => b.revenue - a.revenue || b.count - a.count);
+  return sorted;
+}
+
+function sortLaunchSources(rows: LaunchSourceRow[], sort: LaunchSourceSortKey) {
+  const sorted = [...rows];
+  if (sort === "sales_desc") return sorted.sort((a, b) => b.sales - a.sales || b.revenue - a.revenue);
+  if (sort === "ticket_desc") return sorted.sort((a, b) => b.ticket - a.ticket || b.revenue - a.revenue);
+  if (sort === "source") return sorted.sort((a, b) => compareText(a.source, b.source));
+  return sorted.sort((a, b) => b.revenue - a.revenue);
+}
+
+function previousRange(range: LaunchRange): LaunchRange | null {
+  if (!range.start || !range.end) return null;
+  const duration = range.end.getTime() - range.start.getTime();
+  const previousEnd = new Date(range.start.getTime() - 1);
+  const previousStart = new Date(previousEnd.getTime() - duration);
+  return { label: "Período anterior", start: previousStart, end: previousEnd, bucket: range.bucket };
+}
+
+function buildLaunchAlerts(rows: ComercialVenda[], rawImports: ComercialRawImport[], productRows: ReturnType<typeof buildProductRows>) {
+  const alerts: LaunchAlert[] = [];
+  const latestSale = rows[0] ?? null;
+  const lastMinutes = latestSale ? minutesSince(latestSale.data_compra ?? latestSale.data_aprovacao ?? latestSale.last_event_at ?? latestSale.imported_at) : null;
+  const pending = rows.filter((sale) => commercialGroup(sale) === "pending");
+  const boletoPix = pending.filter((sale) => normalizeStatus(sale.forma_pagamento).includes("BILLET") || normalizeStatus(sale.forma_pagamento).includes("BOLETO") || normalizeStatus(sale.forma_pagamento).includes("PIX"));
+  const refunded = rows.filter(isRefundedOrChargeback);
+  const missingSource = rows.filter((sale) => !sale.source_sck);
+  const financialGap = rows.filter((sale) => sale.valor_liquido === null || sale.valor_liquido === undefined || sale.taxas === null || sale.taxas === undefined || !sale.expected_payment_date);
+  const recentRaw = rawImports.filter((row) => withinHours(row.received_at, 1)).length;
+
+  alerts.push({
+    type: latestSale && lastMinutes !== null && lastMinutes <= 120 ? "informação" : "atenção",
+    title: latestSale ? "Última venda" : "Sem venda no período",
+    text: latestSale && lastMinutes !== null ? `Última venda aconteceu há ${lastMinutes} minutos.` : "Nenhuma venda encontrada no período selecionado.",
+    evidence: latestSale ? `${latestSale.transaction_id} · ${latestSale.produto_nome ?? "produto sem nome"}` : "Sem transações no filtro atual.",
+    suggestion: latestSale ? "Acompanhar se o ritmo continua nas próximas horas." : "Validar se o filtro está correto ou se o lançamento está sem movimentação.",
+  });
+
+  if (!recentRaw) {
+    alerts.push({
+      type: "atenção",
+      title: "Sem evento recente",
+      text: "Sem novas vendas/eventos na última hora.",
+      evidence: "0 eventos Hotmart recebidos nos últimos 60 minutos.",
+      suggestion: "Verificar n8n/Hotmart apenas se uma venda real era esperada nesse intervalo.",
+    });
+  }
+
+  if (pending.length) {
+    alerts.push({
+      type: "atenção",
+      title: "Pagamentos pendentes",
+      text: `Existem ${pending.length} pagamentos pendentes no período.`,
+      evidence: `${boletoPix.length} pendentes parecem boleto/PIX aguardando confirmação.`,
+      suggestion: "Acompanhar confirmação antes de considerar como venda realizada.",
+    });
+  }
+
+  const dominant = productRows[0];
+  if (dominant && dominant.share >= 60) {
+    alerts.push({
+      type: "oportunidade",
+      title: "Produto dominante",
+      text: `${dominant.name} concentra ${dominant.share.toFixed(1)}% da receita bruta confirmada.`,
+      evidence: `${dominant.confirmed} vendas confirmadas e ${formatMoney(dominant.revenue)} de receita bruta.`,
+      suggestion: "Usar esse produto como referência para leitura do lançamento atual.",
+    });
+  }
+
+  if (refunded.length) {
+    alerts.push({
+      type: "crítico",
+      title: "Reembolso ou chargeback",
+      text: `Houve ${refunded.length} reembolsos/chargebacks no período.`,
+      evidence: `${formatMoney(grossTotal(refunded))} em valor bruto associado.`,
+      suggestion: "Validar motivo e não somar esses valores como venda saudável.",
+    });
+  }
+
+  if (financialGap.length) {
+    alerts.push({
+      type: "informação",
+      title: "Lacuna financeira",
+      text: "Valor líquido, taxas ou recebíveis oficiais ainda não vieram em parte dos payloads Hotmart.",
+      evidence: `${financialGap.length} vendas possuem lacunas financeiras.`,
+      suggestion: "Usar receita bruta para leitura do lançamento e não tomar decisão por líquido/saldo ainda.",
+    });
+  }
+
+  if (missingSource.length) {
+    alerts.push({
+      type: "atenção",
+      title: "Origem ausente",
+      text: `${missingSource.length} vendas não possuem source_sck informado.`,
+      evidence: "Sem source_sck não há atribuição segura por campanha/origem.",
+      suggestion: "Conferir UTMs/SCK nos links usados no lançamento.",
+    });
+  }
+
+  return alerts.slice(0, 8);
+}
+
 export function ComercialDashboard({ context }: { context: ComercialContext }) {
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>("launch");
   const [period, setPeriod] = useState<PeriodKey>("30d");
+  const [launchPeriod, setLaunchPeriod] = useState<LaunchPeriodKey>("today");
+  const [launchName, setLaunchName] = useState("Mini lançamento — Junho/2026");
+  const [launchStart, setLaunchStart] = useState("2026-06-01");
+  const [launchEnd, setLaunchEnd] = useState("2026-06-30");
   const [yearFilter, setYearFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -303,6 +700,31 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
         return [row.nome, row.email, row.telefone, row.status_acesso].some((value) => String(value ?? "").toLowerCase().includes(term));
       });
   }, [context.alunos, monthFilter, search, statusFilter, yearFilter]);
+  const launchRange = useMemo(() => buildLaunchRange(launchPeriod, launchName, launchStart, launchEnd), [launchEnd, launchName, launchPeriod, launchStart]);
+  const launchRows = useMemo(() => launchSaleRows(context.vendas, launchRange), [context.vendas, launchRange]);
+  const launchConfirmed = launchRows.filter(isConfirmed);
+  const launchPending = launchRows.filter((sale) => commercialGroup(sale) === "pending");
+  const launchLost = launchRows.filter((sale) => commercialGroup(sale) === "lost");
+  const launchRefunded = launchRows.filter(isRefundedOrChargeback);
+  const launchGross = grossTotal(launchConfirmed);
+  const launchUniqueBuyers = uniqueBuyerCount(launchConfirmed);
+  const launchTicket = launchConfirmed.length ? launchGross / launchConfirmed.length : 0;
+  const launchLatestSale = launchRows[0] ?? null;
+  const launchTemporalRows = buildTemporalRows(launchRows, launchRange);
+  const launchProductRows = buildProductRows(launchRows);
+  const launchStatusRows = buildStatusRows(launchRows);
+  const launchSourceRows = buildSourceRows(launchRows);
+  const launchPreviousRange = previousRange(launchRange);
+  const launchPreviousRows = launchPreviousRange ? launchSaleRows(context.vendas, launchPreviousRange) : [];
+  const launchPreviousConfirmed = launchPreviousRows.filter(isConfirmed);
+  const launchAlerts = buildLaunchAlerts(launchRows, context.rawImports, launchProductRows);
+  const launchRawLast24h = context.rawImports.filter((row) => withinHours(row.received_at, 24));
+  const launchRawLastHour = context.rawImports.filter((row) => withinHours(row.received_at, 1));
+  const launchDataGaps = launchRows.filter((sale) => Array.isArray(sale.data_lacunas) && sale.data_lacunas.length > 0);
+  const launchMissingSource = launchRows.filter((sale) => !sale.source_sck);
+  const launchMissingBuyerEmail = launchRows.filter((sale) => !sale.comprador_email);
+  const launchMissingProduct = launchRows.filter((sale) => !sale.produto_id);
+  const launchUnknownStatus = launchRows.filter((sale) => commercialGroup(sale) === "unknown");
 
   useEffect(() => {
     setMonthFilter("all");
@@ -348,6 +770,47 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
         ))}
       </div>
 
+      {activeTab === "launch" ? (
+        <LaunchIntelligencePanel
+          updatedAt={context.updatedAt}
+          period={launchPeriod}
+          setPeriod={setLaunchPeriod}
+          launchName={launchName}
+          setLaunchName={setLaunchName}
+          launchStart={launchStart}
+          setLaunchStart={setLaunchStart}
+          launchEnd={launchEnd}
+          setLaunchEnd={setLaunchEnd}
+          range={launchRange}
+          rows={launchRows}
+          confirmed={launchConfirmed}
+          pending={launchPending}
+          lost={launchLost}
+          refunded={launchRefunded}
+          gross={launchGross}
+          ticket={launchTicket}
+          buyers={launchUniqueBuyers}
+          latestSale={launchLatestSale}
+          temporalRows={launchTemporalRows}
+          productRows={launchProductRows}
+          statusRows={launchStatusRows}
+          sourceRows={launchSourceRows}
+          alerts={launchAlerts}
+          previousConfirmed={launchPreviousConfirmed}
+          rawLast24h={launchRawLast24h.length}
+          rawLastHour={launchRawLastHour.length}
+          latestRaw={latestRawImport}
+          dataGaps={launchDataGaps.length}
+          missingNet={launchRows.filter((sale) => sale.valor_liquido === null || sale.valor_liquido === undefined).length}
+          missingFees={launchRows.filter((sale) => sale.taxas === null || sale.taxas === undefined).length}
+          missingForecast={launchRows.filter((sale) => !sale.expected_payment_date).length}
+          missingSource={launchMissingSource.length}
+          missingBuyerEmail={launchMissingBuyerEmail.length}
+          missingProduct={launchMissingProduct.length}
+          unknownStatus={launchUnknownStatus.length}
+        />
+      ) : null}
+
       {activeTab === "overview" ? (
         <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -362,9 +825,16 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
             <Metric icon={<CalendarClock />} label="A receber" value={formatMoney(receivableTotal)} helper={`líquido Hotmart no filtro ${periods.find((item) => item.key === period)?.label}`} />
           </div>
 
+          <div className="inline-flex max-w-full items-center rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black uppercase tracking-wide text-emerald-800">
+            Fonte financeira: Receita Bruta Oficial Hotmart
+          </div>
+
           {(confirmedWithoutNet.length > 0 || confirmedWithoutForecast.length > 0) ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
-              Valores líquidos e recebíveis oficiais ainda não foram retornados pela Hotmart neste payload. Os indicadores financeiros líquidos estão indisponíveis ou projetados.
+              <p>Receita líquida indisponível no payload da Hotmart.</p>
+              <p className="mt-1 text-xs font-bold">
+                Recebíveis sem fonte oficial Hotmart permanecem identificados como projetados; valor bruto não é usado como líquido.
+              </p>
             </div>
           ) : null}
 
@@ -529,11 +999,11 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
 
 function Header({ updatedAt }: { updatedAt: string | null }) {
   return (
-    <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <p className="text-sm font-black uppercase tracking-wide text-brand-clay">Hotmart e alunos</p>
-        <h1 className="mt-2 text-4xl font-black tracking-tight text-brand-teal">Comercial</h1>
-        <p className="mt-3 max-w-3xl text-lg text-brand-teal/70">
+        <p className="text-xs font-black uppercase tracking-wide text-brand-clay">Hotmart e alunos</p>
+        <h1 className="mt-2 text-3xl font-black tracking-tight text-brand-teal">Comercial</h1>
+        <p className="mt-2 max-w-3xl text-base text-brand-teal/70">
           Vendas, recebiveis, alunos e produtos conectados a Hotmart antes de impactar Financeiro e DRE.
         </p>
       </div>
@@ -542,16 +1012,339 @@ function Header({ updatedAt }: { updatedAt: string | null }) {
   );
 }
 
+function LaunchIntelligencePanel({
+  updatedAt,
+  period,
+  setPeriod,
+  launchName,
+  setLaunchName,
+  launchStart,
+  setLaunchStart,
+  launchEnd,
+  setLaunchEnd,
+  range,
+  rows,
+  confirmed,
+  pending,
+  lost,
+  refunded,
+  gross,
+  ticket,
+  buyers,
+  latestSale,
+  temporalRows,
+  productRows,
+  statusRows,
+  sourceRows,
+  alerts,
+  previousConfirmed,
+  rawLast24h,
+  rawLastHour,
+  latestRaw,
+  dataGaps,
+  missingNet,
+  missingFees,
+  missingForecast,
+  missingSource,
+  missingBuyerEmail,
+  missingProduct,
+  unknownStatus,
+}: {
+  updatedAt: string | null;
+  period: LaunchPeriodKey;
+  setPeriod: (period: LaunchPeriodKey) => void;
+  launchName: string;
+  setLaunchName: (value: string) => void;
+  launchStart: string;
+  setLaunchStart: (value: string) => void;
+  launchEnd: string;
+  setLaunchEnd: (value: string) => void;
+  range: LaunchRange;
+  rows: ComercialVenda[];
+  confirmed: ComercialVenda[];
+  pending: ComercialVenda[];
+  lost: ComercialVenda[];
+  refunded: ComercialVenda[];
+  gross: number;
+  ticket: number;
+  buyers: number;
+  latestSale: ComercialVenda | null;
+  temporalRows: Array<{ label: string; vendas: number; receita: number; compradores: number }>;
+  productRows: ReturnType<typeof buildProductRows>;
+  statusRows: ReturnType<typeof buildStatusRows>;
+  sourceRows: ReturnType<typeof buildSourceRows>;
+  alerts: LaunchAlert[];
+  previousConfirmed: ComercialVenda[];
+  rawLast24h: number;
+  rawLastHour: number;
+  latestRaw: ComercialRawImport | null;
+  dataGaps: number;
+  missingNet: number;
+  missingFees: number;
+  missingForecast: number;
+  missingSource: number;
+  missingBuyerEmail: number;
+  missingProduct: number;
+  unknownStatus: number;
+}) {
+  const [copiedSummary, setCopiedSummary] = useState(false);
+  const [launchCurvePage, setLaunchCurvePage] = useState(1);
+  const [salesSort, setSalesSort] = useState<LaunchSalesSortKey>("latest");
+  const [productSort, setProductSort] = useState<LaunchProductSortKey>("revenue_desc");
+  const [statusSort, setStatusSort] = useState<LaunchStatusSortKey>("order");
+  const [sourceSort, setSourceSort] = useState<LaunchSourceSortKey>("revenue_desc");
+  const topProduct = productRows[0];
+  const previousGross = grossTotal(previousConfirmed);
+  const previousTicket = previousConfirmed.length ? previousGross / previousConfirmed.length : 0;
+  const variation = previousGross ? ((gross - previousGross) / previousGross) * 100 : null;
+  const latestMinutes = latestSale ? minutesSince(latestSale.data_compra ?? latestSale.data_aprovacao ?? latestSale.last_event_at ?? latestSale.imported_at) : null;
+  const summary = confirmed.length
+    ? `${range.label} registrou ${confirmed.length} vendas confirmadas, com receita bruta de ${formatMoney(gross)} e ticket médio bruto de ${formatMoney(ticket)}. ${topProduct ? `O produto com maior receita foi ${topProduct.name}.` : "Ainda não há produto dominante."} ${refunded.length ? `Houve ${refunded.length} reembolsos/chargebacks no período.` : "Não há reembolsos ou chargebacks no período."} ${pending.length ? `Existem ${pending.length} pagamentos pendentes que merecem acompanhamento.` : "Não há pagamentos pendentes no período."}`
+    : `${range.label} ainda não possui vendas confirmadas no filtro aplicado. Use a leitura de eventos recentes e pendentes para validar se o lançamento está sem movimentação ou se o filtro precisa ser ajustado.`;
+  const sortedLatestSales = useMemo(() => sortLaunchSales(rows, salesSort), [rows, salesSort]);
+  const sortedProductRows = useMemo(() => sortLaunchProducts(productRows, productSort), [productRows, productSort]);
+  const sortedStatusRows = useMemo(() => sortLaunchStatus(statusRows, statusSort), [statusRows, statusSort]);
+  const sortedSourceRows = useMemo(() => sortLaunchSources(sourceRows, sourceSort), [sourceRows, sourceSort]);
+  const curveTotalPages = pageCount(temporalRows.length);
+  const curvePage = Math.min(launchCurvePage, curveTotalPages);
+  const curveRows = paginate(temporalRows, curvePage);
+
+  useEffect(() => {
+    setLaunchCurvePage(1);
+  }, [period, launchStart, launchEnd, temporalRows.length]);
+
+  async function copySummary() {
+    await navigator.clipboard.writeText(summary);
+    setCopiedSummary(true);
+    window.setTimeout(() => setCopiedSummary(false), 1800);
+  }
+
+  return (
+    <div className="space-y-5 text-[0.94rem]">
+      <Card className="p-4">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-3xl">
+            <div className="flex flex-wrap gap-2">
+              <Badge value="Coleta: Dados Hotmart" tone="ok" />
+              <Badge value="Análise: Launch Intelligence Essentials" />
+              <Badge value="Sem IA nesta versão" tone="warn" />
+            </div>
+            <h2 className="mt-4 text-2xl font-black text-brand-teal">Launch Intelligence Essentials</h2>
+            <p className="mt-2 text-brand-teal/65">Acompanhamento do lançamento em tempo real com dados reais da Hotmart.</p>
+          </div>
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
+            Receita líquida indisponível no payload da Hotmart. Recebíveis sem fonte oficial permanecem projetados.
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-black uppercase text-brand-clay">Período</span>
+          {launchPeriods.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setPeriod(item.key)}
+              className={`rounded-md border px-4 py-2 text-sm font-black ${period === item.key ? "border-brand-teal bg-brand-teal text-white" : "border-brand-sand bg-white text-brand-teal"}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        {(period === "launch" || period === "custom") ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-[1.4fr_180px_180px]">
+            <input value={launchName} onChange={(event) => setLaunchName(event.target.value)} className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal" />
+            <input type="date" value={launchStart} onChange={(event) => setLaunchStart(event.target.value)} className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal" />
+            <input type="date" value={launchEnd} onChange={(event) => setLaunchEnd(event.target.value)} className="h-11 rounded-md border border-brand-sand bg-white px-3 text-sm font-bold text-brand-teal" />
+          </div>
+        ) : null}
+      </Card>
+
+      <Card className="p-4">
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+          <div>
+            <p className="text-xs font-black uppercase text-brand-clay">Painel do Lançamento</p>
+            <h3 className="mt-2 text-xl font-black text-brand-teal">{range.label}</h3>
+            <p className="mt-2 text-sm font-bold text-brand-teal/60">
+              {range.start ? formatDate(range.start.toISOString()) : "Início aberto"} a {range.end ? formatDate(range.end.toISOString()) : "Fim aberto"}
+            </p>
+          </div>
+          <div className="grid gap-2 text-sm font-bold text-brand-teal/70">
+            <p>Atualizado em: {formatDateTime(updatedAt)}</p>
+            <p>Total de eventos Hotmart no período: {rows.length}</p>
+            <p>Fonte: Hotmart via n8n · Coleta: Incremental + Webhook</p>
+            <p>Financeiro líquido: indisponível no payload atual</p>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs font-black uppercase text-brand-clay">Resumo do Dia</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void copySummary()}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand bg-white px-3 text-xs font-black text-brand-teal transition hover:bg-brand-cream"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              {copiedSummary ? "Copiado" : "Copiar texto"}
+            </button>
+            <a
+              href="/relatorios"
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand bg-white px-3 text-xs font-black text-brand-teal transition hover:bg-brand-cream"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Enviar via Relatórios
+            </a>
+          </div>
+        </div>
+        <p className="mt-3 text-base font-bold leading-7 text-brand-teal">{summary}</p>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Metric icon={<WalletCards />} label="Receita bruta" value={formatMoney(gross)} helper="oficial Hotmart" />
+        <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmed.length} helper="APPROVED ou COMPLETE" />
+        <Metric icon={<TrendingUp />} label="Ticket médio bruto" value={formatMoney(ticket)} helper="bruto / confirmadas" />
+        <Metric icon={<Users />} label="Compradores únicos" value={buyers} helper="confirmados no filtro" />
+        <Metric icon={<Clock3 />} label="Pendentes" value={pending.length} helper="aguardando pagamento/análise" />
+        <Metric icon={<AlertTriangle />} label="Perdidas/canceladas" value={lost.length} helper="não entram como venda" />
+        <Metric icon={<RefreshCw />} label="Reembolsos/chargebacks" value={refunded.length} helper="acompanhar separadamente" />
+        <Metric icon={<Activity />} label="Última venda" value={latestSale ? formatDateTime(latestSale.data_compra ?? latestSale.data_aprovacao) : "-"} helper={latestMinutes !== null ? `há ${latestMinutes} min` : "sem venda no filtro"} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <DataCard title="Curva do Lançamento" helper={range.bucket === "hour" ? "Evolução por hora no filtro atual." : "Evolução por dia no filtro atual."}>
+          <div className="mb-3 flex justify-end">
+            <ExportButtons label="Curva do Lançamento" filename="comercial_lancamento_curva" columns={launchCurveExportColumns} rows={temporalRows} />
+          </div>
+          <SimpleTable
+            minWidth="620px"
+            headers={["Período", "Vendas", "Receita bruta", "Compradores"]}
+            rows={curveRows.map((row) => [row.label, row.vendas, formatMoney(row.receita), row.compradores])}
+            empty="Sem vendas para montar a curva."
+          />
+          <Pagination page={curvePage} totalPages={curveTotalPages} totalRows={temporalRows.length} onPage={setLaunchCurvePage} />
+        </DataCard>
+        <DataCard title="Comparativos" helper="Compara o filtro atual com o período anterior equivalente.">
+          <div className="grid gap-3 md:grid-cols-3">
+            <MiniMetric label="Receita atual" value={formatMoney(gross)} helper="bruta confirmada" />
+            <MiniMetric label="Período anterior" value={formatMoney(previousGross)} helper={`${previousConfirmed.length} vendas`} />
+            <MiniMetric label="Variação" value={variation === null ? "Sem base" : formatPercent(variation)} helper={`ticket anterior ${formatMoney(previousTicket)}`} />
+          </div>
+        </DataCard>
+      </div>
+
+      <DataCard title="Últimas Vendas" helper="As 10 vendas mais recentes do filtro.">
+        <LaunchTableToolbar>
+          <LaunchSortSelect label="Ordenar" value={salesSort} onChange={(value) => setSalesSort(value as LaunchSalesSortKey)} options={launchSalesSortOptions} />
+          <ExportButtons label="Últimas Vendas" filename="comercial_lancamento_ultimas_vendas" columns={salesExportColumns} rows={sortedLatestSales} />
+        </LaunchTableToolbar>
+        <LatestSalesTable rows={sortedLatestSales.slice(0, 10)} />
+      </DataCard>
+
+      <DataCard title="Produtos que puxaram o lançamento" helper="Ordenado por receita bruta confirmada.">
+        <LaunchTableToolbar>
+          <LaunchSortSelect label="Ordenar" value={productSort} onChange={(value) => setProductSort(value as LaunchProductSortKey)} options={launchProductSortOptions} />
+          <ExportButtons label="Produtos que puxaram o lançamento" filename="comercial_lancamento_produtos" columns={launchProductExportColumns} rows={sortedProductRows} />
+        </LaunchTableToolbar>
+        <SimpleTable
+          minWidth="900px"
+          headers={["Produto", "Confirmadas", "Receita bruta", "Compradores", "Ticket", "Pendentes", "Perdidas", "Participação"]}
+          rows={sortedProductRows.map((row) => [row.name, row.confirmed, formatMoney(row.revenue), row.buyers, formatMoney(row.ticket), row.pending, row.lost, formatPercent(row.share)])}
+          empty="Sem produtos no filtro."
+        />
+      </DataCard>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <DataCard title="Status do Funil" helper="Agrupamento operacional dos status Hotmart.">
+          <LaunchTableToolbar>
+            <LaunchSortSelect label="Ordenar" value={statusSort} onChange={(value) => setStatusSort(value as LaunchStatusSortKey)} options={launchStatusSortOptions} />
+            <ExportButtons label="Status do Funil" filename="comercial_lancamento_status_funil" columns={launchStatusExportColumns} rows={sortedStatusRows} />
+          </LaunchTableToolbar>
+          <SimpleTable
+            minWidth="760px"
+            headers={["Grupo", "Qtd.", "Valor bruto", "%", "Status originais"]}
+            rows={sortedStatusRows.map((row) => [row.label, row.count, formatMoney(row.revenue), formatPercent(row.percent), row.statuses.join(", ") || "-"])}
+            empty="Sem status no filtro."
+          />
+        </DataCard>
+        <DataCard title="Origem das vendas" helper="Leitura por source_sck quando informado.">
+          <LaunchTableToolbar>
+            <LaunchSortSelect label="Ordenar" value={sourceSort} onChange={(value) => setSourceSort(value as LaunchSourceSortKey)} options={launchSourceSortOptions} />
+            <ExportButtons label="Origem das vendas" filename="comercial_lancamento_origem_vendas" columns={launchSourceExportColumns} rows={sortedSourceRows} />
+          </LaunchTableToolbar>
+          <SimpleTable
+            minWidth="680px"
+            headers={["Origem", "Vendas", "Receita bruta", "Ticket", "Participação"]}
+            rows={sortedSourceRows.map((row) => [row.source, row.sales, formatMoney(row.revenue), formatMoney(row.ticket), formatPercent(row.share)])}
+            empty="Sem source_sck no filtro."
+          />
+        </DataCard>
+      </div>
+
+      <DataCard title="Radar do Lançamento" helper="Alertas por regras determinísticas, sem IA.">
+        <div className="grid gap-3 md:grid-cols-2">
+          {alerts.map((alert) => (
+            <div key={`${alert.title}-${alert.evidence}`} className="rounded-md border border-brand-sand bg-white/80 p-4">
+              <Badge value={alert.type} tone={alert.type === "crítico" || alert.type === "atenção" ? "warn" : alert.type === "oportunidade" ? "ok" : undefined} />
+              <h3 className="mt-3 text-lg font-black text-brand-teal">{alert.title}</h3>
+              <p className="mt-2 text-sm font-bold text-brand-teal">{alert.text}</p>
+              <p className="mt-2 text-xs font-bold text-brand-teal/55">Evidência: {alert.evidence}</p>
+              <p className="mt-1 text-xs font-bold text-brand-teal/55">Sugestão: {alert.suggestion}</p>
+            </div>
+          ))}
+        </div>
+      </DataCard>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <DataCard title="Vendas chegando pelo n8n" helper="Validação operacional dos eventos recentes.">
+          <div className="grid gap-3">
+            <MiniMetric label="Última entrada" value={latestRaw ? formatDateTime(latestRaw.received_at) : "Sem evento"} helper={latestRaw ? rawImportSource(latestRaw) : "aguardando Hotmart"} />
+            <MiniMetric label="Eventos 24h" value={rawLast24h} helper="raw imports recentes" />
+            <MiniMetric label="Eventos 60min" value={rawLastHour} helper={rawLastHour ? "movimento recente" : "sem novas vendas/eventos"} />
+          </div>
+        </DataCard>
+        <DataCard title="Lacunas de Dados" helper="Impacto direto na leitura financeira e operacional.">
+          <ul className="space-y-2 text-sm font-bold text-brand-teal/70">
+            <li>Líquido ausente: {missingNet} · impede cálculo de lucro líquido real.</li>
+            <li>Taxas ausentes: {missingFees} · impede apuração de custos Hotmart.</li>
+            <li>Recebíveis oficiais ausentes: {missingForecast} · saldo a receber fica indisponível/projetado.</li>
+            <li>Source_sck ausente: {missingSource} · limita atribuição por campanha.</li>
+            <li>Comprador sem e-mail: {missingBuyerEmail} · dificulta identificação.</li>
+            <li>Produto não mapeado: {missingProduct} · revisar antes de integrar ao Financeiro.</li>
+            <li>Status desconhecido: {unknownStatus} · revisar mapeamento.</li>
+          </ul>
+          <p className="mt-3 text-xs font-bold text-amber-700">{dataGaps} vendas possuem alguma lacuna registrada em data_lacunas.</p>
+        </DataCard>
+        <DataCard title="Confiáveis x Com Alerta" helper="Separação explícita para o mini lançamento.">
+          <div className="grid gap-3 text-sm font-bold">
+            <div className="rounded-md bg-emerald-50 p-3 text-emerald-800">
+              <p className="font-black">Confiável agora</p>
+              <p>Vendas, receita bruta, status, produtos, compradores e forma de pagamento.</p>
+            </div>
+            <div className="rounded-md bg-amber-50 p-3 text-amber-800">
+              <p className="font-black">Com alerta</p>
+              <p>Receita líquida, saldo realizado, saldo a receber, taxas e recebíveis projetados.</p>
+            </div>
+          </div>
+        </DataCard>
+      </div>
+    </div>
+  );
+}
+
 function Metric({ icon, label, value, helper }: { icon: ReactNode; label: string; value: ReactNode; helper: string }) {
   return (
-    <Card className="p-5">
+    <Card className="p-4">
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-black uppercase text-brand-clay">{label}</p>
-          <p className="mt-3 text-3xl font-black text-brand-teal">{value}</p>
-          <p className="mt-2 text-sm font-bold text-brand-teal/55">{helper}</p>
+          <p className="mt-2 break-words text-2xl font-black leading-tight text-brand-teal">{value}</p>
+          <p className="mt-2 text-xs font-bold text-brand-teal/55">{helper}</p>
         </div>
-        <span className="rounded-lg bg-brand-cream p-3 text-brand-teal">{icon}</span>
+        <span className="rounded-lg bg-brand-cream p-2.5 text-brand-teal">{icon}</span>
       </div>
     </Card>
   );
@@ -559,9 +1352,9 @@ function Metric({ icon, label, value, helper }: { icon: ReactNode; label: string
 
 function MiniMetric({ label, value, helper }: { label: string; value: ReactNode; helper: string }) {
   return (
-    <div className="rounded-md border border-brand-sand bg-white/70 p-4">
+    <div className="min-w-0 rounded-md border border-brand-sand bg-white/70 p-3">
       <p className="text-xs font-black uppercase text-brand-clay">{label}</p>
-      <p className="mt-2 text-2xl font-black text-brand-teal">{value}</p>
+      <p className="mt-2 break-words text-xl font-black leading-tight text-brand-teal">{value}</p>
       <p className="mt-1 text-xs font-bold text-brand-teal/55">{helper}</p>
     </div>
   );
@@ -750,14 +1543,126 @@ function RawImportsTable({ rows }: { rows: ComercialRawImport[] }) {
   );
 }
 
+function SimpleTable({
+  headers,
+  rows,
+  empty,
+  minWidth = "720px",
+}: {
+  headers: string[];
+  rows: Array<Array<ReactNode>>;
+  empty: string;
+  minWidth?: string;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm" style={{ minWidth }}>
+        <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
+          <tr>
+            {headers.map((header) => (
+              <th key={header} className="px-4 py-3">{header}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={index} className="border-b border-brand-sand/70">
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex} className="px-4 py-3 font-bold text-brand-teal/80">{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!rows.length ? <EmptyState text={empty} /> : null}
+    </div>
+  );
+}
+
+function LatestSalesTable({ rows }: { rows: ComercialVenda[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1180px] text-left text-sm">
+        <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
+          <tr>
+            <th className="px-4 py-3">Hora</th>
+            <th className="px-4 py-3">Comprador</th>
+            <th className="px-4 py-3">Produto</th>
+            <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Grupo</th>
+            <th className="px-4 py-3 text-right">Bruto</th>
+            <th className="px-4 py-3">Pagamento</th>
+            <th className="px-4 py-3">Source</th>
+            <th className="px-4 py-3">Transação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const group = commercialGroup(row);
+            return (
+              <tr key={row.id} className="border-b border-brand-sand/70">
+                <td className="px-4 py-3 font-bold text-brand-teal">{formatDateTime(row.data_compra ?? row.data_aprovacao)}</td>
+                <td className="px-4 py-3 text-brand-teal">{row.comprador_nome ?? row.comprador_email ?? "-"}</td>
+                <td className="px-4 py-3 text-brand-teal/75">{row.produto_nome ?? "-"}</td>
+                <td className="px-4 py-3"><Badge value={row.status_original ?? row.status} /></td>
+                <td className="px-4 py-3"><Badge value={commercialGroupLabels[group]} tone={group === "confirmed" ? "ok" : group === "pending" || group === "lost" || group === "chargeback" ? "warn" : undefined} /></td>
+                <td className="px-4 py-3 text-right font-black text-brand-teal">{formatMoney(row.valor_bruto)}</td>
+                <td className="px-4 py-3 text-brand-teal/65">{row.forma_pagamento ?? "-"} {row.parcelas > 1 ? `${row.parcelas}x` : ""}</td>
+                <td className="px-4 py-3 text-brand-teal/65">{row.source_sck ?? "-"}</td>
+                <td className="px-4 py-3 text-brand-teal/65">{row.transaction_id}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {!rows.length ? <EmptyState text="Nenhuma venda no filtro atual." /> : null}
+    </div>
+  );
+}
+
+function LaunchTableToolbar({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      {children}
+    </div>
+  );
+}
+
+function LaunchSortSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ key: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs font-black uppercase text-brand-teal/60">
+      {label}
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 rounded-md border border-brand-sand bg-white px-3 text-xs font-black normal-case text-brand-teal"
+      >
+        {options.map((option) => (
+          <option key={option.key} value={option.key}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function DataCard({ title, helper, children }: { title: string; helper: string; children: ReactNode }) {
   return (
     <Card className="overflow-hidden">
-      <div className="border-b border-brand-sand p-5">
-        <h2 className="text-xl font-black text-brand-teal">{title}</h2>
-        <p className="text-sm text-brand-teal/60">{helper}</p>
+      <div className="border-b border-brand-sand p-4">
+        <h2 className="text-lg font-black text-brand-teal">{title}</h2>
+        <p className="text-xs font-bold text-brand-teal/60">{helper}</p>
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-4">{children}</div>
     </Card>
   );
 }
@@ -776,6 +1681,40 @@ const salesExportColumns = [
   { header: "Previsao recebimento", value: (row: ComercialVenda) => formatDate(row.expected_payment_date) },
   { header: "SCK", value: (row: ComercialVenda) => row.source_sck ?? "" },
   { header: "Lacunas", value: (row: ComercialVenda) => Array.isArray(row.data_lacunas) ? row.data_lacunas.join("; ") : "" },
+];
+
+const launchCurveExportColumns = [
+  { header: "Periodo", value: (row: LaunchTemporalRow) => row.label },
+  { header: "Vendas", value: (row: LaunchTemporalRow) => row.vendas },
+  { header: "Receita bruta", value: (row: LaunchTemporalRow) => row.receita },
+  { header: "Compradores", value: (row: LaunchTemporalRow) => row.compradores },
+];
+
+const launchProductExportColumns = [
+  { header: "Produto", value: (row: LaunchProductRow) => row.name },
+  { header: "Confirmadas", value: (row: LaunchProductRow) => row.confirmed },
+  { header: "Receita bruta", value: (row: LaunchProductRow) => row.revenue },
+  { header: "Compradores", value: (row: LaunchProductRow) => row.buyers },
+  { header: "Ticket", value: (row: LaunchProductRow) => row.ticket },
+  { header: "Pendentes", value: (row: LaunchProductRow) => row.pending },
+  { header: "Perdidas", value: (row: LaunchProductRow) => row.lost },
+  { header: "Participacao", value: (row: LaunchProductRow) => row.share },
+];
+
+const launchStatusExportColumns = [
+  { header: "Grupo", value: (row: LaunchStatusRow) => row.label },
+  { header: "Quantidade", value: (row: LaunchStatusRow) => row.count },
+  { header: "Valor bruto", value: (row: LaunchStatusRow) => row.revenue },
+  { header: "Percentual", value: (row: LaunchStatusRow) => row.percent },
+  { header: "Status originais", value: (row: LaunchStatusRow) => row.statuses.join("; ") },
+];
+
+const launchSourceExportColumns = [
+  { header: "Origem", value: (row: LaunchSourceRow) => row.source },
+  { header: "Vendas", value: (row: LaunchSourceRow) => row.sales },
+  { header: "Receita bruta", value: (row: LaunchSourceRow) => row.revenue },
+  { header: "Ticket", value: (row: LaunchSourceRow) => row.ticket },
+  { header: "Participacao", value: (row: LaunchSourceRow) => row.share },
 ];
 
 const receivableExportColumns = [
