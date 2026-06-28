@@ -4,46 +4,62 @@ Modulo local para consolidar vendas Hotmart, recebiveis, alunos e produtos antes
 
 ## Estado atual
 
-- As tabelas ficam na migration `supabase/migrations/0037_comercial_module.sql`.
-- A rota de ingestao local fica em `POST /api/comercial/hotmart/import`.
+- As tabelas ficam nas migrations `supabase/migrations/0038_comercial_module.sql` e complementos posteriores.
+- A rota de ingestao fica em `POST /api/comercial/hotmart/import`.
 - O modulo aparece em `/comercial`, liberado por permissao `comercial`.
+- O endpoint faz upsert por `tenant_id + transaction_id`.
 - Nenhuma migration deve ser aplicada em homologacao/producao sem validacao previa.
 
-## Variaveis necessarias
+## Variaveis necessarias na plataforma
 
-No `.env.local` da plataforma:
+No `.env.local` ou Vercel:
 
 ```env
 N8N_INGEST_TOKEN=um_token_longo_aleatorio
 SUPABASE_SERVICE_ROLE_KEY=service_role_do_supabase
 ```
 
-No n8n, configure os mesmos valores como credenciais/variaveis do workflow:
+## Variaveis necessarias no n8n
 
-```env
-PLATAFORMA_COMERCIAL_IMPORT_URL=http://localhost:3000/api/comercial/hotmart/import
-PLATAFORMA_TENANT_ID=<tenant_id_da_juliana>
-N8N_INGEST_TOKEN=<mesmo_token_do_env_local>
-HOTMART_CLIENT_ID=<client_id_hotmart>
-HOTMART_CLIENT_SECRET=<client_secret_hotmart>
-```
-
-Para homologacao, a URL muda para:
+Configure como variaveis de ambiente, credenciais ou secrets do n8n. Nao cole tokens em nodes versionados.
 
 ```env
 PLATAFORMA_COMERCIAL_IMPORT_URL=https://plataf-op-hml.vercel.app/api/comercial/hotmart/import
+PLATAFORMA_TENANT_ID=<tenant_id_da_juliana>
+N8N_INGEST_TOKEN=<mesmo_token_da_plataforma>
+HOTMART_BASIC_AUTHORIZATION=<Basic gerado para OAuth client_credentials>
+HOTMART_TOKEN_URL=https://api-sec-vlc.hotmart.com/security/oauth/token
+HOTMART_SALES_HISTORY_URL=https://developers.hotmart.com/payments/api/v1/sales/history
+HOTMART_MAX_RESULTS=100
+```
+
+Para backfill manual, opcionais:
+
+```env
+HOTMART_BACKFILL_START_DATE=2020-01-01
+HOTMART_BACKFILL_END_DATE=2026-06-27
+HOTMART_MAX_PAGES_PER_STATUS=500
+```
+
+Para incremental:
+
+```env
+HOTMART_LOOKBACK_DAYS=3
+HOTMART_MAX_PAGES_PER_STATUS=50
 ```
 
 ## Payload aceito pela plataforma
 
-O endpoint aceita um objeto com `tenant_id` e `rows`, ou um array direto. O formato recomendado e:
+Formato obrigatorio:
 
 ```json
 {
   "tenant_id": "uuid-do-tenant",
   "rows": [
     {
+      "event_id": "evt_123",
       "transaction_id": "HP123",
+      "event": "sales_history",
       "product_id": "987",
       "product_name": "Curso AASI",
       "buyer_email": "cliente@email.com",
@@ -59,99 +75,139 @@ O endpoint aceita um objeto com `tenant_id` e `rows`, ou um array direto. O form
       "purchase_date": "2026-06-10T10:00:00-03:00",
       "approved_date": "2026-06-10T10:05:00-03:00",
       "expected_payment_date": "2026-07-10",
-      "source_sck": "campanha_x"
+      "source_sck": "campanha_x",
+      "raw_payload": {}
     }
   ]
 }
 ```
 
-Se a Hotmart nao enviar `expected_payment_date`, a plataforma cria uma previsao com `data_aprovacao + 30 dias` e marca `fonte_previsao = projetado`.
+Regras importantes:
 
-## Workflow n8n - historico 2026
+- `tenant_id` e `rows` sao obrigatorios.
+- `transaction_id` e obrigatorio para importar uma venda.
+- `buyer_email` e importado quando existir, mas nao bloqueia a venda.
+- `net_amount` nao deve ser inventado. Se a Hotmart nao enviar, fica `null`.
+- `gross_amount` nunca e usado como liquido.
+- `fees` fica `null` quando nao vier da Hotmart.
+- `expected_payment_date` so gera recebivel quando vier da Hotmart. Se nao vier, o sistema registra lacuna; nao cria previsao artificial.
+- Duplicidade e evitada por upsert `tenant_id + transaction_id`.
 
-1. Crie um workflow manual chamado `Hotmart Comercial - Backfill 2026`.
-2. Adicione um node `Manual Trigger`.
-3. Adicione um node `Set Periodo 2026` com:
-   - `start_date`: `2026-01-01`
-   - `end_date`: data atual
-   - `tenant_id`: valor de `PLATAFORMA_TENANT_ID`
-4. Adicione um node `HTTP Request - Hotmart vendas`.
-   - Metodo: conforme endpoint usado da Hotmart.
-   - Autenticacao: credencial oficial da Hotmart.
-   - Periodo: use `start_date` e `end_date`.
-   - Paginacao: habilite ate nao haver proxima pagina.
-5. Adicione um node `Code - Normalizar Hotmart`.
-   - Gere uma lista de objetos com os campos do payload recomendado.
-   - Preserve tambem o JSON original em campos extras quando houver duvida.
-6. Adicione `Split in Batches` com lote de 100 registros.
-7. Adicione `HTTP Request - Enviar Plataforma`.
-   - Method: `POST`
-   - URL: `{{$env.PLATAFORMA_COMERCIAL_IMPORT_URL}}`
-   - Headers:
-     - `Authorization`: `Bearer {{$env.N8N_INGEST_TOKEN}}`
-     - `Content-Type`: `application/json`
-   - Body:
+## Workflows n8n versionados
+
+### 1. `Hotmart_Comercial_Webhook_v1.json`
+
+Uso: eventos em tempo real enviados pela Hotmart.
+
+Node principal: `Enviar Plataforma Comercial`.
+
+Configuracao esperada:
+
+- Method: `POST`
+- URL: `={{ $json.config.plataformaImportUrl.replace(/\/$/, "") }}`
+- Headers:
+  - `Authorization`: `={{ 'Bearer ' + $json.config.n8nIngestToken }}`
+  - `Content-Type`: `application/json`
+- Body JSON:
+
+```js
+={{ { tenant_id: $json.config.plataformaTenantId, rows: $json.rows } }}
+```
+
+O webhook responde `200` mesmo quando ignora evento sem `transaction_id`, retornando `reason`.
+
+### 2. `Hotmart_Comercial_Backfill_Historico_v1.json`
+
+Uso: importacao historica manual.
+
+Comportamento:
+
+- Manual Trigger.
+- Itera status por status.
+- Itera paginas por status.
+- Monta a URL da Hotmart com `transaction_status=<STATUS>`.
+- Envia lotes normalizados para `/api/comercial/hotmart/import`.
+
+Status cobertos:
+
+```txt
+APPROVED, COMPLETE, STARTED, WAITING_PAYMENT, PRINTED_BILLET,
+PROCESSING_TRANSACTION, UNDER_ANALISYS, PRE_ORDER, OVERDUE,
+CANCELLED, EXPIRED, NO_FUNDS, BLOCKED, REFUNDED,
+PARTIALLY_REFUNDED, CHARGEBACK, PROTESTED
+```
+
+URL final montada no node `Buscar Historico Hotmart`:
+
+```txt
+https://developers.hotmart.com/payments/api/v1/sales/history?start_date=<ms>&end_date=<ms>&max_results=100&transaction_status=<STATUS>&page_token=<TOKEN_OPCIONAL>
+```
+
+### 3. `Hotmart_Comercial_Incremental_Diario_v1.json`
+
+Uso: atualizacao recorrente de vendas e mudancas de status.
+
+Configuracao atual:
+
+- Schedule Trigger: a cada 1 hora.
+- Janela: ultimos `HOTMART_LOOKBACK_DAYS`, default `3`.
+- Mesma lista de status do backfill.
+- Mesmo endpoint da plataforma.
+
+Durante mini lancamento, manter ativo a cada 1 hora. Fora de lancamento, pode trocar o Schedule Trigger para diario.
+
+## Como testar antes do mini lancamento
+
+1. Aplicar as migrations pendentes do Comercial no Supabase de HML.
+2. Confirmar no Vercel/HML:
+   - `N8N_INGEST_TOKEN`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+3. Importar os tres JSONs no n8n.
+4. Configurar variaveis/secrets do n8n.
+5. Testar o webhook com payload simulado contendo `transaction_id`.
+6. No node `Enviar Plataforma Comercial`, confirmar que o body enviado contem:
+
 ```json
 {
-  "tenant_id": "{{$env.PLATAFORMA_TENANT_ID}}",
-  "rows": "={{$json.rows}}"
+  "tenant_id": "uuid-do-tenant",
+  "rows": ["..."]
 }
 ```
-8. Rode primeiro com 5 registros, depois 100, e somente depois o historico completo.
 
-## Workflow n8n - incremental
+7. Rodar o backfill com periodo curto primeiro, por exemplo:
 
-1. Crie um workflow `Hotmart Comercial - Incremental`.
-2. Use `Schedule Trigger`.
-3. Frequencia recomendada:
-   - Durante lancamento: a cada 3 horas.
-   - Operacao normal: 1 vez por dia.
-4. Busque os ultimos 3 dias para capturar atualizacoes tardias, reembolsos e mudancas de status.
-5. Use o mesmo node de normalizacao e o mesmo endpoint da plataforma.
-
-## Workflow n8n - webhook Hotmart
-
-Depois que o historico estiver validado, crie um workflow separado para webhook. Ele deve receber eventos novos da Hotmart, normalizar para o mesmo payload e chamar `POST /api/comercial/hotmart/import`.
-
-### Eventos Hotmart recomendados
-
-Na tela `Cadastrar Webhook`, use:
-
-- Produto: `Todos os produtos`.
-- Versao: `2.0.0`.
-- Compras: selecione os eventos de compra, aprovacao, cancelamento, reembolso, chargeback e atualizacoes de pagamento.
-- Club: selecione `Primeiro acesso` e `Modulo completo`, porque ajudam a enriquecer a base de alunos.
-- Assinaturas: deixar desmarcado por enquanto, pois o modelo atual nao usa recorrencia de assinatura.
-- Gestao Logistica: deixar desmarcado. Nao ha entrega fisica/logistica nesta operacao.
-- Outros: marcar apenas se o evento trouxer status financeiro ou acesso de aluno que nao esteja coberto em Compras/Club.
-
-URL que deve ser cadastrada na Hotmart:
-
-```txt
-https://seu-n8n/webhook/hotmart-comercial
+```env
+HOTMART_BACKFILL_START_DATE=2026-06-01
+HOTMART_BACKFILL_END_DATE=2026-06-27
 ```
 
-O endpoint da plataforma abaixo nao deve ser cadastrado direto na Hotmart. Ele e chamado pelo node `HTTP Request - Enviar Plataforma` dentro do n8n:
+8. Validar pelo modulo Comercial:
+   - vendas confirmadas;
+   - pendentes;
+   - perdas/reembolsos/chargebacks;
+   - lacunas de `net_amount` e `expected_payment_date`;
+   - ausencia de duplicidade ao rodar novamente.
+9. Ativar o incremental apenas depois do backfill curto estar coerente.
 
-```txt
-http://localhost:3000/api/comercial/hotmart/import
-```
+## Logs esperados
 
-Como seu n8n esta hospedado, ele nao consegue acessar `localhost` da sua maquina. Para teste local existem duas opcoes:
+Ao final dos fluxos de backfill/incremental, o node `Fim Consulta Hotmart` retorna um resumo com:
 
-- Testar a rota com um envio manual local, sem n8n.
-- Usar um tunel temporario para expor o `localhost:3000`.
+- `statuses`
+- `window`
+- `pagesProcessed`
+- `vendasNormalizadas`
+- `imported`
+- `updated`
+- `skipped`
+- `errors`
+- `byStatus`
 
-Em homologacao, depois da validacao local, o node do n8n deve chamar:
+## Validacoes antes de homologacao publica
 
-```txt
-https://plataf-op-hml.vercel.app/api/comercial/hotmart/import
-```
-
-## Validacoes antes de homologacao
-
-- Conferir se o numero de vendas importadas bate com o extrato Hotmart.
-- Conferir vendas aprovadas, reembolsadas e chargeback.
-- Conferir previsao de recebiveis em 7, 15 e 30 dias.
+- Conferir se o numero de vendas importadas bate com o extrato Hotmart no mesmo periodo.
+- Conferir vendas aprovadas, pendentes, reembolsadas e chargeback.
+- Conferir se `valor_liquido` nao esta igual ao bruto quando a Hotmart nao informou comissao.
+- Conferir previsao de recebiveis somente quando a Hotmart trouxe `expected_payment_date`.
 - Conferir alunos duplicados por e-mail.
 - Conferir produtos sem `hotmart_product_id` na aba de reconciliacao.

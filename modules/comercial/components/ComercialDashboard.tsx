@@ -23,6 +23,7 @@ import type {
   ComercialRawImport,
   ComercialRecebivel,
   ComercialVenda,
+  ComercialStatusGroup,
 } from "@/modules/comercial/types";
 
 type TabKey = "overview" | "sales" | "receivables" | "students" | "products" | "reconciliation" | "admin";
@@ -104,12 +105,43 @@ function withinHours(value: string | null | undefined, hours: number) {
   return Date.now() - date.getTime() <= hours * 60 * 60 * 1000;
 }
 
-function isApproved(status: string) {
-  return ["approved", "aprovada", "pago", "paid", "complete", "completo"].includes(status.toLowerCase());
+const commercialGroupLabels: Record<ComercialStatusGroup, string> = {
+  confirmed: "Confirmada",
+  pending: "Pendente",
+  lost: "Perdida",
+  refunded: "Reembolsada",
+  chargeback: "Chargeback",
+  unknown: "Nao mapeada",
+};
+
+function normalizeStatus(status: string | null | undefined) {
+  return (status ?? "unknown").trim().toUpperCase().replace(/[\s-]+/g, "_");
 }
 
-function isRefunded(status: string) {
-  return status.toLowerCase().includes("refund") || status.toLowerCase().includes("reembolso") || status.toLowerCase().includes("chargeback");
+function commercialGroupFromStatus(status: string | null | undefined): ComercialStatusGroup {
+  const normalized = normalizeStatus(status);
+  if (["APPROVED", "COMPLETE"].includes(normalized)) return "confirmed";
+  if (["STARTED", "WAITING_PAYMENT", "PRINTED_BILLET", "PROCESSING_TRANSACTION", "UNDER_ANALISYS", "UNDER_ANALYSIS", "PRE_ORDER", "OVERDUE"].includes(normalized)) return "pending";
+  if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(normalized)) return "refunded";
+  if (normalized === "CHARGEBACK") return "chargeback";
+  if (["CANCELLED", "CANCELED", "EXPIRED", "NO_FUNDS", "BLOCKED", "PROTESTED"].includes(normalized)) return "lost";
+  return "unknown";
+}
+
+function commercialGroup(row: ComercialVenda): ComercialStatusGroup {
+  return row.grupo_comercial ?? commercialGroupFromStatus(row.status_normalizado ?? row.status_original ?? row.status);
+}
+
+function hasGap(row: ComercialVenda, gap: string) {
+  return Array.isArray(row.data_lacunas) && row.data_lacunas.includes(gap);
+}
+
+function isConfirmed(row: ComercialVenda) {
+  return commercialGroup(row) === "confirmed";
+}
+
+function isRefundedOrChargeback(row: ComercialVenda) {
+  return ["refunded", "chargeback"].includes(commercialGroup(row));
 }
 
 function filterReceivablesByPeriod(rows: ComercialRecebivel[], period: PeriodKey) {
@@ -194,15 +226,29 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
 
   const visibleTabs = context.canWrite ? tabs : tabs.filter((tab) => tab.key !== "admin");
   const filteredReceivables = useMemo(() => filterReceivablesByPeriod(context.recebiveis, period), [context.recebiveis, period]);
-  const approvedSales = context.vendas.filter((sale) => isApproved(sale.status));
-  const refundedSales = context.vendas.filter((sale) => isRefunded(sale.status));
-  const grossRevenue = approvedSales.reduce((sum, sale) => sum + sale.valor_bruto, 0);
-  const approvedSalesWithNet = approvedSales.filter((sale) => sale.valor_liquido !== null && sale.valor_liquido !== undefined);
-  const netRevenue = approvedSalesWithNet.reduce((sum, sale) => sum + Number(sale.valor_liquido), 0);
+  const confirmedSales = context.vendas.filter(isConfirmed);
+  const pendingSales = context.vendas.filter((sale) => commercialGroup(sale) === "pending");
+  const lostSales = context.vendas.filter((sale) => commercialGroup(sale) === "lost");
+  const refundedSales = context.vendas.filter(isRefundedOrChargeback);
+  const grossRevenue = confirmedSales.reduce((sum, sale) => sum + sale.valor_bruto, 0);
+  const confirmedSalesWithNet = confirmedSales.filter((sale) => sale.valor_liquido !== null && sale.valor_liquido !== undefined);
+  const netRevenue = confirmedSalesWithNet.reduce((sum, sale) => sum + Number(sale.valor_liquido), 0);
+  const pendingGross = pendingSales.reduce((sum, sale) => sum + sale.valor_bruto, 0);
+  const boletoPixPending = pendingSales.filter((sale) => normalizeStatus(sale.forma_pagamento).includes("BILLET") || normalizeStatus(sale.forma_pagamento).includes("BOLETO") || normalizeStatus(sale.forma_pagamento).includes("PIX"));
   const receivableTotal = filteredReceivables
-    .filter((item) => ["previsto", "disponivel"].includes(item.status) && isTodayOrFuture(item.data_prevista))
-    .reduce((sum, item) => sum + Number(item.valor_liquido ?? item.valor_bruto), 0);
+    .filter((item) => ["previsto", "disponivel"].includes(item.status) && item.fonte_previsao === "hotmart" && item.valor_liquido !== null && item.valor_liquido !== undefined && isTodayOrFuture(item.data_prevista))
+    .reduce((sum, item) => sum + Number(item.valor_liquido), 0);
+  const realizedTotal = context.recebiveis
+    .filter((item) => ["recebido", "disponivel"].includes(item.status) && item.fonte_previsao === "hotmart" && item.valor_liquido !== null && item.valor_liquido !== undefined)
+    .reduce((sum, item) => sum + Number(item.valor_liquido), 0);
+  const uniqueBuyers = new Set(confirmedSales.map((sale) => sale.comprador_email ?? sale.comprador_nome).filter(Boolean)).size;
+  const grossTicket = confirmedSales.length ? grossRevenue / confirmedSales.length : 0;
+  const netTicket = confirmedSalesWithNet.length ? netRevenue / confirmedSalesWithNet.length : 0;
   const unclassifiedSales = context.vendas.filter((sale) => !sale.produto_id).length;
+  const dataGaps = context.vendas.filter((sale) => Array.isArray(sale.data_lacunas) && sale.data_lacunas.length > 0);
+  const confirmedWithoutForecast = confirmedSales.filter((sale) => hasGap(sale, "expected_payment_date_missing"));
+  const confirmedWithoutNet = confirmedSales.filter((sale) => hasGap(sale, "net_amount_missing") || sale.valor_liquido === null || sale.valor_liquido === undefined);
+  const unmappedStatus = context.vendas.filter((sale) => commercialGroup(sale) === "unknown");
   const realtimeImports = context.rawImports.filter((row) => rawImportSource(row) === "Tempo real");
   const recentRealtimeImports = realtimeImports.filter((row) => withinHours(row.received_at, 24));
   const latestRawImport = context.rawImports[0] ?? null;
@@ -225,7 +271,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const salesRows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return filterByDate(context.vendas, (row) => row.data_compra ?? row.data_aprovacao, yearFilter, monthFilter)
-      .filter((row) => statusFilter === "all" || row.status.toLowerCase() === statusFilter.toLowerCase())
+      .filter((row) => statusFilter === "all" || commercialGroup(row) === statusFilter || row.status.toLowerCase() === statusFilter.toLowerCase())
       .filter((row) => {
         if (!term) return true;
         return [row.transaction_id, row.comprador_nome, row.comprador_email, row.produto_nome, row.forma_pagamento]
@@ -305,16 +351,51 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
       {activeTab === "overview" ? (
         <div className="space-y-6">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Metric icon={<ReceiptText />} label="Vendas aprovadas" value={approvedSales.length} helper="transacoes elegiveis para analise" />
+            <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmedSales.length} helper="APPROVED ou COMPLETE" />
             <Metric icon={<WalletCards />} label="Faturamento bruto" value={formatMoney(grossRevenue)} helper="antes de taxas e deducoes" />
             <Metric
               icon={<CheckCircle2 />}
               label="Líquido informado"
               value={formatMoney(netRevenue)}
-              helper={`${approvedSales.length - approvedSalesWithNet.length} vendas ainda sem líquido/taxas`}
+              helper={`${confirmedWithoutNet.length} vendas confirmadas sem líquido informado`}
             />
-            <Metric icon={<CalendarClock />} label="A receber" value={formatMoney(receivableTotal)} helper={`no filtro ${periods.find((item) => item.key === period)?.label}`} />
+            <Metric icon={<CalendarClock />} label="A receber" value={formatMoney(receivableTotal)} helper={`líquido Hotmart no filtro ${periods.find((item) => item.key === period)?.label}`} />
           </div>
+
+          {(confirmedWithoutNet.length > 0 || confirmedWithoutForecast.length > 0) ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+              Valores líquidos e recebíveis oficiais ainda não foram retornados pela Hotmart neste payload. Os indicadores financeiros líquidos estão indisponíveis ou projetados.
+            </div>
+          ) : null}
+
+          <Card className="p-5">
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-brand-clay">Visão de lançamento</p>
+                <h2 className="mt-1 text-xl font-black text-brand-teal">Vendas, funil e lacunas de dados</h2>
+                <p className="mt-1 text-sm text-brand-teal/60">
+                  Separação entre venda confirmada, intenção de compra pendente, perdas e valores que ainda dependem da Hotmart informar líquido/previsão.
+                </p>
+              </div>
+              <PeriodFilter period={period} setPeriod={setPeriod} />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <MiniMetric label="Pendentes" value={pendingSales.length} helper={formatMoney(pendingGross)} />
+              <MiniMetric label="Boleto/PIX aguardando" value={boletoPixPending.length} helper="intenção de compra" />
+              <MiniMetric label="Canceladas/recusadas" value={lostSales.length} helper="perdas de funil" />
+              <MiniMetric label="Reembolsos/chargebacks" value={refundedSales.length} helper="deduções comerciais" />
+              <MiniMetric label="Compradores únicos" value={uniqueBuyers} helper="confirmados" />
+              <MiniMetric label="Ticket bruto" value={formatMoney(grossTicket)} helper="média confirmada" />
+              <MiniMetric label="Ticket líquido" value={formatMoney(netTicket)} helper="somente vendas com líquido" />
+              <MiniMetric label="Saldo realizado" value={formatMoney(realizedTotal)} helper="líquido Hotmart disponível/recebido" />
+            </div>
+            <DataGapList
+              total={dataGaps.length}
+              withoutNet={confirmedWithoutNet.length}
+              withoutForecast={confirmedWithoutForecast.length}
+              unmapped={unmappedStatus.length}
+            />
+          </Card>
 
           <RealtimeValidationCard
             latest={latestRawImport}
@@ -362,7 +443,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
         </DataCard>
       ) : null}
       {activeTab === "receivables" ? (
-        <DataCard title="Recebíveis" helper="Previsão 7, 15, 30 dias, mês ou tudo. Itens projetados antigos não devem ser tratados como saldo real sem conferência.">
+        <DataCard title="Recebíveis" helper="Previsão 7, 15, 30 dias, mês ou tudo. Somente previsão Hotmart com líquido informado entra no saldo a receber.">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <PeriodFilter period={period} setPeriod={setPeriod} />
             <ExportButtons
@@ -427,7 +508,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
         <div className="grid gap-4 md:grid-cols-3">
           <Metric icon={<PackageCheck />} label="Produtos sem mapa" value={context.produtos.filter((item) => !item.curso_id).length} helper="vincular a curso/centro" />
           <Metric icon={<AlertTriangle />} label="Vendas sem produto" value={unclassifiedSales} helper="revisar antes do Financeiro" />
-          <Metric icon={<RefreshCw />} label="Reembolsos/chargebacks" value={refundedSales.length} helper="deducoes futuras" />
+          <Metric icon={<RefreshCw />} label="Reembolsos/chargebacks" value={refundedSales.length} helper="deduções e perdas comerciais" />
           <Card className="p-5 md:col-span-3">
             <h2 className="text-xl font-black text-brand-teal">Validação do fluxo atual</h2>
             <p className="mt-1 text-sm text-brand-teal/60">Use este bloco para conferir se o workflow em tempo real está chegando sem depender do backfill histórico.</p>
@@ -473,6 +554,42 @@ function Metric({ icon, label, value, helper }: { icon: ReactNode; label: string
         <span className="rounded-lg bg-brand-cream p-3 text-brand-teal">{icon}</span>
       </div>
     </Card>
+  );
+}
+
+function MiniMetric({ label, value, helper }: { label: string; value: ReactNode; helper: string }) {
+  return (
+    <div className="rounded-md border border-brand-sand bg-white/70 p-4">
+      <p className="text-xs font-black uppercase text-brand-clay">{label}</p>
+      <p className="mt-2 text-2xl font-black text-brand-teal">{value}</p>
+      <p className="mt-1 text-xs font-bold text-brand-teal/55">{helper}</p>
+    </div>
+  );
+}
+
+function DataGapList({
+  total,
+  withoutNet,
+  withoutForecast,
+  unmapped,
+}: {
+  total: number;
+  withoutNet: number;
+  withoutForecast: number;
+  unmapped: number;
+}) {
+  if (!total) {
+    return <p className="mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">Sem lacunas críticas nos dados importados.</p>;
+  }
+
+  return (
+    <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+      <p className="font-black">{total} vendas com lacunas de dados</p>
+      <p className="mt-1 font-bold">
+        {withoutNet} sem líquido informado · {withoutForecast} sem previsão de recebimento · {unmapped} com status não mapeado.
+      </p>
+      <p className="mt-1 text-xs font-bold opacity-80">Esses itens aparecem para conferência; o sistema não transforma valor bruto em líquido automaticamente.</p>
+    </div>
   );
 }
 
@@ -523,7 +640,7 @@ function CommercialFilters({
       ? ["ativo", "expirado", "reembolsado", "cancelado", "nao_validado"]
       : table === "receivables"
         ? ["previsto", "disponivel", "recebido", "atrasado", "cancelado", "reembolsado", "hotmart", "projetado", "manual"]
-        : ["APPROVED", "COMPLETE", "REFUNDED", "CHARGEBACK", "CANCELED", "EXPIRED"];
+        : ["confirmed", "pending", "lost", "refunded", "chargeback", "unknown"];
 
   return (
     <div className="mb-4 grid gap-3 rounded-md border border-brand-sand bg-white/70 p-3 md:grid-cols-[1fr_160px_160px_180px]">
@@ -560,7 +677,7 @@ function CommercialFilters({
       >
         <option value="all">Todos status</option>
         {statusOptions.map((item) => (
-          <option key={item} value={item}>{item}</option>
+          <option key={item} value={item}>{table === "sales" ? commercialGroupLabels[item as ComercialStatusGroup] : item}</option>
         ))}
       </select>
     </div>
@@ -650,10 +767,15 @@ const salesExportColumns = [
   { header: "Aluno", value: (row: ComercialVenda) => row.comprador_nome ?? row.comprador_email ?? "-" },
   { header: "E-mail", value: (row: ComercialVenda) => row.comprador_email ?? "-" },
   { header: "Produto", value: (row: ComercialVenda) => row.produto_nome ?? "-" },
-  { header: "Status", value: (row: ComercialVenda) => row.status },
+  { header: "Status original", value: (row: ComercialVenda) => row.status_original ?? row.status },
+  { header: "Grupo", value: (row: ComercialVenda) => commercialGroupLabels[commercialGroup(row)] },
   { header: "Pagamento", value: (row: ComercialVenda) => `${row.forma_pagamento ?? "-"} ${row.parcelas > 1 ? `${row.parcelas}x` : ""}`.trim() },
   { header: "Bruto", value: (row: ComercialVenda) => row.valor_bruto },
   { header: "Liquido", value: (row: ComercialVenda) => row.valor_liquido ?? "" },
+  { header: "Taxas", value: (row: ComercialVenda) => row.taxas ?? "" },
+  { header: "Previsao recebimento", value: (row: ComercialVenda) => formatDate(row.expected_payment_date) },
+  { header: "SCK", value: (row: ComercialVenda) => row.source_sck ?? "" },
+  { header: "Lacunas", value: (row: ComercialVenda) => Array.isArray(row.data_lacunas) ? row.data_lacunas.join("; ") : "" },
 ];
 
 const receivableExportColumns = [
@@ -684,16 +806,19 @@ function SalesTable({ rows, allRows }: { rows: ComercialVenda[]; allRows?: Comer
           <ExportButtons label="Vendas Comercial" filename="comercial_vendas" columns={salesExportColumns} rows={allRows} />
         </div>
       ) : null}
-      <table className="w-full min-w-[980px] text-left text-sm">
+      <table className="w-full min-w-[1240px] text-left text-sm">
         <thead className="bg-[#F3DDE1] text-xs uppercase text-brand-clay">
           <tr>
             <th className="px-4 py-3">Compra</th>
             <th className="px-4 py-3">Aluno</th>
             <th className="px-4 py-3">Produto</th>
             <th className="px-4 py-3">Status</th>
+            <th className="px-4 py-3">Grupo</th>
             <th className="px-4 py-3">Pagamento</th>
             <th className="px-4 py-3 text-right">Bruto</th>
             <th className="px-4 py-3 text-right">Liquido</th>
+            <th className="px-4 py-3">Previsao</th>
+            <th className="px-4 py-3">Lacunas</th>
           </tr>
         </thead>
         <tbody>
@@ -702,7 +827,8 @@ function SalesTable({ rows, allRows }: { rows: ComercialVenda[]; allRows?: Comer
               <td className="px-4 py-3 font-bold text-brand-teal">{formatDate(row.data_compra ?? row.data_aprovacao)}</td>
               <td className="px-4 py-3 text-brand-teal">{row.comprador_nome ?? row.comprador_email ?? "-"}</td>
               <td className="px-4 py-3 text-brand-teal/75">{row.produto_nome ?? "-"}</td>
-              <td className="px-4 py-3"><Badge value={row.status} /></td>
+              <td className="px-4 py-3"><Badge value={row.status_original ?? row.status} /></td>
+              <td className="px-4 py-3"><Badge value={commercialGroupLabels[commercialGroup(row)]} tone={commercialGroup(row) === "confirmed" ? "ok" : commercialGroup(row) === "unknown" ? "warn" : undefined} /></td>
               <td className="px-4 py-3 text-brand-teal/65">{row.forma_pagamento ?? "-"} {row.parcelas > 1 ? `${row.parcelas}x` : ""}</td>
               <td className="px-4 py-3 text-right font-black text-brand-teal">{formatMoney(row.valor_bruto)}</td>
               <td className="px-4 py-3 text-right text-brand-teal/75">
@@ -712,6 +838,8 @@ function SalesTable({ rows, allRows }: { rows: ComercialVenda[]; allRows?: Comer
                   formatMoney(row.valor_liquido)
                 )}
               </td>
+              <td className="px-4 py-3 text-brand-teal/70">{formatDate(row.expected_payment_date)}</td>
+              <td className="px-4 py-3 text-xs font-bold text-brand-teal/60">{Array.isArray(row.data_lacunas) && row.data_lacunas.length ? row.data_lacunas.join(", ") : "-"}</td>
             </tr>
           ))}
         </tbody>
@@ -743,7 +871,7 @@ function ReceivablesTable({ rows, compact = false }: { rows: ComercialRecebivel[
               <td className="px-4 py-3 text-brand-teal/70">{row.parcela_numero}/{row.total_parcelas}</td>
               <td className="px-4 py-3"><Badge value={row.fonte_previsao} tone={row.fonte_previsao === "hotmart" ? "ok" : "warn"} /></td>
               <td className="px-4 py-3"><Badge value={row.status} /></td>
-              <td className="px-4 py-3 text-right font-black text-brand-teal">{formatMoney(row.valor_liquido ?? row.valor_bruto)}</td>
+              <td className="px-4 py-3 text-right font-black text-brand-teal">{row.valor_liquido === null || row.valor_liquido === undefined ? <span className="text-xs font-bold text-amber-700">Não informado</span> : formatMoney(row.valor_liquido)}</td>
             </tr>
           ))}
         </tbody>

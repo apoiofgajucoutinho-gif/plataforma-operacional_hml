@@ -12,26 +12,56 @@ function isAuthorized(request: Request) {
   return bearerToken === token || ingestToken === token;
 }
 
+function errorResponse(message: string, status: number) {
+  return NextResponse.json(
+    {
+      ok: false,
+      imported: 0,
+      updated: 0,
+      skipped: 0,
+      errors: [{ row: 0, error: message }],
+    },
+    { status },
+  );
+}
+
 export async function POST(request: Request) {
   if (!process.env.N8N_INGEST_TOKEN) {
-    return NextResponse.json({ error: "N8N_INGEST_TOKEN nao configurado no servidor." }, { status: 503 });
+    return errorResponse("N8N_INGEST_TOKEN nao configurado no servidor.", 503);
   }
 
   if (!isAuthorized(request)) {
-    return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
+    return errorResponse("Nao autorizado.", 401);
   }
 
   try {
-    const body = (await request.json()) as HotmartImportPayload | Record<string, unknown>[];
-    const payload = Array.isArray(body) ? { rows: body } : body;
+    const rawBody = await request.text();
+    if (!rawBody.trim()) {
+      return errorResponse("Body vazio. Envie { tenant_id, rows: [...] }.", 400);
+    }
+
+    const body = JSON.parse(rawBody) as HotmartImportPayload | Record<string, unknown>[];
+    if (Array.isArray(body)) {
+      return errorResponse("Payload invalido. Envie { tenant_id, rows: [...] }.", 400);
+    }
+
+    const payload = body;
+
+    if (!payload || typeof payload !== "object") {
+      return errorResponse("Payload invalido. Envie { tenant_id, rows: [...] }.", 400);
+    }
+
+    if (!payload.tenant_id) {
+      return errorResponse("tenant_id obrigatorio para importar Hotmart.", 400);
+    }
 
     if (!payload.rows || !Array.isArray(payload.rows)) {
-      return NextResponse.json({ error: "Envie um array em rows ou um array JSON direto." }, { status: 400 });
+      return errorResponse("Envie um array em rows no formato { tenant_id, rows: [...] }.", 400);
     }
 
     const result = await importHotmartRows(payload);
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result, { status: result.ok ? 200 : 207 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Erro ao importar Hotmart." }, { status: 400 });
+    return errorResponse(error instanceof Error ? error.message : "Erro ao importar Hotmart.", 400);
   }
 }

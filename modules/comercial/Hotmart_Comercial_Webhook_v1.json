@@ -8,39 +8,38 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "webhook-hotmart-post",
+      "id": "WebhookHotmart",
       "name": "Webhook Hotmart",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         -720,
         0
-      ],
-      "webhookId": "hotmart-comercial-webhook"
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const input = items[0]?.json || {};\n\nreturn [{\n  json: {\n    ...input,\n    config: {\n      plataformaImportUrl: 'http://localhost:3000/api/comercial/hotmart/import',\n      plataformaTenantId: 'ff24d2bc-22e2-4a5b-bc8c-f6d25a7fa3b0',\n      n8nIngestToken: 'COLE_AQUI_O_MESMO_N8N_INGEST_TOKEN'\n    }\n  }\n}];"
+        "jsCode": "\nconst input = items[0]?.json || {};\nconst missing = [];\nfunction env(name, fallback = '') {\n  const value = $env[name] || fallback;\n  if (!value) missing.push(name);\n  return value;\n}\nconst config = {\n  plataformaImportUrl: env('PLATAFORMA_COMERCIAL_IMPORT_URL', 'https://plataf-op-hml.vercel.app/api/comercial/hotmart/import'),\n  plataformaTenantId: env('PLATAFORMA_TENANT_ID'),\n  n8nIngestToken: env('N8N_INGEST_TOKEN')\n};\nif (missing.length) throw new Error('Variaveis ausentes no n8n: ' + missing.join(', '));\nreturn [{ json: { ...input, config } }];\n"
       },
-      "id": "configurar-plataforma",
+      "id": "ConfigurarPlataforma",
       "name": "Configurar Plataforma",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -600,
+        -560,
         0
       ]
     },
     {
       "parameters": {
-        "jsCode": "function get(obj, path) {\n  return path.split('.').reduce((acc, key) => {\n    if (!acc || typeof acc !== 'object') return undefined;\n    return acc[key];\n  }, obj);\n}\n\nfunction first(...values) {\n  for (const value of values) {\n    if (value !== undefined && value !== null && String(value).trim() !== '') return value;\n  }\n  return null;\n}\n\nfunction text(...values) {\n  const value = first(...values);\n  return value === null ? null : String(value).trim();\n}\n\nfunction number(...values) {\n  const value = first(...values);\n  if (value === null) return null;\n  if (typeof value === 'number') return Number.isFinite(value) ? value : null;\n  const normalized = String(value).replace(/\\./g, '').replace(',', '.');\n  const parsed = Number(normalized);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction integer(...values) {\n  const value = number(...values);\n  return value ? Math.max(1, Math.round(value)) : 1;\n}\n\nfunction date(...values) {\n  const value = first(...values);\n  if (value === null) return null;\n  const parsed = new Date(value);\n  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();\n}\n\nfunction hotmartStatus(payload) {\n  return text(\n    get(payload, 'data.purchase.status'),\n    get(payload, 'purchase.status'),\n    get(payload, 'data.status'),\n    payload.status,\n    payload.event\n  ) || 'unknown';\n}\n\nconst input = items[0]?.json || {};\nconst config = input.config || {};\nconst body = input.body || input;\nconst data = body.data || body;\nconst purchase = data.purchase || body.purchase || {};\nconst buyer = data.buyer || purchase.buyer || body.buyer || {};\nconst product = data.product || purchase.product || body.product || {};\nconst payment = data.payment || purchase.payment || body.payment || {};\nconst price = purchase.price || data.price || body.price || {};\nconst commissions = Array.isArray(data.commissions) ? data.commissions : Array.isArray(body.commissions) ? body.commissions : [];\nconst producerCommission = commissions.find((commission) => String(commission.source || '').toUpperCase().includes('PRODUCER')) || commissions[0] || {};\n\nconst transactionId = text(\n  purchase.transaction,\n  data.transaction,\n  body.transaction,\n  body.transaction_id,\n  body.id,\n  `${body.event || 'hotmart'}-${Date.now()}`\n);\n\nconst row = {\n  event_id: text(body.id, body.event_id, get(body, 'event.id'), `${body.event || 'hotmart'}-${transactionId}`),\n  transaction_id: transactionId,\n  event: text(body.event, body.event_name, body.type),\n  product_id: text(product.id, product.ucode, body.product_id, body.hotmart_product_id),\n  product_name: text(product.name, product.title, body.product_name, body.produto_nome),\n  buyer_email: text(buyer.email, body.buyer_email, body.email)?.toLowerCase(),\n  buyer_name: text(buyer.name, buyer.full_name, body.buyer_name, body.name),\n  buyer_phone: text(buyer.phone, buyer.phone_number, body.buyer_phone, body.telefone),\n  status: hotmartStatus(body),\n  payment_type: text(payment.type, payment.method, purchase.payment_type, body.payment_type),\n  installments: integer(payment.installments_number, payment.installments, purchase.installments_number, body.installments, body.parcelas),\n  currency: text(price.currency_code, price.currency, body.currency, body.moeda) || 'BRL',\n  gross_amount: number(price.value, purchase.price?.value, data.price?.value, body.gross_amount, body.valor_bruto, body.price),\n  net_amount: number(producerCommission.value, data.commission?.value, body.net_amount, body.valor_liquido),\n  fees: number(data.fees?.value, purchase.fees?.value, body.fees, body.taxas),\n  purchase_date: date(purchase.order_date, purchase.purchase_date, body.purchase_date, body.data_compra, data.creation_date),\n  approved_date: date(purchase.approved_date, body.approved_date, body.data_aprovacao),\n  refund_date: date(purchase.refund_date, body.refund_date, body.data_reembolso),\n  chargeback_date: date(purchase.chargeback_date, body.chargeback_date, body.data_chargeback),\n  expected_payment_date: date(data.receivable?.expected_payment_date, data.payment?.expected_payment_date, body.expected_payment_date, body.data_prevista),\n  source_sck: text(data.tracking?.source_sck, purchase.tracking?.source_sck, body.source_sck, body.sck),\n  raw_payload: body\n};\n\nif (!row.transaction_id || !row.buyer_email) {\n  return [{ json: { config, rows: [], skipped: true, reason: 'Evento Hotmart sem transaction_id ou buyer_email.', raw_payload: body } }];\n}\n\nreturn [{ json: { config, tenant_id: config.plataformaTenantId, rows: [row], count: 1 } }];"
+        "jsCode": "\nfunction get(obj, path) {\n  return path.split('.').reduce((acc, key) => {\n    if (!acc || typeof acc !== 'object') return undefined;\n    return acc[key];\n  }, obj);\n}\nfunction first(...values) {\n  for (const value of values) {\n    if (value !== undefined && value !== null && String(value).trim() !== '') return value;\n  }\n  return null;\n}\nfunction text(...values) {\n  const value = first(...values);\n  return value === null ? null : String(value).trim();\n}\nfunction number(...values) {\n  const value = first(...values);\n  if (value === null) return null;\n  if (typeof value === 'number') return Number.isFinite(value) ? value : null;\n  if (typeof value === 'object') return number(value.value, value.amount, value.total, value.price);\n  const normalized = String(value).replace(/\\s/g, '').replace(/R\\$/gi, '').replace(/\\./g, '').replace(',', '.');\n  const parsed = Number(normalized);\n  return Number.isFinite(parsed) ? parsed : null;\n}\nfunction integer(...values) {\n  const value = number(...values);\n  return value ? Math.max(1, Math.round(value)) : 1;\n}\nfunction date(...values) {\n  const value = first(...values);\n  if (value === null) return null;\n  const parsed = new Date(value);\n  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();\n}\nfunction array(...values) {\n  for (const value of values) {\n    if (Array.isArray(value)) return value;\n  }\n  return [];\n}\nfunction commissionValue(item, purchase, data) {\n  const direct = number(item.net_amount, item.valor_liquido, item.producer_net_amount, get(item, 'commission.value'), get(item, 'commission.amount'), get(data, 'commission.value'), get(data, 'commission.amount'), get(purchase, 'commission.value'));\n  if (direct !== null) return direct;\n  const commissions = array(item.commissions, data.commissions, purchase.commissions);\n  const producer = commissions.find((commission) => {\n    const source = String(commission.source || commission.role || commission.type || commission.name || '').toUpperCase();\n    return source.includes('PRODUCER') || source.includes('PRODUTOR') || source.includes('SELLER');\n  });\n  return producer ? number(producer.value, producer.amount, producer.commission) : null;\n}\nfunction firstReceivableDate(item, purchase, data) {\n  const receivables = array(item.receivables, item.installments, data.receivables, purchase.receivables);\n  for (const receivable of receivables) {\n    const found = date(receivable.expected_payment_date, receivable.payment_date, receivable.release_date, receivable.due_date, receivable.date);\n    if (found) return found;\n  }\n  return null;\n}\nfunction normalizeHotmartRow(item, eventName) {\n  const data = item.data || item;\n  const purchase = data.purchase || item.purchase || item;\n  const buyer = data.buyer || purchase.buyer || item.buyer || {};\n  const product = data.product || purchase.product || item.product || {};\n  const payment = data.payment || purchase.payment || item.payment || {};\n  const price = purchase.price || data.price || item.price || {};\n  const transactionId = text(purchase.transaction, get(purchase, 'transaction.code'), data.transaction, item.transaction, item.transaction_id, item.purchase_transaction, item.id);\n  return {\n    event_id: text(item.event_id, item.id, get(item, 'event.id'), eventName && transactionId ? `${eventName}-${transactionId}` : null),\n    transaction_id: transactionId,\n    event: text(item.event, item.event_name, item.type, eventName),\n    product_id: text(product.id, product.ucode, item.product_id, item.hotmart_product_id),\n    product_name: text(product.name, product.title, item.product_name, item.produto_nome),\n    buyer_email: text(buyer.email, item.buyer_email, item.email)?.toLowerCase() || null,\n    buyer_name: text(buyer.name, buyer.full_name, item.buyer_name, item.name),\n    buyer_phone: text(buyer.phone, buyer.phone_number, item.buyer_phone, item.telefone),\n    status: text(purchase.status, data.status, item.purchase_status, item.status, item.event) || 'unknown',\n    payment_type: text(payment.type, payment.method, purchase.payment_type, item.payment_type),\n    installments: integer(payment.installments_number, payment.installments, purchase.installments_number, item.installments, item.parcelas),\n    currency: text(price.currency_code, price.currency, item.currency, item.moeda) || 'BRL',\n    gross_amount: number(price.value, purchase.price?.value, purchase.full_price?.value, data.price?.value, item.gross_amount, item.valor_bruto, item.price),\n    net_amount: commissionValue(item, purchase, data),\n    fees: number(data.fees?.value, purchase.fees?.value, item.fees, item.taxas),\n    purchase_date: date(purchase.order_date, purchase.purchase_date, item.purchase_date, item.data_compra, data.creation_date),\n    approved_date: date(purchase.approved_date, item.approved_date, item.data_aprovacao),\n    refund_date: date(purchase.refund_date, item.refund_date, item.data_reembolso),\n    chargeback_date: date(purchase.chargeback_date, item.chargeback_date, item.data_chargeback),\n    expected_payment_date: date(firstReceivableDate(item, purchase, data), data.receivable?.expected_payment_date, data.payment?.expected_payment_date, item.expected_payment_date, item.data_prevista),\n    source_sck: text(data.tracking?.source_sck, purchase.tracking?.source_sck, item.tracking?.source_sck, item.source_sck, item.sck),\n    raw_payload: item\n  };\n}\n\nconst input = items[0]?.json || {};\nconst config = input.config || {};\nconst body = input.body || input;\nconst row = normalizeHotmartRow(body, text(body.event, body.event_name, body.type, 'hotmart_webhook'));\nif (!row.transaction_id) {\n  return [{ json: { config, rows: [], skipped: true, reason: 'Evento Hotmart ignorado: transaction_id ausente.', raw_payload: body } }];\n}\nreturn [{ json: { config, tenant_id: config.plataformaTenantId, rows: [row], count: 1, reason: null } }];\n"
       },
-      "id": "normalizar-hotmart",
+      "id": "NormalizarHotmart",
       "name": "Normalizar Hotmart",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -460,
+        -360,
         0
       ]
     },
@@ -67,19 +66,19 @@
         },
         "options": {}
       },
-      "id": "tem-registros",
+      "id": "Temregistros",
       "name": "Tem registros?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -220,
+        -140,
         0
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.config.plataformaImportUrl.replace(/\\/$/, '') }}",
+        "url": "={{ $json.config.plataformaImportUrl.replace(/\\/$/, \"\") }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -95,52 +94,55 @@
         },
         "sendBody": true,
         "contentType": "json",
-        "jsonBody": "={{ { tenant_id: $json.tenant_id || $json.config.plataformaTenantId, rows: $json.rows } }}",
+        "jsonBody": "={{ { tenant_id: $json.config.plataformaTenantId, rows: $json.rows } }}",
         "options": {
-          "timeout": 120000
+          "timeout": 120000,
+          "retry": {
+            "maxTries": 3
+          }
         }
       },
-      "id": "enviar-plataforma",
+      "id": "EnviarPlataformaComercial",
       "name": "Enviar Plataforma Comercial",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        40,
+        120,
         -80
       ]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { ok: true, imported: $json.imported || 0, skipped: $json.skipped || 0, errors: $json.errors || [] } }}",
+        "responseBody": "={{ { ok: true, imported: $json.imported || 0, updated: $json.updated || 0, skipped: $json.skipped || 0, errors: $json.errors || [] } }}",
         "options": {
           "responseCode": 200
         }
       },
-      "id": "responder-ok",
+      "id": "ResponderOK",
       "name": "Responder OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        300,
+        380,
         -80
       ]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { ok: true, skipped: true, reason: $json.reason || 'Sem registros importaveis' } }}",
+        "responseBody": "={{ { ok: true, skipped: true, reason: $json.reason || 'Evento ignorado sem registros importaveis', raw_payload: $json.raw_payload || null } }}",
         "options": {
           "responseCode": 200
         }
       },
-      "id": "responder-sem-registros",
+      "id": "ResponderSemRegistros",
       "name": "Responder Sem Registros",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        40,
-        120
+        120,
+        140
       ]
     }
   ],

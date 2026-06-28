@@ -35,6 +35,8 @@ export type ComercialAluno = {
   updated_at: string;
 };
 
+export type ComercialStatusGroup = "confirmed" | "pending" | "lost" | "refunded" | "chargeback" | "unknown";
+
 export type ComercialVenda = {
   id: string;
   tenant_id: string;
@@ -46,6 +48,9 @@ export type ComercialVenda = {
   comprador_nome: string | null;
   comprador_email: string | null;
   status: string;
+  status_original: string | null;
+  status_normalizado: string | null;
+  grupo_comercial: ComercialStatusGroup | null;
   forma_pagamento: string | null;
   parcelas: number;
   moeda: string;
@@ -57,9 +62,13 @@ export type ComercialVenda = {
   data_aprovacao: string | null;
   data_reembolso: string | null;
   data_chargeback: string | null;
+  expected_payment_date: string | null;
   source_sck: string | null;
   origem: string;
   raw_id: string | null;
+  last_event_at: string | null;
+  imported_at: string | null;
+  data_lacunas: string[] | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
