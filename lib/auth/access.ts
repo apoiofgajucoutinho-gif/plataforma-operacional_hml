@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { allModules, readyModules } from "@/lib/auth/modules";
+import { getLocalBypassAllowedModules, localBypassUser } from "@/lib/auth/local-bypass";
 import { createClient } from "@/lib/supabase/server";
 
 const landingPriority = ["instagram", "ads", "objetivos", "agenda", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
@@ -18,6 +19,8 @@ const modulePaths: Record<string, string> = {
 };
 
 export async function getAllowedModulesForUser(userId: string) {
+  if (userId === localBypassUser.id) return getLocalBypassAllowedModules();
+
   const userClient = await createClient();
   const dataClient = createAdminClient() ?? userClient;
 

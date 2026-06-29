@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllowedModulesForUser, getLandingPathFromAllowedModules } from "@/lib/auth/access";
+import { getLocalBypassAllowedModules, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
@@ -7,8 +8,15 @@ export async function GET() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const localUser = getLocalBypassUser();
 
   if (!user) {
+    if (localUser) {
+      return NextResponse.json({
+        path: getLandingPathFromAllowedModules(getLocalBypassAllowedModules()),
+      });
+    }
+
     return NextResponse.json({ path: "/login" });
   }
 

@@ -1128,12 +1128,14 @@ export function InstagramDashboard({
       ) : null}
 
       {activeTab === "editorial" ? (
-        <EditorialIntelligence
-          authorized={editorialAuthorized && !editorialAccessDenied}
-          role={context.role}
-          posts={context.posts}
-          interactions={context.interactions}
-        />
+        <>
+          <EditorialIntelligence
+            authorized={editorialAuthorized && !editorialAccessDenied}
+            role={context.role}
+            posts={context.posts}
+            interactions={context.interactions}
+          />
+        </>
       ) : activeTab === "insights" ? (
         <>
           <SectionTitle icon={<Sparkles className="h-4 w-4" />} title="Visao Geral" />

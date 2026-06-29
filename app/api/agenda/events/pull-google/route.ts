@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { pullGoogleCalendarEventsToAgenda } from "@/modules/agenda/services/agenda-server";
@@ -11,18 +12,22 @@ export async function POST() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
+    const currentUser = user ?? getLocalBypassUser();
 
-    if (!user) {
+    if (!currentUser) {
       return NextResponse.json({ error: "Nao autenticado." }, { status: 401 });
     }
 
-    const { data: membership, error: membershipError } = await dataClient
-      .from("tenant_members")
-      .select("tenant_id, role")
-      .eq("user_id", user.id)
-      .eq("ativo", true)
-      .limit(1)
-      .maybeSingle();
+    const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+    const { data: membership, error: membershipError } = localMembership
+      ? { data: localMembership, error: null }
+      : await dataClient
+          .from("tenant_members")
+          .select("tenant_id, role")
+          .eq("user_id", currentUser.id)
+          .eq("ativo", true)
+          .limit(1)
+          .maybeSingle();
 
     if (membershipError || !membership) {
       throw membershipError ?? new Error("Usuario sem tenant vinculado.");

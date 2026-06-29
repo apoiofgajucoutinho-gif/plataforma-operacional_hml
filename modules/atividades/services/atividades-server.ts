@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { allModules } from "@/lib/auth/modules";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AtividadesContext, AtividadeTime } from "@/modules/atividades/types";
@@ -39,17 +40,21 @@ export async function getAtividadesContext(): Promise<AtividadesContext> {
   const {
     data: { user },
   } = await userClient.auth.getUser();
-
-  if (!user) redirect("/login");
-
   const dataClient: SupabaseAny = createAdminClient() ?? userClient;
-  const { data: membership, error } = await dataClient
-    .from("tenant_members")
-    .select("tenant_id, role")
-    .eq("user_id", user.id)
-    .eq("ativo", true)
-    .limit(1)
-    .maybeSingle();
+  const currentUser = user ?? getLocalBypassUser();
+
+  if (!currentUser) redirect("/login");
+
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { data: membership, error } = localMembership
+    ? { data: localMembership, error: null }
+    : await dataClient
+        .from("tenant_members")
+        .select("tenant_id, role")
+        .eq("user_id", currentUser.id)
+        .eq("ativo", true)
+        .limit(1)
+        .maybeSingle();
 
   if (error || !membership) {
     return {

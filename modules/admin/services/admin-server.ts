@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { allModules } from "@/lib/auth/modules";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { AdminContext, AdminProfileAccess, AdminRole } from "@/modules/admin/types";
@@ -60,18 +61,22 @@ export async function getAdminContext(): Promise<AdminContext> {
   const {
     data: { user },
   } = await userClient.auth.getUser();
-
-  if (!user) redirect("/login");
-
   const admin = createAdminClient();
   const dataClient = admin ?? userClient;
-  const { data: membership } = await dataClient
-    .from("tenant_members")
-    .select("tenant_id, role")
-    .eq("user_id", user.id)
-    .eq("ativo", true)
-    .limit(1)
-    .maybeSingle();
+  const currentUser = user ?? getLocalBypassUser();
+
+  if (!currentUser) redirect("/login");
+
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { data: membership } = localMembership
+    ? { data: localMembership }
+    : await dataClient
+        .from("tenant_members")
+        .select("tenant_id, role")
+        .eq("user_id", currentUser.id)
+        .eq("ativo", true)
+        .limit(1)
+        .maybeSingle();
 
   if (!membership || membership.role !== "ADMIN") {
     return {

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getLandingPathForUser } from "@/lib/auth/access";
+import { isLocalAuthBypassEnabled } from "@/lib/auth/local-bypass";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function HomePage() {
@@ -9,6 +10,10 @@ export default async function HomePage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
+    if (isLocalAuthBypassEnabled()) {
+      redirect("/comercial");
+    }
+
     redirect("/login");
   }
 

@@ -1,27 +1,32 @@
 import { redirect } from "next/navigation";
+import { allModules } from "@/lib/auth/modules";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-
-const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 
 export async function getAdocaoContext() {
   const userClient = await createClient();
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const dataClient = createAdminClient() ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) {
+  if (!currentUser) {
     redirect("/login");
   }
 
-  const dataClient = createAdminClient() ?? userClient;
-  const { data: membership } = await dataClient
-    .from("tenant_members")
-    .select("tenant_id, role")
-    .eq("user_id", user.id)
-    .eq("ativo", true)
-    .limit(1)
-    .maybeSingle();
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { data: membershipFromDb } = localMembership
+    ? { data: localMembership }
+    : await dataClient
+        .from("tenant_members")
+        .select("tenant_id, role")
+        .eq("user_id", currentUser.id)
+        .eq("ativo", true)
+        .limit(1)
+        .maybeSingle();
+  const membership = membershipFromDb;
 
   if (!membership) {
     return {

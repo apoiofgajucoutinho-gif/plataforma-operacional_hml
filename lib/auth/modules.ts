@@ -1,4 +1,4 @@
-export const readyModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "comercial", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
+export const readyModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "comercial", "norwyn", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 export const allModules = [
   "agenda",
   "instagram",
@@ -6,6 +6,7 @@ export const allModules = [
   "objetivos",
   "financeiro",
   "comercial",
+  "norwyn",
   "ocorrencias",
   "adocao",
   "atividades",

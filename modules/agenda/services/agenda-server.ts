@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { env } from "@/lib/env";
+import { allModules } from "@/lib/auth/modules";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -11,8 +13,6 @@ import {
 } from "@/services/google/calendar";
 import type { GoogleCalendarEvent } from "@/services/google/calendar";
 import type { AgendaEvent, AgendaEventInput, AgendaEventType } from "@/modules/agenda/types";
-
-const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 
 type GoogleCalendarConnection = {
   account_email: string;
@@ -210,18 +210,25 @@ export async function getAgendaContext() {
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const dataClient = createAdminClient() ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) {
+  if (!currentUser) {
     redirect("/login");
   }
 
-  const { membership, error: membershipError, source } = await getMembershipByUserId(
-    user.id,
-  );
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const {
+    membership,
+    error: membershipError,
+    source,
+  } = localMembership
+    ? { membership: localMembership, error: null, source: "local_bypass" }
+    : await getMembershipByUserId(currentUser.id);
 
   if (membershipError) {
     return {
-      user,
+      user: currentUser,
       tenant: null,
       events: [] as AgendaEvent[],
       updatedAt: null,
@@ -232,7 +239,7 @@ export async function getAgendaContext() {
 
   if (!membership) {
     return {
-      user,
+      user: currentUser,
       tenant: null,
       events: [] as AgendaEvent[],
       updatedAt: null,
@@ -244,12 +251,11 @@ export async function getAgendaContext() {
     };
   }
 
-  const dataClient = createAdminClient() ?? userClient;
   const allowedModules = await getAllowedModules(membership.tenant_id, membership.role);
 
   if (!allowedModules.includes("agenda")) {
     return {
-      user,
+      user: currentUser,
       tenant: null,
       events: [] as AgendaEvent[],
       updatedAt: null,
@@ -280,7 +286,7 @@ export async function getAgendaContext() {
     }, null) ?? null;
 
   return {
-    user,
+    user: currentUser,
     tenant: {
       id: membership.tenant_id,
       nome: tenant?.nome ?? "Organizacao",
@@ -299,12 +305,17 @@ export async function createAgendaEvent(input: AgendaEventInput) {
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const dataClient = createAdminClient() ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) {
+  if (!currentUser) {
     throw new Error("Usuario nao autenticado.");
   }
 
-  const { membership, error: membershipError } = await getMembershipByUserId(user.id);
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { membership, error: membershipError } = localMembership
+    ? { membership: localMembership, error: null }
+    : await getMembershipByUserId(currentUser.id);
 
   if (membershipError) {
     throw membershipError;
@@ -313,8 +324,6 @@ export async function createAgendaEvent(input: AgendaEventInput) {
   if (!membership) {
     throw new Error("Usuario sem tenant vinculado.");
   }
-
-  const dataClient = createAdminClient() ?? userClient;
 
   await assertNoAgendaConflict({
     dataClient,
@@ -333,7 +342,7 @@ export async function createAgendaEvent(input: AgendaEventInput) {
       inicio: input.inicio,
       fim: input.fim,
       local: input.local ?? null,
-      responsavel_id: user.id,
+      responsavel_id: currentUser.id,
     })
     .select("*")
     .returns<AgendaEvent[]>()
@@ -613,12 +622,17 @@ export async function updateAgendaEvent(eventId: string, input: AgendaEventInput
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const dataClient = createAdminClient() ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) {
+  if (!currentUser) {
     throw new Error("Usuario nao autenticado.");
   }
 
-  const { membership, error: membershipError } = await getMembershipByUserId(user.id);
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { membership, error: membershipError } = localMembership
+    ? { membership: localMembership, error: null }
+    : await getMembershipByUserId(currentUser.id);
 
   if (membershipError) {
     throw membershipError;
@@ -627,8 +641,6 @@ export async function updateAgendaEvent(eventId: string, input: AgendaEventInput
   if (!membership) {
     throw new Error("Usuario sem tenant vinculado.");
   }
-
-  const dataClient = createAdminClient() ?? userClient;
 
   await assertNoAgendaConflict({
     dataClient,
@@ -666,12 +678,17 @@ export async function deleteAgendaEvent(eventId: string) {
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const dataClient = createAdminClient() ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) {
+  if (!currentUser) {
     throw new Error("Usuario nao autenticado.");
   }
 
-  const { membership, error: membershipError } = await getMembershipByUserId(user.id);
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { membership, error: membershipError } = localMembership
+    ? { membership: localMembership, error: null }
+    : await getMembershipByUserId(currentUser.id);
 
   if (membershipError) {
     throw membershipError;
@@ -681,7 +698,6 @@ export async function deleteAgendaEvent(eventId: string) {
     throw new Error("Usuario sem tenant vinculado.");
   }
 
-  const dataClient = createAdminClient() ?? userClient;
   const { data: event, error: eventError } = await dataClient
     .from("agenda_eventos")
     .select("*")

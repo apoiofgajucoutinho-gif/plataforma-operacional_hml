@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import { allModules } from "@/lib/auth/modules";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type {
@@ -7,8 +9,6 @@ import type {
   InstagramInteraction,
   InstagramPostMetric,
 } from "@/modules/instagram/types";
-
-const allModules = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 
 async function getMembershipByUserId(userId: string) {
   const admin = createAdminClient();
@@ -50,10 +50,15 @@ export async function getInstagramAccessContext() {
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const dataClient = createAdminClient() ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) redirect("/login");
+  if (!currentUser) redirect("/login");
 
-  const { membership } = await getMembershipByUserId(user.id);
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { membership } = localMembership
+    ? { membership: localMembership }
+    : await getMembershipByUserId(currentUser.id);
   if (!membership) return { role: null, allowedModules: [] as string[] };
 
   return {
@@ -67,14 +72,21 @@ export async function getInstagramContext(): Promise<InstagramContext> {
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const dataClient = createAdminClient() ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) {
+  if (!currentUser) {
     redirect("/login");
   }
 
-  const { membership, error: membershipError, source } = await getMembershipByUserId(
-    user.id,
-  );
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const {
+    membership,
+    error: membershipError,
+    source,
+  } = localMembership
+    ? { membership: localMembership, error: null, source: "local_bypass" }
+    : await getMembershipByUserId(currentUser.id);
 
   if (membershipError) {
     return {
@@ -104,7 +116,6 @@ export async function getInstagramContext(): Promise<InstagramContext> {
     };
   }
 
-  const dataClient = createAdminClient() ?? userClient;
   const allowedModules = await getAllowedModules(membership.tenant_id, membership.role);
 
   if (!allowedModules.includes("instagram")) {

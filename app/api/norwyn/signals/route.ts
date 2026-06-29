@@ -5,7 +5,35 @@ import { createClient } from "@/lib/supabase/server";
 
 type SupabaseAny = any;
 
-const writableEntities = new Set(["chamado", "cadastro", "plano"]);
+const writableRoles = new Set(["ADMIN", "SUPORTE"]);
+const writableActions = new Set(["create", "update", "archive", "delete", "status"]);
+
+const allowedFields = new Set([
+  "provider",
+  "category",
+  "subcategory",
+  "title",
+  "description",
+  "starts_at",
+  "ends_at",
+  "priority",
+  "impact_score",
+  "compatibility_score",
+  "urgency_score",
+  "confidence_score",
+  "status",
+  "suggested_angle",
+  "suggested_action",
+  "recommended_tone",
+  "avoid_tone",
+  "mission_tags",
+  "product_tags",
+  "audience_tags",
+  "content_format_suggestions",
+  "source_name",
+  "source_url",
+  "metadata",
+]);
 
 async function getAuthContext() {
   const userClient = await createClient();
@@ -30,74 +58,81 @@ async function getAuthContext() {
 
   if (!membership) return { error: "Usuario sem tenant ativo.", status: 403 as const };
 
-  if (membership.role !== "ADMIN") {
+  if (!writableRoles.has(membership.role)) {
     const { data: permission } = await dataClient
       .from("tenant_module_permissions")
       .select("can_write")
       .eq("tenant_id", membership.tenant_id)
       .eq("role", membership.role)
-      .eq("module", "ocorrencias")
+      .eq("module", "norwyn")
       .maybeSingle();
 
-    if (!permission?.can_write) return { error: "Sem permissao para alterar ocorrencias.", status: 403 as const };
+    if (!permission?.can_write) return { error: "Sem permissao para alterar signals da Norwyn.", status: 403 as const };
   }
 
   return { dataClient, tenantId: membership.tenant_id, userId: currentUser.id };
 }
 
-function tableFor(entity: string) {
-  if (entity === "chamado") return "ocorrencias_chamados";
-  if (entity === "cadastro") return "ocorrencias_cadastros";
-  return "ocorrencias_planos_acao";
-}
-
 function cleanPayload(payload: Record<string, unknown>) {
-  return Object.fromEntries(
-    Object.entries(payload).map(([key, value]) => {
-      if (value === "") return [key, null];
-      return [key, value];
-    }),
-  );
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (!allowedFields.has(key)) continue;
+    if (value === "") {
+      cleaned[key] = null;
+      continue;
+    }
+    cleaned[key] = value;
+  }
+  return cleaned;
 }
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const entity = String(body.entity ?? "");
   const action = String(body.action ?? "create");
-
-  if (!writableEntities.has(entity)) {
-    return NextResponse.json({ error: "Entidade invalida." }, { status: 400 });
+  if (!writableActions.has(action)) {
+    return NextResponse.json({ error: "Acao invalida." }, { status: 400 });
   }
 
   const auth = await getAuthContext();
   if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const table = tableFor(entity);
   const payload = cleanPayload({ ...(body.payload ?? {}), tenant_id: auth.tenantId });
 
-  if (entity === "chamado" && action === "create") {
-    payload.created_by = auth.userId;
-  }
-
-  if (action === "delete") {
+  if (action === "archive" || action === "delete") {
     const id = String(body.id ?? "");
     if (!id) return NextResponse.json({ error: "ID obrigatorio." }, { status: 400 });
-    const { error } = await auth.dataClient.from(table).delete().eq("tenant_id", auth.tenantId).eq("id", id);
+    const { data, error } = await auth.dataClient
+      .from("norwyn_signals")
+      .update({ status: "archived" })
+      .eq("tenant_id", auth.tenantId)
+      .eq("id", id)
+      .select("*")
+      .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ data });
   }
 
-  if (action === "update") {
-    const id = String(body.id ?? payload.id ?? "");
+  if (action === "update" || action === "status") {
+    const id = String(body.id ?? body.payload?.id ?? "");
     if (!id) return NextResponse.json({ error: "ID obrigatorio." }, { status: 400 });
     delete payload.id;
-    const { data, error } = await auth.dataClient.from(table).update(payload).eq("tenant_id", auth.tenantId).eq("id", id).select("*").single();
+    const { data, error } = await auth.dataClient
+      .from("norwyn_signals")
+      .update(payload)
+      .eq("tenant_id", auth.tenantId)
+      .eq("id", id)
+      .select("*")
+      .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ data });
   }
 
   delete payload.id;
-  const { data, error } = await auth.dataClient.from(table).insert(payload).select("*").single();
+  const { data, error } = await auth.dataClient
+    .from("norwyn_signals")
+    .insert({ ...payload, tenant_id: auth.tenantId, created_by: auth.userId })
+    .select("*")
+    .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ data });
 }

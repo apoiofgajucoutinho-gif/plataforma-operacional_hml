@@ -12,6 +12,7 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   CircleDollarSign,
+  Compass,
   LayoutDashboard,
   LineChart,
   LogOut,
@@ -30,6 +31,7 @@ import { readyModules } from "@/lib/auth/modules";
 import { createClient } from "@/lib/supabase/client";
 
 const navigation = [
+  { label: "Norwyn", href: "/norwyn", icon: Compass, key: "norwyn" },
   { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda" },
   { label: "Instagram", href: "/instagram", icon: BarChart3, key: "instagram" },
   { label: "Ads", href: "/ads", icon: Target, key: "ads" },
@@ -113,7 +115,7 @@ export function AppShell({
       window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         void signOut();
-      }, 10 * 60 * 1000);
+      }, 30 * 60 * 1000);
     };
     const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
     events.forEach((eventName) => window.addEventListener(eventName, resetTimer, { passive: true }));

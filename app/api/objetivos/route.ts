@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -11,17 +12,21 @@ async function getAuthContext() {
   const {
     data: { user },
   } = await userClient.auth.getUser();
-  if (!user) return { error: "Nao autenticado.", status: 401 as const };
-
   const admin = createAdminClient();
   const dataClient: SupabaseAny = admin ?? userClient;
-  const { data: membership } = await dataClient
-    .from("tenant_members")
-    .select("tenant_id, role")
-    .eq("user_id", user.id)
-    .eq("ativo", true)
-    .limit(1)
-    .maybeSingle();
+  const currentUser = user ?? getLocalBypassUser();
+  if (!currentUser) return { error: "Nao autenticado.", status: 401 as const };
+
+  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
+  const { data: membership } = localMembership
+    ? { data: localMembership }
+    : await dataClient
+        .from("tenant_members")
+        .select("tenant_id, role")
+        .eq("user_id", currentUser.id)
+        .eq("ativo", true)
+        .limit(1)
+        .maybeSingle();
 
   if (!membership) return { error: "Usuario sem tenant ativo.", status: 403 as const };
 

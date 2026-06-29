@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { allModules } from "@/lib/auth/modules";
+import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type {
@@ -72,12 +73,18 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
   const {
     data: { user },
   } = await userClient.auth.getUser();
+  const adminClient = createAdminClient();
+  const profileClient = adminClient ?? userClient;
+  const currentUser = user ?? getLocalBypassUser();
 
-  if (!user) {
+  if (!currentUser) {
     redirect("/login");
   }
 
-  const { membership, error: membershipError } = await getMembershipByUserId(user.id);
+  const localMembership = user ? null : await getLocalBypassMembership(profileClient);
+  const { membership, error: membershipError } = localMembership
+    ? { membership: localMembership, error: null }
+    : await getMembershipByUserId(currentUser.id);
 
   if (membershipError) {
     throw new Error(membershipError.message);
@@ -87,8 +94,6 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
     throw new Error("Usuario sem tenant vinculado.");
   }
 
-  const adminClient = createAdminClient();
-  const profileClient = adminClient ?? userClient;
   const allowedModules = await getAllowedModules(
     membership.tenant_id,
     membership.role,
@@ -103,7 +108,7 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
       .from("fin_perfis_usuario")
     .select("perfil, ativo")
     .eq("tenant_id", membership.tenant_id)
-    .eq("user_id", user.id)
+    .eq("user_id", currentUser.id)
     .eq("ativo", true)
       .maybeSingle();
 
@@ -115,8 +120,8 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
   }
 
   return {
-    userId: user.id,
-    userEmail: user.email ?? null,
+    userId: currentUser.id,
+    userEmail: currentUser.email ?? null,
     tenantId: membership.tenant_id,
     role: membership.role,
     perfil,
