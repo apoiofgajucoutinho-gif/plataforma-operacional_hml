@@ -985,6 +985,12 @@ function BriefingPanel({ action, close }: { action: PlannerAction; close: () => 
 }
 
 function ExplainPanel({ action, close }: { action: PlannerAction; close: () => void }) {
+  const confidenceLabel = action.confidence >= 75 ? "Confianca Alta" : action.confidence >= 58 ? "Confianca Media" : "Confianca Baixa";
+  const limitations = [
+    "Esta leitura e deterministica e nao usa IA.",
+    "As evidencias indicam influencia potencial, nao atribuicao direta.",
+    "Quando houver poucos sinais recentes, valide com pergunta aberta ou caixa de Stories antes de executar em escala.",
+  ];
   return (
     <Card className="border-amber-200 bg-amber-50/80 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -999,6 +1005,20 @@ function ExplainPanel({ action, close }: { action: PlannerAction; close: () => v
         {action.evidence.map((item) => <li key={item}>• {item}</li>)}
       </ul>
       <p className="mt-3 text-xs text-brand-teal/55">Indice de confianca deterministico: {action.confidence}%. Ele combina quantidade de evidencias, frescor dos dados e lacunas conhecidas.</p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-md border border-amber-200 bg-white/70 p-3">
+          <p className="text-[11px] font-black uppercase text-amber-800">{confidenceLabel}</p>
+          <p className="mt-2 text-sm text-brand-teal/70">
+            A leitura considera evidencias do pilar {action.pillar}, prioridade {action.priority}, missao ativa e proximo passo sugerido.
+          </p>
+        </div>
+        <div className="rounded-md border border-amber-200 bg-white/70 p-3">
+          <p className="text-[11px] font-black uppercase text-amber-800">Limitacoes da evidencia</p>
+          <ul className="mt-2 grid gap-1 text-xs leading-5 text-brand-teal/60">
+            {limitations.map((item) => <li key={item}>- {item}</li>)}
+          </ul>
+        </div>
+      </div>
     </Card>
   );
 }

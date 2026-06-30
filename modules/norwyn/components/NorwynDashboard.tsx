@@ -622,6 +622,71 @@ function normalizeKey(value: string | null | undefined) {
     .replace(/^-|-$/g, "");
 }
 
+const productAliases = [
+  { label: "Formacao AASI", keys: ["formacao-aasi", "formacao-em-aasi", "aasi", "perda-em-rampa"] },
+  { label: "Mentoria AASI", keys: ["mentoria-formacao-aasi-premium", "mentoria-aasi", "premium"] },
+  { label: "Ajustes Finos", keys: ["ajustes-finos"] },
+  { label: "Imersao Zumbido", keys: ["imersao-zumbido", "zumbido"] },
+];
+
+function friendlyProductName(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  const key = normalizeKey(raw);
+  if (!key) return "";
+  if (key.includes("zumbido")) return "Imersao Zumbido";
+  if (key.includes("mentoria") && key.includes("aasi")) return "Mentoria AASI";
+  if (key.includes("ajustes-finos")) return "Ajustes Finos";
+  const alias = productAliases.find((item) => item.keys.some((aliasKey) => key.includes(aliasKey)));
+  return alias?.label ?? raw.replace(/\s+/g, " ").slice(0, 56);
+}
+
+function productMatchesAlias(value: string | null | undefined, alias: string) {
+  if (alias === "all") return true;
+  const valueKey = normalizeKey(value);
+  const aliasKey = normalizeKey(alias);
+  const group = productAliases.find((item) => normalizeKey(item.label) === aliasKey);
+  const keys = group?.keys ?? [aliasKey];
+  return keys.some((key) => valueKey.includes(key)) || friendlyProductName(value) === alias;
+}
+
+function missionProductLabels(mission: NorwynMission | null) {
+  if (!mission?.products.trim()) return [];
+  return [...new Set(mission.products.split(/[,\n;]/).map((item) => friendlyProductName(item)).filter(Boolean))];
+}
+
+function productFitsMission(value: string | null | undefined, mission: NorwynMission | null) {
+  const labels = missionProductLabels(mission);
+  if (!labels.length) return true;
+  return labels.some((label) => productMatchesAlias(value, label));
+}
+
+function missionIsCommercial(mission: NorwynMission | null) {
+  const text = normalizeKey(`${mission?.type ?? ""} ${mission?.name ?? ""} ${mission?.mainGoal ?? ""}`);
+  return ["lancamento", "evergreen", "recuperacao", "produto", "venda", "receita", "faturamento"].some((item) => text.includes(item));
+}
+
+function missionIsAudience(mission: NorwynMission | null) {
+  const text = normalizeKey(`${mission?.type ?? ""} ${mission?.name ?? ""} ${mission?.mainGoal ?? ""}`);
+  return ["crescimento", "autoridade", "seguidor", "alcance", "interacao", "audiencia"].some((item) => text.includes(item));
+}
+
+function angleForSeed(seed: Partial<BriefingSeed>, contextText = "") {
+  const text = normalizeKey(`${seed.title ?? ""} ${seed.objective ?? ""} ${seed.context ?? ""} ${seed.rule ?? ""} ${contextText}`);
+  if (text.includes("obje") || text.includes("duvida") || text.includes("faq")) return "Quebra de objecao";
+  if (text.includes("caso") || text.includes("clin")) return "Caso clinico";
+  if (text.includes("bastidor")) return "Bastidores";
+  if (text.includes("erro") || text.includes("falha")) return "Erro comum";
+  if (text.includes("antes") && text.includes("depois")) return "Antes e depois";
+  if (text.includes("prova") || text.includes("venda") || text.includes("depoimento")) return "Prova social";
+  if (text.includes("micro") || text.includes("aprendiz")) return "Micro aprendizagem";
+  return "Autoridade tecnica";
+}
+
+function sourceId(prefix: string, value: string | number | null | undefined, fallback = "atual") {
+  const raw = String(value ?? fallback);
+  return `${prefix} #${raw.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || fallback}`;
+}
+
 function briefingEngineKey(seed: BriefingSeed, missionId: string, date = todayInput()) {
   return [
     "mission-engine-v0",
@@ -635,10 +700,10 @@ function briefingEngineKey(seed: BriefingSeed, missionId: string, date = todayIn
     .join("|");
 }
 
-function buildMissionSignals(context: NorwynContext) {
+function buildMissionSignals(context: NorwynContext, mission: NorwynMission | null = null) {
   const confirmedSales = context.commercialSales.filter(
     (sale) => sale.grupo_comercial === "confirmed" && inLastDays(sale.data_aprovacao ?? sale.data_compra, 7),
-  );
+  ).filter((sale) => productFitsMission(sale.produto_nome, mission));
   const activeAds = context.adsRows.filter((row) => Number(row.valor_gasto ?? 0) > 0 && inLastDays(row.data_referencia, 7));
   const pendingInteractions = context.interactions.filter((item) => item.status !== "respondido" && item.status !== "arquivado");
   const upcomingEvents = context.agendaEvents.filter((event) => {
@@ -654,7 +719,7 @@ function buildMissionSignals(context: NorwynContext) {
       ["alta", "urgente"].includes(String(task.prioridade)),
   );
   const openIncidents = context.ocorrencias.filter((item) => !["resolvido", "cancelado", "ignorado"].includes(String(item.status)));
-  const products = [...new Set(confirmedSales.map((sale) => sale.produto_nome).filter(Boolean) as string[])].slice(0, 3);
+  const products = [...new Set(confirmedSales.map((sale) => friendlyProductName(sale.produto_nome)).filter(Boolean))].slice(0, 3);
 
   return { confirmedSales, activeAds, pendingInteractions, upcomingEvents, urgentTasks, openIncidents, products };
 }
@@ -752,7 +817,7 @@ function missionKpis(mission: NorwynMission, context: NorwynContext) {
     if (!date || !start || !end) return false;
     return date >= start && date <= end;
   };
-  const sales = context.commercialSales.filter((sale) => inPeriod(sale.data_aprovacao ?? sale.data_compra));
+  const sales = context.commercialSales.filter((sale) => inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission));
   const confirmed = sales.filter((sale) => sale.grupo_comercial === "confirmed");
   const pending = sales.filter((sale) => sale.grupo_comercial === "pending");
   const lost = sales.filter((sale) => ["lost", "refunded", "chargeback"].includes(String(sale.grupo_comercial)));
@@ -799,11 +864,11 @@ function missionActualValue(mission: NorwynMission, context: NorwynContext) {
   const unit = normalizeKey(`${mission.goalUnit} ${mission.mainGoal}`);
   if (unit.includes("receita") || unit.includes("faturamento")) {
     return context.commercialSales
-      .filter((sale) => sale.grupo_comercial === "confirmed" && inPeriod(sale.data_aprovacao ?? sale.data_compra))
+      .filter((sale) => sale.grupo_comercial === "confirmed" && inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission))
       .reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
   }
   if (unit.includes("venda")) {
-    return context.commercialSales.filter((sale) => sale.grupo_comercial === "confirmed" && inPeriod(sale.data_aprovacao ?? sale.data_compra)).length;
+    return context.commercialSales.filter((sale) => sale.grupo_comercial === "confirmed" && inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission)).length;
   }
   if (unit.includes("interacao") || unit.includes("sinal")) {
     return context.interactions.filter((item) => inPeriod(item.interaction_at)).length;
@@ -827,14 +892,134 @@ function missionProgressByGoal(mission: NorwynMission, context: NorwynContext) {
   };
 }
 
+function missionGoalDetails(mission: NorwynMission | null, context: NorwynContext) {
+  if (!mission) {
+    return {
+      targetText: "Definir missao principal",
+      actualText: "-",
+      remainingText: "-",
+      progressText: "0%",
+      progress: 0,
+      daysText: "-",
+      forecastText: "Sem missao ativa",
+      statusText: "Sem contexto",
+      deviationText: "-",
+    };
+  }
+  const goal = missionProgressByGoal(mission, context);
+  const remainingDays = daysUntil(mission.endDate);
+  if (!goal) {
+    const temporal = missionProgress(mission);
+    return {
+      targetText: `${mission.mainGoal} (${mission.goalUnit || "meta"})`,
+      actualText: `${temporal}% temporal`,
+      remainingText: "meta numerica nao definida",
+      progressText: `${temporal}%`,
+      progress: temporal,
+      daysText: remainingDays === null ? "-" : remainingDays.toLocaleString("pt-BR"),
+      forecastText: temporal >= 70 ? "Dentro do ritmo temporal" : "Exige leitura manual",
+      statusText: mission.status,
+      deviationText: "Sem desvio numerico",
+    };
+  }
+  const dailyNeed = remainingDays && remainingDays > 0 ? Math.ceil(goal.remaining / remainingDays) : goal.remaining;
+  const statusText = goal.progress >= 100 ? "Meta atingida" : goal.progress >= 70 ? "Em bom ritmo" : goal.progress >= 40 ? "Acompanhar" : "Abaixo do esperado";
+  return {
+    targetText: `${goal.target.toLocaleString("pt-BR")} ${mission.goalUnit || ""}`.trim(),
+    actualText: goal.actual.toLocaleString("pt-BR"),
+    remainingText: goal.remaining.toLocaleString("pt-BR"),
+    progressText: `${goal.progress}%`,
+    progress: goal.progress,
+    daysText: remainingDays === null ? "-" : remainingDays.toLocaleString("pt-BR"),
+    forecastText: goal.remaining <= 0 ? "Sem restante" : `${dailyNeed.toLocaleString("pt-BR")} ${mission.goalUnit || "un."}/dia`,
+    statusText,
+    deviationText: goal.remaining <= 0 ? "acima ou dentro da meta" : `faltam ${goal.remaining.toLocaleString("pt-BR")}`,
+  };
+}
+
+function buildOperationalRisks(context: NorwynContext, mission: NorwynMission | null = null) {
+  const risks = [
+    {
+      label: "Campanhas com CTR baixo",
+      count: context.adsRows.filter((row) => Number(row.valor_gasto ?? 0) > 0 && Number(row.ctr ?? 0) < 1 && inLastDays(row.data_referencia, 14)).length,
+      priority: 3,
+    },
+    {
+      label: "Comentarios/interacoes sem resposta",
+      count: context.interactions.filter((item) => item.status !== "respondido" && item.status !== "arquivado").length,
+      priority: missionIsAudience(mission) ? 4 : 2,
+    },
+    {
+      label: "Vendas pendentes",
+      count: context.commercialSales.filter((sale) => sale.grupo_comercial === "pending" && productFitsMission(sale.produto_nome, mission)).length,
+      priority: missionIsCommercial(mission) ? 4 : 2,
+    },
+    {
+      label: "PIX/boletos expirados ou perdidos",
+      count: context.commercialSales.filter((sale) => ["lost", "chargeback", "refunded"].includes(String(sale.grupo_comercial)) && productFitsMission(sale.produto_nome, mission)).length,
+      priority: missionIsCommercial(mission) ? 3 : 1,
+    },
+    {
+      label: "Tarefas urgentes abertas",
+      count: context.atividades.filter((task) => !["concluida", "ignorada", "cancelada"].includes(String(task.status)) && ["alta", "urgente"].includes(String(task.prioridade))).length,
+      priority: 3,
+    },
+    {
+      label: "Ocorrencias abertas",
+      count: context.ocorrencias.filter((item) => !["resolvido", "cancelado", "ignorado"].includes(String(item.status))).length,
+      priority: 3,
+    },
+  ];
+  return risks.filter((risk) => risk.count > 0).sort((a, b) => b.priority - a.priority || b.count - a.count);
+}
+
+function operationalContextFor(context: NorwynContext, mission: NorwynMission | null) {
+  const signals = buildMissionSignals(context, mission);
+  const risks = buildOperationalRisks(context, mission);
+  if (!signals.confirmedSales.length && !signals.activeAds.length && !signals.pendingInteractions.length && !risks.length) {
+    return { label: "Baixo Sinal", reason: "Os sinais recentes ainda estao dispersos; a melhor decisao e coletar novas perguntas ou aguardar mais dados." };
+  }
+  if (mission?.type === "Recuperacao Comercial" || risks.some((risk) => risk.label.includes("Vendas") || risk.label.includes("PIX"))) {
+    return { label: "Momento de Recuperacao", reason: "Ha oportunidades comerciais pendentes ou perdidas que devem ser tratadas antes de ampliar demanda." };
+  }
+  if (missionIsCommercial(mission) && (signals.confirmedSales.length || signals.activeAds.length)) {
+    return { label: "Momento Comercial Forte", reason: "Existe venda recente, investimento ativo ou produto com sinal suficiente para concentrar a execucao." };
+  }
+  if (missionIsAudience(mission) || signals.pendingInteractions.length) {
+    return { label: "Momento de Aquecimento", reason: "As interacoes indicam necessidade de gerar perguntas, relacionamento e clareza antes de vender mais forte." };
+  }
+  return { label: "Momento de Consolidacao", reason: "Ha sinais suficientes para organizar execucao e preservar aprendizados sem mudar a direcao principal." };
+}
+
+function confidenceExplanation(context: NorwynContext, mission: NorwynMission | null, opportunities: BriefingSeed[]) {
+  const signals = buildMissionSignals(context, mission);
+  const points = [
+    `${context.contentEvents.length} conteudos/eventos historicos`,
+    `${signals.confirmedSales.length} vendas confirmadas no contexto recente`,
+    `${context.adsRows.filter((row) => Number(row.valor_gasto ?? 0) > 0).length} registros de Ads com gasto`,
+    `${context.interactions.length} interacoes disponiveis`,
+    `${opportunities.length} recomendacoes rastreaveis`,
+  ];
+  const gaps = [
+    context.interactions.length ? null : "interacoes insuficientes",
+    signals.confirmedSales.length ? null : "sem venda recente no contexto da missao",
+    context.adsRows.length ? null : "sem sinal de Ads no recorte",
+  ].filter(Boolean) as string[];
+  const score = Math.min(94, Math.max(42, 35 + points.filter((item) => !item.startsWith("0 ")).length * 10 + opportunities.length * 2 - gaps.length * 6));
+  return {
+    label: score >= 75 ? "Confianca Alta" : score >= 58 ? "Confianca Media" : "Confianca Baixa",
+    score,
+    reasons: points,
+    limits: gaps.length ? gaps : ["sem lacuna relevante para esta leitura deterministica"],
+  };
+}
+
 function buildExecutiveSummary(context: NorwynContext, mission: NorwynMission | null, opportunities: BriefingSeed[]) {
-  const signals = buildMissionSignals(context);
-  const goal = mission ? missionProgressByGoal(mission, context) : null;
-  const mainRisk = signals.openIncidents.length
-    ? `${signals.openIncidents.length} ocorrencia(s) aberta(s)`
-    : signals.pendingInteractions.length
-      ? `${signals.pendingInteractions.length} interacao(oes) pendente(s)`
-      : "nenhum risco critico dominante";
+  const signals = buildMissionSignals(context, mission);
+  const goal = missionGoalDetails(mission, context);
+  const risks = buildOperationalRisks(context, mission);
+  const contextLabel = operationalContextFor(context, mission);
+  const confidence = confidenceExplanation(context, mission, opportunities);
   const mainOpportunity = opportunities[0]?.title ?? "Coletar sinais da audiencia";
   const action = opportunities[0]
     ? `Transformar "${opportunities[0].title}" em briefing ou draft revisavel.`
@@ -846,119 +1031,133 @@ function buildExecutiveSummary(context: NorwynContext, mission: NorwynMission | 
 
   return {
     title: mission?.name ?? "Nenhuma missao principal ativa",
-    goalText: mission?.mainGoal ?? "Definir missao principal",
-    progressText: goal
-      ? `${goal.progress}% da meta (${goal.actual.toLocaleString("pt-BR")} de ${goal.target.toLocaleString("pt-BR")})`
-      : `${mission ? missionProgress(mission) : 0}% de progresso temporal`,
-    risk: mainRisk,
+    goalText: goal.targetText,
+    actualText: goal.actualText,
+    remainingText: goal.remainingText,
+    progressText: goal.progressText,
+    deviationText: goal.deviationText,
+    contextLabel: contextLabel.label,
+    contextReason: contextLabel.reason,
+    risk: risks[0] ? `${risks[0].count} ${risks[0].label.toLowerCase()}` : "nenhum risco critico dominante",
+    risks,
     opportunity: mainOpportunity,
     action,
+    confidence,
+    productContext: missionProductLabels(mission).join(", ") || signals.products.join(", ") || "sem produto dominante",
     dataLimits: dataLimits.length ? dataLimits.join("; ") : "sem lacuna critica detectada para esta leitura",
   };
 }
 
 function buildOpportunityRadar(context: NorwynContext, mission: NorwynMission | null): BriefingSeed[] {
-  const signals = buildMissionSignals(context);
+  const signals = buildMissionSignals(context, mission);
   const topProduct = signals.products[0] ?? "";
   const topPost = [...context.posts].sort((a, b) => Number(b.alcance ?? 0) - Number(a.alcance ?? 0))[0];
-  const pendingCommercial = context.commercialSales.filter((sale) => sale.grupo_comercial === "pending").length;
+  const pendingCommercial = context.commercialSales.filter((sale) => sale.grupo_comercial === "pending" && productFitsMission(sale.produto_nome, mission)).length;
   const riskyCommercial = context.commercialSales.filter((sale) =>
     ["pending", "lost", "refunded", "chargeback"].includes(String(sale.grupo_comercial)) &&
+    productFitsMission(sale.produto_nome, mission) &&
     inLastDays(sale.last_event_at ?? sale.data_compra, 30),
   ).length;
   const adAlert = context.adsRows.find((row) => Number(row.valor_gasto ?? 0) > 0 && (Number(row.ctr ?? 0) < 1 || Number(row.frequencia ?? 0) > 3));
   const seeds: BriefingSeed[] = [];
+  const canUseCommercial = !mission || missionIsCommercial(mission) || mission.type === "Campanha Ads";
+  const canUseAudience = !mission || missionIsAudience(mission) || mission.type === "Organizacao Operacional";
 
-  if (topProduct) {
+  if (topProduct && canUseCommercial) {
+    const angle = angleForSeed({ title: topProduct, rule: "produto vendido recentemente pode virar prova social" });
     seeds.push({
-      title: `Prova social e objecoes de ${topProduct}`,
+      title: `${angle}: prova social e objecoes de ${topProduct}`,
       type: "Stories",
       missionId: mission?.id,
-      recommendationOrigin: "Opportunity Radar",
+      recommendationOrigin: `${sourceId("Comercial", signals.confirmedSales[0]?.transaction_id ?? signals.confirmedSales[0]?.id)} / Mission ${mission?.id ?? "sem-missao"}`,
       objective: "Transformar venda recente em conversa comercial sem publicar automaticamente.",
       context: `${topProduct} apareceu entre os produtos vendidos recentemente.`,
-      evidence: [`Produto recente: ${topProduct}`, `${signals.confirmedSales.length} vendas confirmadas nos ultimos 7 dias.`],
+      evidence: [`Angulo recomendado: ${angle}.`, `Produto recente: ${topProduct}`, `${signals.confirmedSales.length} vendas confirmadas nos ultimos 7 dias.`, operationalContextFor(context, mission).reason],
       product: topProduct,
       centralMessage: `Existe sinal comercial recente para reforcar ${topProduct}.`,
       cta: "Abrir caixa de perguntas sobre o produto.",
       priority: "Alta",
       confidence: 78,
       sourceModule: "Comercial / Hotmart",
-      rule: "produto vendido recentemente pode virar prova social",
+      rule: `${angle}: produto vendido recentemente pode virar prova social sem afirmar atribuicao direta.`,
     });
   }
 
-  if (signals.pendingInteractions.length) {
+  if (signals.pendingInteractions.length && canUseAudience) {
+    const angle = angleForSeed({ title: "FAQ publico", rule: "pergunta recorrente pode virar carrossel ou FAQ" });
     seeds.push({
-      title: "Perguntas recorrentes podem virar FAQ publico",
+      title: `${angle}: perguntas recorrentes podem virar FAQ publico`,
       type: "FAQ / Resposta publica",
       missionId: mission?.id,
-      recommendationOrigin: "Opportunity Radar",
+      recommendationOrigin: `${sourceId("Instagram", signals.pendingInteractions[0]?.id)} / Signals ${signals.pendingInteractions.length}`,
       objective: "Reduzir tempo de resposta e transformar duvidas em conteudo.",
       context: "Ha interacoes pendentes ou nao respondidas no Instagram.",
-      evidence: [`${signals.pendingInteractions.length} interacoes pendentes.`],
+      evidence: [`Angulo recomendado: ${angle}.`, `${signals.pendingInteractions.length} interacoes pendentes.`, "Tema dominante ainda deve ser validado nas respostas antes de virar promessa comercial."],
       objection: "duvida ainda sem resposta",
       centralMessage: "As perguntas da audiencia podem orientar conteudo util.",
       cta: "Responder nos comentarios e direcionar para conteudo complementar.",
       priority: "Media",
       confidence: 70,
       sourceModule: "Instagram",
-      rule: "pergunta recorrente pode virar carrossel ou FAQ",
+      rule: `${angle}: pergunta recorrente pode virar carrossel ou FAQ`,
     });
   }
 
-  if (pendingCommercial || riskyCommercial) {
+  if ((pendingCommercial || riskyCommercial) && canUseCommercial) {
+    const angle = angleForSeed({ title: "Mensagem de recuperacao", rule: "perda comercial pode virar mensagem de recuperacao" });
     seeds.push({
-      title: "Mensagem de recuperacao para pagamentos pendentes",
+      title: `${angle}: mensagem de recuperacao para pagamentos pendentes`,
       type: "Mensagem de recuperacao",
       missionId: mission?.id,
-      recommendationOrigin: "Opportunity Radar",
+      recommendationOrigin: `${sourceId("Comercial", "risco")} / Mission ${mission?.id ?? "sem-missao"}`,
       objective: "Apoiar recuperacao comercial sem disparo automatico.",
       context: "Existem vendas pendentes, perdidas, reembolsadas ou com risco comercial no Comercial.",
-      evidence: [`${pendingCommercial} registros pendentes no Comercial.`, `${riskyCommercial} registros de risco comercial nos ultimos 30 dias.`],
+      evidence: [`Angulo recomendado: ${angle}.`, `${pendingCommercial} registros pendentes no Comercial.`, `${riskyCommercial} registros de risco comercial nos ultimos 30 dias.`],
       objection: "pagamento nao concluido",
       centralMessage: "Uma orientacao curta pode remover friccao de compra.",
       cta: "Conferir duvida e orientar proximo passo.",
       priority: "Alta",
       confidence: 72,
       sourceModule: "Comercial",
-      rule: "perda comercial pode virar mensagem de recuperacao",
+      rule: `${angle}: perda comercial pode virar mensagem de recuperacao`,
     });
   }
 
-  if (adAlert) {
+  if (adAlert && (!mission || mission.type === "Campanha Ads" || missionIsCommercial(mission))) {
+    const angle = angleForSeed({ title: "Revisar criativo", rule: "campanha com alerta pode virar briefing de anuncio" });
     seeds.push({
-      title: "Revisar criativo ou promessa de campanha",
+      title: `${angle}: revisar criativo ou promessa de campanha`,
       type: "Anuncio",
       missionId: mission?.id,
-      recommendationOrigin: "Opportunity Radar",
+      recommendationOrigin: `${sourceId("Ads", adAlert.id ?? adAlert.campanha)} / Mission ${mission?.id ?? "sem-missao"}`,
       objective: "Criar alternativa de anuncio para validar sem alterar campanha atual.",
       context: "Ha sinal de Ads com gasto e possivel alerta de performance.",
-      evidence: [`Campanha: ${adAlert.campanha ?? "sem nome"}`, `Gasto: ${Number(adAlert.valor_gasto ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`],
+      evidence: [`Angulo recomendado: ${angle}.`, `Campanha: ${adAlert.campanha ?? "sem nome"}`, `Gasto: ${Number(adAlert.valor_gasto ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`],
       centralMessage: "Antes de escalar, validar promessa, link, publico e criativo.",
       cta: "Criar rascunho alternativo para revisao.",
       priority: "Media",
       confidence: 65,
       sourceModule: "Ads",
-      rule: "campanha com alerta pode virar briefing de anuncio",
+      rule: `${angle}: campanha com alerta pode virar briefing de anuncio`,
     });
   }
 
-  if (topPost) {
+  if (topPost && canUseAudience) {
+    const angle = angleForSeed({ title: "Reaproveitar post com maior alcance", rule: "post com alcance pode virar carrossel" });
     seeds.push({
-      title: "Reaproveitar post com maior alcance",
+      title: `${angle}: reaproveitar post com maior alcance`,
       type: "Carrossel",
       missionId: mission?.id,
-      recommendationOrigin: "Opportunity Radar",
+      recommendationOrigin: `${sourceId("Instagram", topPost.id)} / Mission ${mission?.id ?? "sem-missao"}`,
       objective: "Transformar conteudo com alcance em ativo reutilizavel.",
       context: "Um post recente concentra alcance acima dos demais.",
-      evidence: [`Alcance: ${Number(topPost.alcance ?? 0).toLocaleString("pt-BR")}`, `Formato: ${String(topPost.tipo ?? "post")}`],
+      evidence: [`Angulo recomendado: ${angle}.`, `Alcance: ${Number(topPost.alcance ?? 0).toLocaleString("pt-BR")}`, `Formato: ${String(topPost.tipo ?? "post")}`],
       centralMessage: "Conteudos com resposta organica podem virar sequencias mais didaticas.",
       cta: "Salvar, comentar ou enviar duvida.",
       priority: "Baixa",
       confidence: 62,
       sourceModule: "Editorial Intelligence",
-      rule: "post com alcance pode virar carrossel",
+      rule: `${angle}: post com alcance pode virar carrossel`,
     });
   }
 
@@ -1036,7 +1235,25 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     [context, signals, activeMission],
   );
   const evidenceOpportunities = useMemo(
-    () => evidenceEngine.recommendations.map((recommendation) => evidenceRecommendationToBriefingSeed(recommendation, activeMission?.id) as BriefingSeed),
+    () =>
+      evidenceEngine.recommendations
+        .filter((recommendation) => {
+          if (!activeMission) return true;
+          if (missionIsAudience(activeMission) && !missionIsCommercial(activeMission)) return !recommendation.productName;
+          return productFitsMission(recommendation.productName, activeMission) || !missionProductLabels(activeMission).length;
+        })
+        .map((recommendation) => {
+          const seed = evidenceRecommendationToBriefingSeed(recommendation, activeMission?.id) as BriefingSeed;
+          const angle = angleForSeed(seed, recommendation.title);
+          return {
+            ...seed,
+            title: seed.title.includes(":") ? seed.title : `${angle}: ${seed.title}`,
+            product: friendlyProductName(seed.product ?? recommendation.productName),
+            recommendationOrigin: `${sourceId("Evidence", recommendation.id)} / ${seed.recommendationOrigin ?? "Evidence Engine"}`,
+            evidence: [`Angulo recomendado: ${angle}.`, ...seed.evidence],
+            rule: `${angle}: ${seed.rule ?? recommendation.decisionRule}`,
+          };
+        }),
     [evidenceEngine, activeMission],
   );
   const opportunities = useMemo(() => [...evidenceOpportunities, ...buildOpportunityRadar(context, activeMission)].slice(0, 9), [context, activeMission, evidenceOpportunities]);
@@ -1640,7 +1857,7 @@ function MissionCenterView({
           </div>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-          <MissionSummary mission={activeMission} />
+          <MissionSummary mission={activeMission} context={context} />
           <div className="grid gap-3 md:grid-cols-3">
             <MiniCounter label="Principal" value={missions.filter((mission) => mission.priority === "Principal" && mission.status !== "Arquivada").length} />
             <MiniCounter label="Estrategicas" value={missions.filter((mission) => mission.priority === "Estrategica" && mission.status !== "Arquivada").length} />
@@ -1714,13 +1931,42 @@ function ExecutiveSummaryCard({
           <p className="text-xs font-black uppercase text-brand-clay">Resumo executivo</p>
           <h2 className="mt-1 text-xl font-semibold text-brand-teal">{summary.title}</h2>
           <p className="mt-2 text-sm leading-6 text-brand-teal/70">
-            Meta: {summary.goalText}. Progresso: {summary.progressText}. Principal atencao: {summary.risk}. Oportunidade atual:
-            {" "}{summary.opportunity}.
+            {summary.contextLabel}: {summary.contextReason} Meta: {summary.goalText}. Atual: {summary.actualText}. Restante:
+            {" "}{summary.remainingText}. Desvio: {summary.deviationText}. Oportunidade atual: {summary.opportunity}.
           </p>
         </div>
         <div className="grid min-w-[220px] gap-2">
           <MissionMeta label="Proximo passo" value={summary.action} />
-          <MissionMeta label="Limites dos dados" value={summary.dataLimits} />
+          <MissionMeta label="Produto/contexto" value={summary.productContext} />
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <MissionMeta label="Meta" value={summary.goalText} />
+        <MissionMeta label="Atual" value={summary.actualText} />
+        <MissionMeta label="Progresso" value={summary.progressText} />
+        <MissionMeta label="Contexto operacional" value={summary.contextLabel} />
+        <MissionMeta label="Confianca" value={`${summary.confidence.label} (${summary.confidence.score}%)`} />
+        <MissionMeta label="Limites dos dados" value={summary.dataLimits} />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-md border border-brand-sand bg-white/75 p-3">
+          <p className="text-[11px] font-black uppercase text-brand-clay">Riscos priorizados</p>
+          {summary.risks.length ? (
+            <ul className="mt-2 space-y-1 text-sm text-brand-teal/70">
+              {summary.risks.slice(0, 5).map((risk) => (
+                <li key={risk.label}>- {risk.count} {risk.label.toLowerCase()}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-brand-teal/60">Nenhum risco operacional dominante no recorte.</p>
+          )}
+        </div>
+        <div className="rounded-md border border-brand-sand bg-white/75 p-3">
+          <p className="text-[11px] font-black uppercase text-brand-clay">Por que confiamos</p>
+          <ul className="mt-2 space-y-1 text-sm text-brand-teal/70">
+            {summary.confidence.reasons.slice(0, 5).map((reason) => <li key={reason}>- {reason}</li>)}
+          </ul>
+          <p className="mt-2 text-xs text-brand-teal/55">Limitacoes: {summary.confidence.limits.join("; ")}.</p>
         </div>
       </div>
       <div className="mt-4 rounded-md border border-brand-sand bg-brand-cream/35 p-3">
@@ -1744,7 +1990,7 @@ function ExecutiveSummaryCard({
   );
 }
 
-function MissionSummary({ mission }: { mission: NorwynMission | null }) {
+function MissionSummary({ mission, context }: { mission: NorwynMission | null; context: NorwynContext }) {
   if (!mission) {
     return (
       <article className="rounded-md border border-brand-sand bg-white/90 p-4">
@@ -1754,6 +2000,7 @@ function MissionSummary({ mission }: { mission: NorwynMission | null }) {
       </article>
     );
   }
+  const goal = missionGoalDetails(mission, context);
   return (
     <article className="rounded-md border border-brand-sand bg-white/90 p-4">
       <p className="text-[11px] font-black uppercase text-brand-clay">Missao Principal</p>
@@ -1763,6 +2010,9 @@ function MissionSummary({ mission }: { mission: NorwynMission | null }) {
         <MissionMeta label="Status" value={mission.status} />
         <MissionMeta label="Periodo" value={`${mission.startDate} - ${mission.endDate}`} />
         <MissionMeta label="Meta" value={`${mission.mainGoal} (${mission.goalUnit})`} />
+        <MissionMeta label="Atual" value={goal.actualText} />
+        <MissionMeta label="Restante" value={goal.remainingText} />
+        <MissionMeta label="Desvio" value={goal.deviationText} />
       </div>
     </article>
   );
@@ -1790,8 +2040,10 @@ function MissionDetail({
     );
   }
   const kpis = missionKpis(mission, context);
-  const goalProgress = missionProgressByGoal(mission, context);
-  const remainingDays = daysUntil(mission.endDate);
+  const goalDetails = missionGoalDetails(mission, context);
+  const contextLabel = operationalContextFor(context, mission);
+  const risks = buildOperationalRisks(context, mission);
+  const confidence = confidenceExplanation(context, mission, buildOpportunityRadar(context, mission));
   const tabs = ["Resumo", "KPIs", "Plano", "Recomendacoes", "Timeline", "Checklist", "Aprendizados"];
 
   function updateChecklist(itemId: string, status: MissionChecklistItem["status"]) {
@@ -1835,10 +2087,14 @@ function MissionDetail({
         </div>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <MissionMeta label="Meta" value={`${mission.mainGoal} (${mission.goalUnit})`} />
-        <MissionMeta label="Progresso da meta" value={goalProgress ? `${goalProgress.progress}%` : `${missionProgress(mission)}% temporal`} />
-        <MissionMeta label="Restante" value={goalProgress ? goalProgress.remaining.toLocaleString("pt-BR") : "meta numerica nao definida"} />
-        <MissionMeta label="Dias restantes" value={remainingDays === null ? "-" : remainingDays.toLocaleString("pt-BR")} />
+        <MissionMeta label="Meta" value={goalDetails.targetText} />
+        <MissionMeta label="Atual" value={goalDetails.actualText} />
+        <MissionMeta label="Restante" value={goalDetails.remainingText} />
+        <MissionMeta label="Progresso" value={goalDetails.progressText} />
+        <MissionMeta label="Dias restantes" value={goalDetails.daysText} />
+        <MissionMeta label="Previsao" value={goalDetails.forecastText} />
+        <MissionMeta label="Status" value={goalDetails.statusText} />
+        <MissionMeta label="Desvio" value={goalDetails.deviationText} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {tabs.map((item) => (
@@ -1885,8 +2141,28 @@ function MissionDetail({
       ) : null}
 
       {tab === "Recomendacoes" ? (
-        <div className="mt-4 rounded-md border border-brand-sand bg-brand-cream/35 p-4 text-sm leading-6 text-brand-teal/75">
-          As recomendacoes do Strategy devem priorizar esta missao quando ela estiver como Principal ou Estrategica.
+        <div className="mt-4 space-y-3">
+          <div className="rounded-md border border-brand-sand bg-brand-cream/35 p-4 text-sm leading-6 text-brand-teal/75">
+            <p className="font-semibold text-brand-teal">{contextLabel.label}</p>
+            <p className="mt-1">{contextLabel.reason}</p>
+            <p className="mt-2">A Mission Engine limita as evidencias ao contexto da missao e ao produto: {missionProductLabels(mission).join(", ") || "sem produto definido"}.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-[11px] font-black uppercase text-brand-clay">Riscos ordenados</p>
+              {risks.length ? risks.slice(0, 6).map((risk) => (
+                <p key={risk.label} className="mt-2 text-sm text-brand-teal/70">{risk.count} {risk.label.toLowerCase()}</p>
+              )) : <p className="mt-2 text-sm text-brand-teal/60">Sem risco dominante.</p>}
+            </div>
+            <div className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-[11px] font-black uppercase text-brand-clay">Confianca</p>
+              <p className="mt-2 text-sm font-semibold text-brand-teal">{confidence.label} ({confidence.score}%)</p>
+              <ul className="mt-2 space-y-1 text-sm text-brand-teal/70">
+                {confidence.reasons.map((reason) => <li key={reason}>- {reason}</li>)}
+              </ul>
+              <p className="mt-2 text-xs text-brand-teal/55">Limitacoes: {confidence.limits.join("; ")}.</p>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -2319,7 +2595,8 @@ function EvidenceEngineView({
   const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const products = useMemo(
-    () => [...new Set(evidenceEngine.launchPatterns.map((pattern) => pattern.productName).filter(Boolean) as string[])].sort(),
+    () =>
+      [...new Set(evidenceEngine.launchPatterns.flatMap((pattern) => [pattern.productName, ...pattern.associatedProducts]).map((product) => friendlyProductName(product)).filter(Boolean))].sort(),
     [evidenceEngine.launchPatterns],
   );
   const contentOptions = useMemo(
@@ -2344,7 +2621,7 @@ function EvidenceEngineView({
         (periodFilter === "last-launch" && pattern.influenceScore >= 65) ||
         (periodFilter === "current-launch" && age <= 10) ||
         age <= Number(periodFilter);
-      const productOk = soldProductFilter === "all" || pattern.productName === soldProductFilter || pattern.associatedProducts.includes(soldProductFilter);
+      const productOk = soldProductFilter === "all" || productMatchesAlias(pattern.productName, soldProductFilter) || pattern.associatedProducts.some((product) => productMatchesAlias(product, soldProductFilter));
       const contentOk = contentFilter === "all" || pattern.format === contentFilter;
       const campaignOk = campaignFilter === "all" || pattern.campaignId === campaignFilter;
       const missionOk = missionFilter === "all" || pattern.missionId === missionFilter;
@@ -2379,7 +2656,7 @@ function EvidenceEngineView({
   const topRecommendation = evidenceEngine.recommendations[0];
   const visualizing = [
     periodFilter === "all" ? "Historico completo" : periodFilter === "last-launch" ? "Ultimo lancamento" : periodFilter === "current-launch" ? "Lancamento atual" : `Ultimos ${periodFilter} dias`,
-    soldProductFilter === "all" ? "Todos os produtos vendidos" : soldProductFilter,
+    soldProductFilter === "all" ? "Todos os produtos vendidos" : friendlyProductName(soldProductFilter),
     contentFilter === "all" ? "Todos os conteudos" : contentFilter,
     campaignFilter === "all" ? "Todas as campanhas" : `Campanha ${campaignFilter}`,
     missionFilter === "all" ? "Todas as missoes" : `Missao ${missionFilter}`,
@@ -2402,33 +2679,27 @@ function EvidenceEngineView({
       </Card>
 
       <Card className="border-[#E9CBD1] p-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <Field label="Produto analisado">
-            <select value={soldProductFilter} onChange={(event) => setSoldProductFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+            <select value={soldProductFilter} onChange={(event) => setSoldProductFilter(event.target.value)} className="h-9 w-full rounded-md border border-brand-sand bg-white px-3 text-sm">
               <option value="all">Todos os produtos</option>
               {products.map((product) => <option key={product} value={product}>{product}</option>)}
             </select>
           </Field>
           <Field label="Conteudo relacionado">
-            <select value={contentFilter} onChange={(event) => setContentFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+            <select value={contentFilter} onChange={(event) => setContentFilter(event.target.value)} className="h-9 w-full rounded-md border border-brand-sand bg-white px-3 text-sm">
               <option value="all">Todos os conteudos</option>
               {contentOptions.map((format) => <option key={format} value={format}>{format}</option>)}
             </select>
           </Field>
-          <Field label="Produto vendido">
-            <select value={soldProductFilter} onChange={(event) => setSoldProductFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
-              <option value="all">Todos vendidos</option>
-              {products.map((product) => <option key={product} value={product}>{product}</option>)}
-            </select>
-          </Field>
           <Field label="Campanha">
-            <select value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+            <select value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)} className="h-9 w-full rounded-md border border-brand-sand bg-white px-3 text-sm">
               <option value="all">Todas as campanhas</option>
               {campaigns.map((campaign) => <option key={campaign} value={campaign}>{campaign}</option>)}
             </select>
           </Field>
           <Field label="Missao">
-            <select value={missionFilter} onChange={(event) => setMissionFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+            <select value={missionFilter} onChange={(event) => setMissionFilter(event.target.value)} className="h-9 w-full rounded-md border border-brand-sand bg-white px-3 text-sm">
               <option value="all">Todas as missoes</option>
               {missions.map((mission) => <option key={mission} value={mission}>{mission}</option>)}
             </select>
@@ -2446,7 +2717,7 @@ function EvidenceEngineView({
             </button>
           ))}
           <Field label="Periodo">
-            <select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+            <select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)} className="h-9 w-full rounded-md border border-brand-sand bg-white px-3 text-sm">
               <option value="7">7 dias</option>
               <option value="15">15 dias</option>
               <option value="30">30 dias</option>
@@ -2506,7 +2777,7 @@ function EvidenceEngineView({
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-black uppercase text-brand-clay">{pattern.format} - {new Date(pattern.publishedAt).toLocaleDateString("pt-BR")}</p>
                   <h3 className="mt-1 line-clamp-2 text-sm font-semibold text-brand-teal">{pattern.contentTitle}</h3>
-                  <p className="mt-1 text-xs text-brand-teal/60">{pattern.productName ?? "Produto nao identificado"}</p>
+                  <p className="mt-1 text-xs text-brand-teal/60">{friendlyProductName(pattern.productName) || "Produto nao identificado"}</p>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -2602,7 +2873,7 @@ function EvidenceEngineView({
                 <div className="grid gap-2 sm:grid-cols-2">
                   <MissionMeta label="Data" value={new Date(selectedPattern.publishedAt).toLocaleString("pt-BR")} />
                   <MissionMeta label="Formato" value={selectedPattern.format} />
-                  <MissionMeta label="Produto" value={selectedPattern.productName ?? "-"} />
+                  <MissionMeta label="Produto" value={friendlyProductName(selectedPattern.productName) || "-"} />
                   <MissionMeta label="Janela" value={`${selectedPattern.influenceHours}h`} />
                 </div>
                 <p className="rounded-md border border-brand-sand bg-white/80 p-3 text-sm leading-6 text-brand-teal/70">

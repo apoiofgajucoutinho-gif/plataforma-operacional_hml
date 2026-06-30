@@ -340,10 +340,20 @@ function buildInsights(patterns: NorwynLaunchPattern[], recommendations: NorwynE
 }
 
 function buildRecommendations(patterns: NorwynLaunchPattern[], input: EvidenceEngineInput): NorwynEvidenceRecommendation[] {
+  const angleForPattern = (pattern: NorwynLaunchPattern) => {
+    const text = `${pattern.contentTitle ?? ""} ${pattern.format ?? ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (text.includes("duvida") || text.includes("faq") || text.includes("pergunta")) return "Quebra de objecao";
+    if (text.includes("caso") || text.includes("clin")) return "Caso clinico";
+    if (text.includes("erro") || text.includes("falha")) return "Erro comum";
+    if (text.includes("bastidor")) return "Bastidores";
+    if (text.includes("depoimento") || text.includes("prova")) return "Prova social";
+    if (text.includes("aula") || text.includes("aprend")) return "Micro aprendizagem";
+    return "Autoridade tecnica";
+  };
   const topPatterns = [...patterns].sort((a, b) => b.influenceScore - a.influenceScore).slice(0, 4);
   const recommendations = topPatterns.map((pattern) => ({
     id: `pattern-${pattern.id}`,
-    title: `Repetir angulo com ${pattern.productName ?? "produto prioritario"}`,
+    title: `${angleForPattern(pattern)}: repetir padrao com ${pattern.productName ?? "produto prioritario"}`,
     objective: "Transformar um padrao observado historicamente em briefing operacional para nova peca.",
     relatedMission: input.activeMissionName ?? null,
     expectedImpact: "Aumentar clareza comercial e testar novamente um formato associado a picos de venda.",

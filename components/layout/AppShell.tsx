@@ -115,7 +115,7 @@ export function AppShell({
       window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         void signOut();
-      }, 30 * 60 * 1000);
+      }, 60 * 60 * 1000);
     };
     const events = ["mousemove", "keydown", "click", "scroll", "touchstart"];
     events.forEach((eventName) => window.addEventListener(eventName, resetTimer, { passive: true }));
