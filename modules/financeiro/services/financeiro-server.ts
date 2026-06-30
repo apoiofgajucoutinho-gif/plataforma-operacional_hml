@@ -126,7 +126,7 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
     role: membership.role,
     perfil,
     allowedModules,
-    dataClient: perfil === "admin" ? (adminClient ?? userClient) : userClient,
+    dataClient: perfil === "admin" || perfil === "suporte" ? (adminClient ?? userClient) : userClient,
   };
 }
 
