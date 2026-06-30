@@ -5,12 +5,15 @@ import type { ReactNode } from "react";
 import {
   Archive,
   Bot,
+  BookOpen,
+  BriefcaseBusiness,
   CheckCircle2,
   ClipboardList,
   Compass,
   Copy,
   Eye,
   Flag,
+  Home,
   Layers3,
   Pencil,
   Plus,
@@ -24,9 +27,12 @@ import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/mod
 import type { InstagramPostMetric } from "@/modules/instagram/types";
 import type { NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus } from "@/modules/norwyn/types";
 
-type NorwynTab = "mission" | "strategy" | "briefing" | "studio" | "shadow" | "intelligence" | "evidence" | "signals" | "automation";
+type NorwynTab = "home" | "business" | "mission" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
 type MissionPriority = "Principal" | "Estrategica" | "Continua";
 type MissionStatus = "Planejada" | "Ativa" | "Pausada" | "Encerrada" | "Arquivada";
+type BusinessObjectiveHorizon = "Trimestral" | "Semestral" | "Anual" | "Continuo";
+type BusinessObjectiveCategory = "Receita" | "Produto" | "Marketing" | "Comercial" | "Operacao" | "Autoridade" | "Educacao";
+type BusinessObjectiveStatus = "Draft" | "Planejado" | "Ativo" | "Em risco" | "Concluido" | "Arquivado";
 type BriefingType =
   | "Carrossel"
   | "Stories"
@@ -76,6 +82,7 @@ type MissionLearning = {
 
 type NorwynMission = {
   id: string;
+  strategicObjectiveId?: string;
   name: string;
   type: MissionType;
   status: MissionStatus;
@@ -206,8 +213,28 @@ type KnowledgeEvent = {
   updatedAt: string;
 };
 
+type BusinessObjective = {
+  id: string;
+  name: string;
+  description: string;
+  horizon: BusinessObjectiveHorizon;
+  category: BusinessObjectiveCategory;
+  priority: MissionPriority;
+  status: BusinessObjectiveStatus;
+  startDate: string;
+  endDate: string;
+  kpis: string[];
+  target: string;
+  progress: number;
+  owner: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const MISSIONS_KEY = "norwyn-mission-os-missions-v1";
 const ACTIVE_MISSION_KEY = "norwyn-mission-os-active-v1";
+const BUSINESS_OBJECTIVES_KEY = "norwyn-business-strategy-objectives-v1";
 const BRIEFINGS_KEY = "norwyn-execution-briefings-v1";
 const DRAFTS_KEY = "norwyn-execution-drafts-v1";
 const SHADOW_KEY = "norwyn-execution-shadow-v1";
@@ -254,6 +281,9 @@ const draftStatuses: DraftStatus[] = ["rascunho", "rascunho automatico", "em rev
 const executionStatuses: ExecutionStatus[] = ["executado", "parcial", "nao executado", "ignorado"];
 const executionResults: ExecutionResult[] = ["positivo", "neutro", "negativo", "inconclusivo"];
 const sourceOptions = ["Instagram", "Ads", "Comercial", "Agenda", "Objetivos", "Ocorrencias", "Atividades", "Financeiro"];
+const businessHorizons: BusinessObjectiveHorizon[] = ["Trimestral", "Semestral", "Anual", "Continuo"];
+const businessCategories: BusinessObjectiveCategory[] = ["Receita", "Produto", "Marketing", "Comercial", "Operacao", "Autoridade", "Educacao"];
+const businessStatuses: BusinessObjectiveStatus[] = ["Draft", "Planejado", "Ativo", "Em risco", "Concluido", "Arquivado"];
 const signalProviders: NorwynSignalProvider[] = ["manual", "calendar", "instagram", "hotmart", "ads", "shadow", "news", "google_trends", "youtube", "tiktok", "system"];
 const signalCategories = ["calendar", "trend", "event", "opportunity", "alert", "market", "platform_update", "commercial", "editorial", "audience", "product", "ads", "learning"];
 const signalSubcategories = [
@@ -363,6 +393,72 @@ function makeId(prefix = "mission") {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function defaultBusinessObjectives(): BusinessObjective[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "bo-aasi-premium-principal-2026",
+      name: "Transformar a Formacao AASI Premium no principal produto da empresa",
+      description: "Elevar a Formacao AASI Premium ao papel de produto central da estrategia comercial e editorial.",
+      horizon: "Semestral",
+      category: "Receita",
+      priority: "Principal",
+      status: "Ativo",
+      startDate: "2026-07-01",
+      endDate: "2026-12-31",
+      kpis: ["Receita anual", "Participacao por produto", "Vendas confirmadas", "Conversao comercial"],
+      target: "70% da receita anual",
+      progress: 35,
+      owner: "Juliana",
+      notes: "Objetivo estrategico cadastrado para orientar missoes, conteudos, lancamento e leitura comercial no 2o semestre de 2026.",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "bo-ajustes-finos-funil-perpetuo-2026",
+      name: "Construir funil perpetuo para Ajustes Finos",
+      description: "Criar uma rotina de aquisicao, nutricao e venda recorrente para Ajustes Finos.",
+      horizon: "Anual",
+      category: "Comercial",
+      priority: "Estrategica",
+      status: "Planejado",
+      startDate: "2026-07-01",
+      endDate: "2026-12-31",
+      kpis: ["Vendas mensais", "Leads", "CPL", "Taxa de conversao"],
+      target: "40 vendas/mes ate 31/12/2026",
+      progress: 15,
+      owner: "Juliana",
+      notes: "Deve orientar missoes de funil, Ads, interacoes e recuperacao comercial.",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "bo-produto-intermediario-q4-2026",
+      name: "Criar produto intermediario de R$ 1.000",
+      description: "Desenhar e validar um produto intermediario para preencher o espaco entre entrada, cursos e ofertas premium.",
+      horizon: "Trimestral",
+      category: "Produto",
+      priority: "Estrategica",
+      status: "Planejado",
+      startDate: "2026-10-01",
+      endDate: "2026-12-31",
+      kpis: ["Produto estruturado", "Oferta validada", "Primeiras vendas", "Sinais de audiencia"],
+      target: "Produto intermediario validado no Q4 2026",
+      progress: 5,
+      owner: "Juliana",
+      notes: "Objetivo de descoberta e validacao. Nao deve competir com a estrategia principal sem evidencias.",
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+}
+
+function ensureDefaultBusinessObjectives(stored: BusinessObjective[]) {
+  const defaults = defaultBusinessObjectives();
+  const ids = new Set(stored.map((item) => item.id));
+  return [...stored, ...defaults.filter((item) => !ids.has(item.id))];
+}
+
 function firstNumber(value: string | null | undefined) {
   const match = String(value ?? "").replace(/\./g, "").replace(",", ".").match(/-?\d+(\.\d+)?/);
   return match ? Number(match[0]) : null;
@@ -380,6 +476,7 @@ function daysUntil(value: string) {
 function emptyMission(seed?: Partial<NorwynMission>): NorwynMission {
   return {
     id: makeId(),
+    strategicObjectiveId: "",
     name: "",
     type: "Lancamento",
     status: "Planejada",
@@ -1203,7 +1300,8 @@ function TabButton({
 }
 
 export function NorwynDashboard({ context }: { context: NorwynContext }) {
-  const [activeTab, setActiveTab] = useState<NorwynTab>("mission");
+  const [activeTab, setActiveTab] = useState<NorwynTab>("home");
+  const [businessObjectives, setBusinessObjectives] = useState<BusinessObjective[]>([]);
   const [missions, setMissions] = useState<NorwynMission[]>([]);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
   const [editingMission, setEditingMission] = useState<NorwynMission | null>(null);
@@ -1220,6 +1318,12 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [engineMessage, setEngineMessage] = useState<string>("");
 
   const suggestions = useMemo(() => buildSuggestedMissions(context), [context]);
+  const activeObjectives = businessObjectives.filter((objective) => objective.status !== "Arquivado");
+  const primaryObjective =
+    activeObjectives.find((objective) => objective.priority === "Principal" && objective.status === "Ativo") ??
+    activeObjectives.find((objective) => objective.status === "Ativo") ??
+    activeObjectives[0] ??
+    null;
   const activeMission = missions.find((mission) => mission.id === activeMissionId) ?? missions.find((mission) => mission.priority === "Principal" && mission.status !== "Arquivada") ?? null;
   const detailMission = missions.find((mission) => mission.id === detailMissionId) ?? activeMission;
   const evidenceEngine = useMemo(
@@ -1251,7 +1355,7 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
             product: friendlyProductName(seed.product ?? recommendation.productName),
             recommendationOrigin: `${sourceId("Evidence", recommendation.id)} / ${seed.recommendationOrigin ?? "Evidence Engine"}`,
             evidence: [`Angulo recomendado: ${angle}.`, ...seed.evidence],
-            rule: `${angle}: ${seed.rule ?? recommendation.decisionRule}`,
+            rule: `${angle}: ${seed.rule ?? recommendation.expectedImpact}`,
           };
         }),
     [evidenceEngine, activeMission],
@@ -1260,6 +1364,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
 
   useEffect(() => {
     try {
+      const storedObjectives = ensureDefaultBusinessObjectives(JSON.parse(window.localStorage.getItem(BUSINESS_OBJECTIVES_KEY) || "[]") as BusinessObjective[]);
+      setBusinessObjectives(storedObjectives);
+      window.localStorage.setItem(BUSINESS_OBJECTIVES_KEY, JSON.stringify(storedObjectives));
       const stored = JSON.parse(window.localStorage.getItem(MISSIONS_KEY) || "[]") as NorwynMission[];
       setMissions(stored);
       setActiveMissionId(window.localStorage.getItem(ACTIVE_MISSION_KEY));
@@ -1268,6 +1375,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
       setShadowActions(JSON.parse(window.localStorage.getItem(SHADOW_KEY) || "[]") as ShadowAction[]);
       setKnowledgeEvents(JSON.parse(window.localStorage.getItem(KNOWLEDGE_KEY) || "[]") as KnowledgeEvent[]);
     } catch {
+      const defaults = defaultBusinessObjectives();
+      setBusinessObjectives(defaults);
+      window.localStorage.setItem(BUSINESS_OBJECTIVES_KEY, JSON.stringify(defaults));
       setMissions([]);
       setBriefings([]);
       setDrafts([]);
@@ -1283,6 +1393,11 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   function persist(next: NorwynMission[]) {
     setMissions(next);
     window.localStorage.setItem(MISSIONS_KEY, JSON.stringify(next));
+  }
+
+  function persistBusinessObjectives(next: BusinessObjective[]) {
+    setBusinessObjectives(next);
+    window.localStorage.setItem(BUSINESS_OBJECTIVES_KEY, JSON.stringify(next));
   }
 
   function saveMission(mission: NorwynMission) {
@@ -1444,7 +1559,7 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         : [savedSignal, ...current],
     );
     setEditingSignal(null);
-    setActiveTab("signals");
+    setActiveTab("knowledge");
   }
 
   async function updateSignalStatus(signal: NorwynSignal, status: NorwynSignalStatus) {
@@ -1621,10 +1736,10 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-black uppercase tracking-wide text-brand-clay">Norwyn Mission OS</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-brand-teal sm:text-4xl">Mission Center</h1>
+          <p className="text-xs font-black uppercase tracking-wide text-brand-clay">Norwyn OS V1</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-brand-teal sm:text-4xl">Executive Home</h1>
           <p className="mt-3 max-w-4xl text-sm leading-6 text-brand-teal/70">
-            Missoes definem a direcao, Intelligence interpreta sinais e Strategy transforma o conhecimento em decisoes operacionais.
+            Business Strategy orienta as missoes, os dados operacionais viram evidencias e a Norwyn transforma sinais em decisoes claras para o dia.
           </p>
         </div>
         <div className="flex flex-col items-start gap-2 sm:items-end">
@@ -1646,8 +1761,20 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
       ) : null}
 
       <div className="flex flex-wrap gap-2">
+        <TabButton active={activeTab === "home"} onClick={() => setActiveTab("home")}>
+          <Home className="h-4 w-4" /> Executive Home
+        </TabButton>
+        <TabButton active={activeTab === "business"} onClick={() => setActiveTab("business")}>
+          <BriefcaseBusiness className="h-4 w-4" /> Business Strategy
+        </TabButton>
         <TabButton active={activeTab === "mission"} onClick={() => setActiveTab("mission")}>
           <Flag className="h-4 w-4" /> Mission Center
+        </TabButton>
+        <TabButton active={activeTab === "intelligence"} onClick={() => setActiveTab("intelligence")}>
+          <Layers3 className="h-4 w-4" /> Intelligence
+        </TabButton>
+        <TabButton active={activeTab === "evidence"} onClick={() => setActiveTab("evidence")}>
+          <CheckCircle2 className="h-4 w-4" /> Evidence
         </TabButton>
         <TabButton active={activeTab === "strategy"} onClick={() => setActiveTab("strategy")}>
           <Compass className="h-4 w-4" /> Strategy
@@ -1661,23 +1788,49 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         <TabButton active={activeTab === "shadow"} onClick={() => setActiveTab("shadow")}>
           <Eye className="h-4 w-4" /> Shadow Mode
         </TabButton>
-        <TabButton active={activeTab === "intelligence"} onClick={() => setActiveTab("intelligence")}>
-          <Layers3 className="h-4 w-4" /> Intelligence
+        <TabButton active={activeTab === "knowledge"} onClick={() => setActiveTab("knowledge")}>
+          <BookOpen className="h-4 w-4" /> Knowledge
         </TabButton>
-        <TabButton active={activeTab === "evidence"} onClick={() => setActiveTab("evidence")}>
-          <CheckCircle2 className="h-4 w-4" /> Evidence
-        </TabButton>
-        <TabButton active={activeTab === "signals"} onClick={() => setActiveTab("signals")}>
-          <Target className="h-4 w-4" /> Signals
-        </TabButton>
-        <TabButton active={activeTab === "automation"} onClick={() => setActiveTab("automation")}>
-          <Bot className="h-4 w-4" /> Automation
+        <TabButton active={activeTab === "guide"} onClick={() => setActiveTab("guide")}>
+          <Bot className="h-4 w-4" /> Como funciona
         </TabButton>
       </div>
+
+      {activeTab === "home" ? (
+        <ExecutiveHomeView
+          context={context}
+          businessObjectives={businessObjectives}
+          primaryObjective={primaryObjective}
+          missions={missions}
+          activeMission={activeMission}
+          opportunities={opportunities}
+          evidenceEngine={evidenceEngine}
+          knowledgeEvents={knowledgeEvents}
+          openMission={(id) => {
+            setDetailMissionId(id);
+            setActiveTab("mission");
+          }}
+          openBriefing={(seed) => openBriefing(seed)}
+          goTo={(tab) => setActiveTab(tab)}
+        />
+      ) : null}
+
+      {activeTab === "business" ? (
+        <BusinessStrategyView
+          objectives={businessObjectives}
+          missions={missions}
+          saveObjectives={persistBusinessObjectives}
+          openMission={(id) => {
+            setDetailMissionId(id);
+            setActiveTab("mission");
+          }}
+        />
+      ) : null}
 
       {activeTab === "mission" ? (
         <MissionCenterView
           context={context}
+          businessObjectives={businessObjectives}
           missions={missions}
           activeMission={activeMission}
           detailMission={detailMission}
@@ -1769,19 +1922,11 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
           openBriefing={(recommendation) => openBriefing(evidenceRecommendationToBriefingSeed(recommendation, activeMission?.id) as BriefingSeed)}
         />
       ) : null}
-      {activeTab === "signals" ? (
-        <SignalsView
-          signals={signals}
-          editSignal={setEditingSignal}
-          newSignal={() => setEditingSignal(emptySignal())}
-          archiveSignal={archiveSignal}
-          updateSignalStatus={updateSignalStatus}
-        />
-      ) : null}
-      {activeTab === "automation" ? <PreviewView icon={<Bot className="h-5 w-5" />} title="Automation" items={["Disparos", "Lembretes", "Tarefas", "Fluxos", "Alertas", "Integracoes"]} /> : null}
+      {activeTab === "knowledge" ? <KnowledgeBaseView knowledgeEvents={knowledgeEvents} signals={signals} /> : null}
+      {activeTab === "guide" ? <ArchitectureGuideView /> : null}
 
       {editingMission ? (
-        <MissionForm mission={editingMission} close={() => setEditingMission(null)} save={saveMission} />
+        <MissionForm mission={editingMission} businessObjectives={businessObjectives} close={() => setEditingMission(null)} save={saveMission} />
       ) : null}
       {editingBriefing ? (
         <BriefingForm briefing={editingBriefing} missions={missions} close={() => setEditingBriefing(null)} save={saveBriefing} />
@@ -1796,8 +1941,289 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   );
 }
 
+function ExecutiveHomeView({
+  context,
+  businessObjectives,
+  primaryObjective,
+  missions,
+  activeMission,
+  opportunities,
+  evidenceEngine,
+  knowledgeEvents,
+  openMission,
+  openBriefing,
+  goTo,
+}: {
+  context: NorwynContext;
+  businessObjectives: BusinessObjective[];
+  primaryObjective: BusinessObjective | null;
+  missions: NorwynMission[];
+  activeMission: NorwynMission | null;
+  opportunities: BriefingSeed[];
+  evidenceEngine: ReturnType<typeof buildEvidenceEngine>;
+  knowledgeEvents: KnowledgeEvent[];
+  openMission: (id: string) => void;
+  openBriefing: (seed: BriefingSeed) => void;
+  goTo: (tab: NorwynTab) => void;
+}) {
+  const activeMissions = missions.filter((mission) => mission.status !== "Arquivada" && mission.status !== "Encerrada");
+  const summary = buildExecutiveSummary(context, activeMission, opportunities);
+  const upcomingEvents = context.agendaEvents.filter((event) => inLastDays(event.inicio, -30) || parseDate(event.inicio));
+  const criticalTasks = context.atividades.filter((task) => ["Alta", "Urgente"].includes(String(task.prioridade ?? "")) && task.status !== "concluida");
+  const openIncidents = context.ocorrencias.filter((item) => !["Resolvido", "Cancelado", "Ignorado"].includes(String(item.status ?? "")));
+  const topPlay = evidenceEngine.launchPatterns[0] ?? null;
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="max-w-4xl">
+            <p className="text-xs font-black uppercase text-brand-clay">Estrategia da empresa</p>
+            <h2 className="mt-2 text-2xl font-semibold text-brand-teal">{primaryObjective?.name ?? "Nenhum objetivo estrategico ativo"}</h2>
+            <p className="mt-2 text-sm leading-6 text-brand-teal/70">{primaryObjective?.description ?? "Cadastre um objetivo em Business Strategy para orientar a Norwyn."}</p>
+          </div>
+          <div className="grid min-w-[220px] gap-2">
+            <MissionMeta label="Meta" value={primaryObjective?.target ?? "-"} />
+            <MissionMeta label="Status" value={primaryObjective?.status ?? "-"} />
+            <MissionMeta label="Progresso" value={primaryObjective ? `${primaryObjective.progress}%` : "-"} />
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <MiniCounter label="Objetivos ativos" value={businessObjectives.filter((item) => item.status === "Ativo").length} />
+          <MiniCounter label="Missoes ativas" value={activeMissions.length} />
+          <MiniCounter label="Oportunidades" value={opportunities.length} />
+          <MiniCounter label="Alertas" value={criticalTasks.length + openIncidents.length} />
+        </div>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <ExecutiveSummaryCard summary={summary} knowledgeEvents={knowledgeEvents} />
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <SectionTitle icon={<Target className="h-5 w-5" />} title="O que fazer agora" />
+          <div className="mt-4 space-y-3">
+            {opportunities.slice(0, 4).map((item) => (
+              <article key={`${item.title}-${item.rule}`} className="rounded-md border border-brand-sand bg-white/85 p-3">
+                <p className="text-[11px] font-black uppercase text-brand-clay">{item.priority ?? "Prioridade"}</p>
+                <h3 className="mt-1 text-sm font-semibold text-brand-teal">{item.title}</h3>
+                <p className="mt-2 text-xs leading-5 text-brand-teal/65">{item.objective}</p>
+                <p className="mt-2 text-xs font-bold text-brand-teal/55">Por que: {item.evidence?.[0] ?? item.rule ?? "Sinal operacional detectado."}</p>
+                <button type="button" onClick={() => openBriefing(item)} className="mt-3 h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white">Criar briefing</button>
+              </article>
+            ))}
+            {!opportunities.length ? <EmptyState>Nenhuma recomendacao priorizada no recorte atual.</EmptyState> : null}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <SectionTitle icon={<Flag className="h-5 w-5" />} title="Missoes ativas" />
+          <div className="mt-4 space-y-3">
+            {activeMissions.slice(0, 5).map((mission) => (
+              <button key={mission.id} type="button" onClick={() => openMission(mission.id)} className="w-full rounded-md border border-brand-sand bg-white/85 p-3 text-left">
+                <p className="text-sm font-semibold text-brand-teal">{mission.name}</p>
+                <p className="mt-1 text-xs text-brand-teal/60">{mission.status} - {mission.priority} - prazo {mission.endDate || "-"}</p>
+              </button>
+            ))}
+            {!activeMissions.length ? <EmptyState>Nenhuma missao ativa criada.</EmptyState> : null}
+          </div>
+        </Card>
+
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <SectionTitle icon={<Sparkles className="h-5 w-5" />} title="Winning Plays" />
+          {topPlay ? (
+            <article className="mt-4 rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-xs font-black uppercase text-brand-clay">{topPlay.format}</p>
+              <h3 className="mt-1 text-sm font-semibold text-brand-teal">{topPlay.contentTitle}</h3>
+              <p className="mt-2 text-xs text-brand-teal/65">
+                {topPlay.salesInWindow} venda(s) na janela e {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(topPlay.revenueInWindow)} de receita bruta associada.
+              </p>
+              <p className="mt-2 text-xs font-bold text-brand-teal/55">Motivo: influencia {topPlay.influenceLevel.toLowerCase()} com evidencia historica.</p>
+              <button type="button" onClick={() => goTo("briefing")} className="mt-3 h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Criar nova versao</button>
+            </article>
+          ) : (
+            <EmptyState>Sem play historico suficiente para sugerir repeticao.</EmptyState>
+          )}
+        </Card>
+
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Agenda e alertas" />
+          <div className="mt-4 space-y-3">
+            <MissionMeta label="Eventos proximos" value={`${upcomingEvents.slice(0, 7).length}`} />
+            <MissionMeta label="Tarefas criticas" value={`${criticalTasks.length}`} />
+            <MissionMeta label="Ocorrencias abertas" value={`${openIncidents.length}`} />
+            <p className="text-xs leading-5 text-brand-teal/60">Use Agenda, Atividades e Ocorrencias como sensores. A decisao consolidada fica nesta home.</p>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function BusinessStrategyView({
+  objectives,
+  missions,
+  saveObjectives,
+  openMission,
+}: {
+  objectives: BusinessObjective[];
+  missions: NorwynMission[];
+  saveObjectives: (objectives: BusinessObjective[]) => void;
+  openMission: (id: string) => void;
+}) {
+  function patchObjective(id: string, patch: Partial<BusinessObjective>) {
+    saveObjectives(objectives.map((objective) => (objective.id === id ? { ...objective, ...patch, updatedAt: new Date().toISOString() } : objective)));
+  }
+
+  function restoreDefaults() {
+    saveObjectives(ensureDefaultBusinessObjectives(objectives));
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitle icon={<BriefcaseBusiness className="h-5 w-5" />} title="Business Strategy" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
+              Objetivos deixam de ser apenas OKRs e passam a orientar missoes, recomendacoes, briefings e leituras dos sensores operacionais.
+            </p>
+          </div>
+          <button type="button" onClick={restoreDefaults} className="h-9 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal">Garantir objetivos base</button>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        {objectives.map((objective) => {
+          const relatedMissions = missions.filter((mission) => mission.strategicObjectiveId === objective.id && mission.status !== "Arquivada");
+          return (
+            <Card key={objective.id} className="border-[#E9CBD1] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-black uppercase text-brand-clay">{objective.category} - {objective.horizon}</p>
+                  <h3 className="mt-2 text-lg font-semibold text-brand-teal">{objective.name}</h3>
+                </div>
+                <span className="rounded-full bg-brand-cream px-2 py-1 text-[11px] font-black text-brand-teal">{objective.status}</span>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-brand-teal/70">{objective.description}</p>
+              <div className="mt-4 grid gap-2">
+                <MissionMeta label="Meta" value={objective.target} />
+                <MissionMeta label="Prazo" value={`${objective.startDate} - ${objective.endDate}`} />
+                <MissionMeta label="Progresso" value={`${objective.progress}%`} />
+                <MissionMeta label="KPIs" value={objective.kpis.join(", ")} />
+              </div>
+              <div className="mt-4 h-2 rounded-full bg-brand-sand/45">
+                <div className="h-2 rounded-full bg-brand-clay" style={{ width: `${Math.min(100, Math.max(0, objective.progress))}%` }} />
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {businessStatuses.map((status) => (
+                  <button key={status} type="button" onClick={() => patchObjective(objective.id, { status })} className={`h-8 rounded-md border px-2 text-[11px] font-bold ${objective.status === status ? "border-brand-teal bg-brand-teal text-white" : "border-brand-sand bg-white text-brand-teal"}`}>
+                    {status}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 rounded-md border border-brand-sand bg-white/70 p-3">
+                <p className="text-[11px] font-black uppercase text-brand-clay">Missoes relacionadas</p>
+                {relatedMissions.length ? relatedMissions.slice(0, 4).map((mission) => (
+                  <button key={mission.id} type="button" onClick={() => openMission(mission.id)} className="mt-2 block text-left text-sm font-semibold text-brand-teal underline-offset-4 hover:underline">
+                    {mission.name}
+                  </button>
+                )) : <p className="mt-2 text-sm text-brand-teal/60">Nenhuma missao vinculada ainda.</p>}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeBaseView({ knowledgeEvents, signals }: { knowledgeEvents: KnowledgeEvent[]; signals: NorwynSignal[] }) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<BookOpen className="h-5 w-5" />} title="Knowledge Base" />
+        <p className="mt-2 text-sm leading-6 text-brand-teal/70">Aprendizados locais gerados por missoes, briefings, drafts, Shadow Mode e execucoes registradas.</p>
+        <div className="mt-4 space-y-3">
+          {knowledgeEvents.length ? knowledgeEvents.map((event) => (
+            <article key={event.id} className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-sm font-semibold text-brand-teal">{event.title}</p>
+              <p className="mt-1 text-xs text-brand-teal/60">{event.type} - {event.status} - {new Date(event.createdAt).toLocaleString("pt-BR")}</p>
+              <p className="mt-2 text-xs text-brand-teal/55">{event.evidence.join("; ")}</p>
+            </article>
+          )) : <EmptyState>Nenhum aprendizado persistido ainda.</EmptyState>}
+        </div>
+      </Card>
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<Target className="h-5 w-5" />} title="Signals ativos" />
+        <div className="mt-4 space-y-3">
+          {signals.slice(0, 10).map((signal) => (
+            <article key={signal.id} className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-sm font-semibold text-brand-teal">{signal.title}</p>
+              <p className="mt-1 text-xs text-brand-teal/60">{signal.category} - score {signal.final_score}</p>
+            </article>
+          ))}
+          {!signals.length ? <EmptyState>Nenhum signal ativo registrado.</EmptyState> : null}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function ArchitectureGuideView() {
+  const layers = [
+    ["Dados Operacionais", "Instagram, Ads, Comercial, Agenda, Atividades, Ocorrencias e Financeiro alimentam a Norwyn."],
+    ["Business Strategy", "Define a direcao da empresa e os objetivos que devem orientar qualquer decisao."],
+    ["Mission Engine", "Transforma objetivos em missoes operacionais com meta, prazo, KPIs e proximo passo."],
+    ["Intelligence", "Interpreta sinais sem assumir que o foco sempre sera o mesmo produto."],
+    ["Evidence Engine", "Mostra as evidencias que justificam recomendacoes e reduz decisoes genericas."],
+    ["Strategy Planner", "Organiza a decisao: o que fazer agora, por que e com qual confianca."],
+    ["Briefing Center", "Converte uma decisao em especificacao revisavel antes da execucao."],
+    ["Studio e Shadow", "Prepara rascunhos e compara a execucao real com a estrategia esperada."],
+    ["Knowledge Base", "Preserva aprendizados para orientar proximas missoes."],
+  ];
+  const faq = [
+    ["Quero saber qual conteudo repetir.", "Use Evidence ou Winning Plays na Executive Home."],
+    ["Quero organizar minha empresa.", "Comece por Business Strategy."],
+    ["Quero saber o que fazer hoje.", "Abra a Executive Home."],
+    ["Quero produzir conteudo.", "Use Briefing Center e Studio."],
+    ["Quero entender por que a Norwyn recomendou isso.", "Abra Evidence e leia as evidencias da recomendacao."],
+  ];
+  return (
+    <div className="space-y-4">
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<Bot className="h-5 w-5" />} title="Como a Norwyn funciona" />
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-brand-teal/70">
+          A Norwyn nao substitui os modulos operacionais. Ela usa esses modulos como sensores para responder o que aconteceu, o que merece atencao e qual decisao faz sentido agora.
+        </p>
+      </Card>
+      <div className="grid gap-3 md:grid-cols-3">
+        {layers.map(([title, description], index) => (
+          <article key={title} className="rounded-md border border-brand-sand bg-white/85 p-4">
+            <p className="text-[11px] font-black uppercase text-brand-clay">Camada {index + 1}</p>
+            <h3 className="mt-2 text-base font-semibold text-brand-teal">{title}</h3>
+            <p className="mt-2 text-sm leading-6 text-brand-teal/65">{description}</p>
+          </article>
+        ))}
+      </div>
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<BookOpen className="h-5 w-5" />} title="Perguntas frequentes" />
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {faq.map(([question, answer]) => (
+            <div key={question} className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-sm font-semibold text-brand-teal">{question}</p>
+              <p className="mt-1 text-sm text-brand-teal/65">{answer}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function MissionCenterView({
   context,
+  businessObjectives,
   missions,
   activeMission,
   detailMission,
@@ -1815,6 +2241,7 @@ function MissionCenterView({
   runMissionEngine,
 }: {
   context: NorwynContext;
+  businessObjectives: BusinessObjective[];
   missions: NorwynMission[];
   activeMission: NorwynMission | null;
   detailMission: NorwynMission | null;
@@ -1833,6 +2260,9 @@ function MissionCenterView({
 }) {
   const visibleMissions = missions.filter((mission) => mission.status !== "Arquivada");
   const executiveSummary = buildExecutiveSummary(context, activeMission, opportunities);
+  const activeObjective = activeMission?.strategicObjectiveId
+    ? businessObjectives.find((objective) => objective.id === activeMission.strategicObjectiveId)
+    : null;
 
   return (
     <div className="space-y-4">
@@ -1857,7 +2287,7 @@ function MissionCenterView({
           </div>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
-          <MissionSummary mission={activeMission} context={context} />
+          <MissionSummary mission={activeMission} objective={activeObjective} context={context} />
           <div className="grid gap-3 md:grid-cols-3">
             <MiniCounter label="Principal" value={missions.filter((mission) => mission.priority === "Principal" && mission.status !== "Arquivada").length} />
             <MiniCounter label="Estrategicas" value={missions.filter((mission) => mission.priority === "Estrategica" && mission.status !== "Arquivada").length} />
@@ -1990,7 +2420,15 @@ function ExecutiveSummaryCard({
   );
 }
 
-function MissionSummary({ mission, context }: { mission: NorwynMission | null; context: NorwynContext }) {
+function MissionSummary({
+  mission,
+  objective,
+  context,
+}: {
+  mission: NorwynMission | null;
+  objective?: BusinessObjective | null;
+  context: NorwynContext;
+}) {
   if (!mission) {
     return (
       <article className="rounded-md border border-brand-sand bg-white/90 p-4">
@@ -2008,6 +2446,7 @@ function MissionSummary({ mission, context }: { mission: NorwynMission | null; c
       <p className="mt-2 text-sm leading-6 text-brand-teal/70">{mission.objective}</p>
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <MissionMeta label="Status" value={mission.status} />
+        <MissionMeta label="Objetivo estrategico" value={objective?.name ?? "Sem vinculo"} />
         <MissionMeta label="Periodo" value={`${mission.startDate} - ${mission.endDate}`} />
         <MissionMeta label="Meta" value={`${mission.mainGoal} (${mission.goalUnit})`} />
         <MissionMeta label="Atual" value={goal.actualText} />
@@ -2247,7 +2686,17 @@ function MissionListItem({
   );
 }
 
-function MissionForm({ mission, close, save }: { mission: NorwynMission; close: () => void; save: (mission: NorwynMission) => void }) {
+function MissionForm({
+  mission,
+  businessObjectives,
+  close,
+  save,
+}: {
+  mission: NorwynMission;
+  businessObjectives: BusinessObjective[];
+  close: () => void;
+  save: (mission: NorwynMission) => void;
+}) {
   const [draft, setDraft] = useState<NorwynMission>(mission);
   const toggleSource = (source: string) => {
     setDraft((current) => ({
@@ -2270,6 +2719,14 @@ function MissionForm({ mission, close, save }: { mission: NorwynMission; close: 
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <Field label="Nome da missao"><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="form-input" /></Field>
+          <Field label="Objetivo estrategico">
+            <select value={draft.strategicObjectiveId ?? ""} onChange={(event) => setDraft({ ...draft, strategicObjectiveId: event.target.value })} className="form-input">
+              <option value="">Sem objetivo vinculado</option>
+              {businessObjectives.filter((objective) => objective.status !== "Arquivado").map((objective) => (
+                <option key={objective.id} value={objective.id}>{objective.name}</option>
+              ))}
+            </select>
+          </Field>
           <Field label="Responsavel"><input value={draft.owner} onChange={(event) => setDraft({ ...draft, owner: event.target.value })} className="form-input" /></Field>
           <Field label="Tipo"><select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as MissionType })} className="form-input">{missionTypes.map((item) => <option key={item}>{item}</option>)}</select></Field>
           <Field label="Status"><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as MissionStatus })} className="form-input">{missionStatuses.map((item) => <option key={item}>{item}</option>)}</select></Field>
