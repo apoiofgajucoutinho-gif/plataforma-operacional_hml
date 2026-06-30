@@ -2311,36 +2311,79 @@ function EvidenceEngineView({
   evidenceEngine: ReturnType<typeof buildEvidenceEngine>;
   openBriefing: (recommendation: NorwynEvidenceRecommendation) => void;
 }) {
-  const [productFilter, setProductFilter] = useState("all");
-  const [formatFilter, setFormatFilter] = useState("all");
+  const [soldProductFilter, setSoldProductFilter] = useState("all");
+  const [contentFilter, setContentFilter] = useState("all");
+  const [campaignFilter, setCampaignFilter] = useState("all");
+  const [missionFilter, setMissionFilter] = useState("all");
   const [periodFilter, setPeriodFilter] = useState("30");
-  const [levelFilter, setLevelFilter] = useState("all");
+  const [selectedPatternId, setSelectedPatternId] = useState<string | null>(null);
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const products = useMemo(
     () => [...new Set(evidenceEngine.launchPatterns.map((pattern) => pattern.productName).filter(Boolean) as string[])].sort(),
     [evidenceEngine.launchPatterns],
   );
-  const formats = useMemo(
+  const contentOptions = useMemo(
     () => [...new Set(evidenceEngine.launchPatterns.map((pattern) => pattern.format).filter(Boolean))].sort(),
+    [evidenceEngine.launchPatterns],
+  );
+  const campaigns = useMemo(
+    () => [...new Set(evidenceEngine.launchPatterns.map((pattern) => pattern.campaignId).filter(Boolean) as string[])].sort(),
+    [evidenceEngine.launchPatterns],
+  );
+  const missions = useMemo(
+    () => [...new Set(evidenceEngine.launchPatterns.map((pattern) => pattern.missionId).filter(Boolean) as string[])].sort(),
     [evidenceEngine.launchPatterns],
   );
   const filteredPatterns = useMemo(() => {
     const now = new Date();
     return evidenceEngine.launchPatterns.filter((pattern) => {
       const publishedAt = new Date(pattern.publishedAt);
+      const age = Number.isNaN(publishedAt.getTime()) ? Infinity : (now.getTime() - publishedAt.getTime()) / (1000 * 60 * 60 * 24);
       const inPeriod =
         periodFilter === "all" ||
-        (!Number.isNaN(publishedAt.getTime()) &&
-          (now.getTime() - publishedAt.getTime()) / (1000 * 60 * 60 * 24) <= Number(periodFilter));
-      const productOk = productFilter === "all" || pattern.productName === productFilter;
-      const formatOk = formatFilter === "all" || pattern.format === formatFilter;
-      const levelOk = levelFilter === "all" || pattern.influenceLevel === levelFilter;
-      return inPeriod && productOk && formatOk && levelOk;
+        (periodFilter === "last-launch" && pattern.influenceScore >= 65) ||
+        (periodFilter === "current-launch" && age <= 10) ||
+        age <= Number(periodFilter);
+      const productOk = soldProductFilter === "all" || pattern.productName === soldProductFilter || pattern.associatedProducts.includes(soldProductFilter);
+      const contentOk = contentFilter === "all" || pattern.format === contentFilter;
+      const campaignOk = campaignFilter === "all" || pattern.campaignId === campaignFilter;
+      const missionOk = missionFilter === "all" || pattern.missionId === missionFilter;
+      return inPeriod && productOk && contentOk && campaignOk && missionOk;
     });
-  }, [evidenceEngine.launchPatterns, productFilter, formatFilter, periodFilter, levelFilter]);
+  }, [evidenceEngine.launchPatterns, soldProductFilter, contentFilter, campaignFilter, missionFilter, periodFilter]);
 
   const summary = evidenceEngine.summary;
+  const selectedPattern = evidenceEngine.launchPatterns.find((pattern) => pattern.id === selectedPatternId) ?? null;
+  const selectedPatternEvidence = selectedEvidenceId?.startsWith("pattern-")
+    ? evidenceEngine.launchPatterns.find((pattern) => `pattern-${pattern.id}` === selectedEvidenceId) ?? null
+    : null;
+  const selectedEvidence =
+    evidenceEngine.insights.find((insight) => insight.id === selectedEvidenceId) ??
+    evidenceEngine.recommendations.find((recommendation) => recommendation.id === selectedEvidenceId) ??
+    (selectedPatternEvidence
+      ? {
+          title: selectedPatternEvidence.contentTitle,
+          interpretation:
+            "Este conteudo foi selecionado por concentrar sinais historicos de publicacao, interacao e vendas confirmadas dentro da janela analisada. A leitura indica influencia potencial, nao atribuicao direta.",
+          evidenceCards: selectedPatternEvidence.evidenceCards,
+        }
+      : null) ??
+    null;
   const totalRevenue = filteredPatterns.reduce((sum, pattern) => sum + pattern.revenueInWindow, 0);
   const totalSales = filteredPatterns.reduce((sum, pattern) => sum + pattern.salesInWindow, 0);
+  const uniqueTransactions = new Map<string, number>();
+  filteredPatterns.forEach((pattern) => {
+    pattern.transactionRevenue.forEach((item) => uniqueTransactions.set(item.id, item.value));
+  });
+  const uniqueRevenue = [...uniqueTransactions.values()].reduce((sum, value) => sum + value, 0);
+  const topRecommendation = evidenceEngine.recommendations[0];
+  const visualizing = [
+    periodFilter === "all" ? "Historico completo" : periodFilter === "last-launch" ? "Ultimo lancamento" : periodFilter === "current-launch" ? "Lancamento atual" : `Ultimos ${periodFilter} dias`,
+    soldProductFilter === "all" ? "Todos os produtos vendidos" : soldProductFilter,
+    contentFilter === "all" ? "Todos os conteudos" : contentFilter,
+    campaignFilter === "all" ? "Todas as campanhas" : `Campanha ${campaignFilter}`,
+    missionFilter === "all" ? "Todas as missoes" : `Missao ${missionFilter}`,
+  ].join(" • ");
 
   return (
     <div className="space-y-4">
@@ -2349,17 +2392,59 @@ function EvidenceEngineView({
           <div>
             <SectionTitle icon={<CheckCircle2 className="h-5 w-5" />} title="Evidence Engine" />
             <p className="mt-2 max-w-4xl text-sm leading-6 text-brand-teal/70">
-              Leitura deterministica de padroes historicos e influencia potencial. Nao representa atribuicao direta de vendas.
+              Esta analise identifica padroes historicos e influencia potencial. Ela nao representa atribuicao direta de vendas.
             </p>
           </div>
           <span className="rounded-full bg-[#FFF4CF] px-3 py-1 text-xs font-black uppercase text-brand-clay">
-            Correlacao operacional
+            Fonte: Evidence Engine
           </span>
         </div>
       </Card>
 
       <Card className="border-[#E9CBD1] p-4">
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <Field label="Produto analisado">
+            <select value={soldProductFilter} onChange={(event) => setSoldProductFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+              <option value="all">Todos os produtos</option>
+              {products.map((product) => <option key={product} value={product}>{product}</option>)}
+            </select>
+          </Field>
+          <Field label="Conteudo relacionado">
+            <select value={contentFilter} onChange={(event) => setContentFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+              <option value="all">Todos os conteudos</option>
+              {contentOptions.map((format) => <option key={format} value={format}>{format}</option>)}
+            </select>
+          </Field>
+          <Field label="Produto vendido">
+            <select value={soldProductFilter} onChange={(event) => setSoldProductFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+              <option value="all">Todos vendidos</option>
+              {products.map((product) => <option key={product} value={product}>{product}</option>)}
+            </select>
+          </Field>
+          <Field label="Campanha">
+            <select value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+              <option value="all">Todas as campanhas</option>
+              {campaigns.map((campaign) => <option key={campaign} value={campaign}>{campaign}</option>)}
+            </select>
+          </Field>
+          <Field label="Missao">
+            <select value={missionFilter} onChange={(event) => setMissionFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
+              <option value="all">Todas as missoes</option>
+              {missions.map((mission) => <option key={mission} value={mission}>{mission}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          {[
+            ["last-launch", "Ultimo lancamento"],
+            ["current-launch", "Lancamento atual"],
+            ["30", "Ultimos 30 dias"],
+            ["all", "Historico completo"],
+          ].map(([value, label]) => (
+            <button key={value} type="button" onClick={() => setPeriodFilter(value)} className={`h-8 rounded-md border px-3 text-xs font-bold ${periodFilter === value ? "border-brand-teal bg-brand-teal text-white" : "border-brand-sand bg-white text-brand-teal"}`}>
+              {label}
+            </button>
+          ))}
           <Field label="Periodo">
             <select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
               <option value="7">7 dias</option>
@@ -2369,84 +2454,106 @@ function EvidenceEngineView({
               <option value="all">Tudo</option>
             </select>
           </Field>
-          <Field label="Produto">
-            <select value={productFilter} onChange={(event) => setProductFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
-              <option value="all">Todos os produtos</option>
-              {products.map((product) => <option key={product} value={product}>{product}</option>)}
-            </select>
-          </Field>
-          <Field label="Formato">
-            <select value={formatFilter} onChange={(event) => setFormatFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
-              <option value="all">Todos os formatos</option>
-              {formats.map((format) => <option key={format} value={format}>{format}</option>)}
-            </select>
-          </Field>
-          <Field label="Influencia">
-            <select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)} className="h-9 rounded-md border border-brand-sand bg-white px-3 text-sm">
-              <option value="all">Todos os niveis</option>
-              <option value="Baixa">Baixa</option>
-              <option value="Media">Media</option>
-              <option value="Alta">Alta</option>
-              <option value="Influencia Potencial">Influencia potencial</option>
-            </select>
-          </Field>
         </div>
+        <p className="mt-3 text-xs font-bold text-brand-teal/60">Visualizando: {visualizing}</p>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <MissionMeta label="Eventos analisados" value={filteredPatterns.length.toLocaleString("pt-BR")} />
-        <MissionMeta label="Vendas na janela" value={totalSales.toLocaleString("pt-BR")} />
-        <MissionMeta label="Receita na janela" value={totalRevenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
-        <MissionMeta label="Melhor formato" value={summary.bestFormat ?? "-"} />
-        <MissionMeta label="Produto mais associado" value={summary.topProduct ?? "-"} />
-      </div>
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <p className="text-xs font-black uppercase text-brand-clay">Resumo Executivo</p>
+        <h2 className="mt-1 text-xl font-semibold text-brand-teal">O que repetir, testar e observar agora</h2>
+        <p className="mt-2 text-sm leading-6 text-brand-teal/70">
+          {filteredPatterns.length
+            ? `Foram encontrados ${filteredPatterns.length} conteudo(s) com padrao de influencia potencial no recorte. ${summary.topProduct ? `O produto com maior sinal e ${summary.topProduct}.` : "Ainda nao ha produto dominante."} ${topRecommendation ? `Proximo passo: ${topRecommendation.nextStep}` : "A recomendacao principal ainda depende de mais sinais."}`
+            : "Nao ha evidencias suficientes nos filtros atuais. Recomenda-se ampliar o periodo ou coletar novas perguntas via Stories antes de decidir a proxima pauta."}
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <MissionMeta label="Conteudos com sinal" value={filteredPatterns.length.toLocaleString("pt-BR")} />
+          <MissionMeta label="Vendas acumuladas nas janelas" value={totalSales.toLocaleString("pt-BR")} />
+          <MissionMeta label="Receita acumulada nas janelas" value={totalRevenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+          <MissionMeta label="Receita unica do recorte" value={uniqueRevenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+          <MissionMeta label="Melhor formato" value={summary.bestFormat ?? "-"} />
+          <MissionMeta label="Confianca media" value={`${filteredPatterns.length ? Math.round(filteredPatterns.reduce((sum, pattern) => sum + pattern.influenceScore, 0) / filteredPatterns.length) : 0}%`} />
+        </div>
+      </Card>
 
       <Card className="border-[#E9CBD1] p-4 sm:p-5">
         <SectionTitle icon={<Target className="h-5 w-5" />} title="Launch Pattern Intelligence" />
         <p className="mt-2 text-sm leading-6 text-brand-teal/65">
           Responde quais formatos, horarios, temas e produtos apareceram associados a janelas de venda. Use como sinal para decidir o proximo teste, nao como prova de origem.
         </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <DetailBlock label="Melhor horario observado" value={summary.bestHour ?? "-"} />
-          <DetailBlock label="Melhor dia observado" value={summary.bestWeekday ?? "-"} />
-          <DetailBlock label="Venda bruta nas janelas" value={summary.totalWindowRevenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <DetailBlock label="Melhor horario para publicar (Instagram)" value={summary.bestPublishingHour ?? "-"} />
+          <DetailBlock label="Horario de maior conversao (Hotmart)" value={summary.bestConversionHour ?? "-"} />
+          <DetailBlock label="Melhor dia para publicar (Instagram)" value={summary.bestPublishingWeekday ?? "-"} />
+          <DetailBlock label="Melhor dia de vendas (Hotmart)" value={summary.bestSalesWeekday ?? "-"} />
         </div>
-        <div className="mt-4 overflow-x-auto rounded-md border border-brand-sand">
-          <table className="min-w-[860px] w-full text-left text-sm">
-            <thead className="bg-[#F1D9DD] text-[11px] uppercase text-brand-clay">
-              <tr>
-                <th className="px-3 py-2">Conteudo</th>
-                <th className="px-3 py-2">Formato</th>
-                <th className="px-3 py-2">Produto</th>
-                <th className="px-3 py-2">Janela</th>
-                <th className="px-3 py-2">Vendas</th>
-                <th className="px-3 py-2">Receita</th>
-                <th className="px-3 py-2">Match</th>
-                <th className="px-3 py-2">Influencia</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredPatterns.slice(0, 30).map((pattern) => (
-                <tr key={pattern.id} className="border-t border-brand-sand/70">
-                  <td className="max-w-[260px] px-3 py-3 font-semibold text-brand-teal">
-                    <p className="line-clamp-2">{pattern.contentTitle}</p>
-                    <p className="mt-1 text-xs font-normal text-brand-teal/55">{new Date(pattern.publishedAt).toLocaleDateString("pt-BR")}</p>
-                  </td>
-                  <td className="px-3 py-3 text-brand-teal/70">{pattern.format}</td>
-                  <td className="px-3 py-3 text-brand-teal/70">{pattern.productName ?? "-"}</td>
-                  <td className="px-3 py-3 text-brand-teal/70">{pattern.influenceHours}h</td>
-                  <td className="px-3 py-3 font-bold text-brand-teal">{pattern.salesInWindow}</td>
-                  <td className="px-3 py-3 font-bold text-brand-teal">{pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td>
-                  <td className="px-3 py-3 text-brand-teal/70">{pattern.productMatchScore}%</td>
-                  <td className="px-3 py-3">
-                    <span className="rounded-full bg-brand-cream px-2 py-1 text-xs font-black text-brand-clay">{pattern.influenceLevel}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {evidenceEngine.comparisons.map((item) => (
+            <article key={item.label} className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-[11px] font-black uppercase text-brand-clay">{item.label}</p>
+              <p className="mt-2 text-xl font-semibold text-brand-teal">{item.uniqueSales.toLocaleString("pt-BR")} vendas</p>
+              <p className="mt-1 text-xs text-brand-teal/60">{item.uniqueRevenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} unicos - score {item.avgInfluence}%</p>
+            </article>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          {filteredPatterns.slice(0, 24).map((pattern) => (
+            <article key={pattern.id} className="rounded-md border border-brand-sand bg-white/90 p-3 shadow-sm">
+              <div className="flex gap-3">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-cream text-xs font-bold text-brand-teal/55">
+                  {pattern.imageUrl ? <img src={pattern.imageUrl} alt="" className="h-full w-full object-cover" /> : pattern.format}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-black uppercase text-brand-clay">{pattern.format} - {new Date(pattern.publishedAt).toLocaleDateString("pt-BR")}</p>
+                  <h3 className="mt-1 line-clamp-2 text-sm font-semibold text-brand-teal">{pattern.contentTitle}</h3>
+                  <p className="mt-1 text-xs text-brand-teal/60">{pattern.productName ?? "Produto nao identificado"}</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <MissionMeta label="Vendas" value={pattern.salesInWindow.toLocaleString("pt-BR")} />
+                <MissionMeta label="Receita" value={pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+                <MissionMeta label="Match Score" value={`${pattern.productMatchScore}%`} />
+                <MissionMeta label="Influence Score" value={`${pattern.influenceScore}%`} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full bg-brand-cream px-2 py-1 text-xs font-black text-brand-clay">{pattern.influenceLevel}</span>
+                <span className="rounded-full bg-[#E7F4EF] px-2 py-1 text-xs font-black text-brand-teal">confianca {pattern.influenceScore}%</span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setSelectedEvidenceId(`pattern-${pattern.id}`)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Ver evidencias</button>
+                <button type="button" onClick={() => setSelectedPatternId(pattern.id)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Ver post</button>
+              </div>
+            </article>
+          ))}
         </div>
         {!filteredPatterns.length ? <EmptyState>Nenhum padrao encontrado nos filtros atuais. Isso pode indicar ausencia de eventos sincronizados ou vendas fora das janelas configuradas.</EmptyState> : null}
+      </Card>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<Sparkles className="h-5 w-5" />} title="Insights" />
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {evidenceEngine.insights.map((insight) => (
+            <article key={insight.id} className="rounded-md border border-brand-sand bg-white/85 p-4">
+              <p className="text-[11px] font-black uppercase text-brand-clay">confianca {insight.confidence}% - {insight.sourceCount} fonte(s)</p>
+              <h3 className="mt-2 text-base font-semibold text-brand-teal">{insight.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-brand-teal/65">{insight.interpretation}</p>
+              <p className="mt-3 text-sm font-semibold text-brand-teal">Acao sugerida: {insight.action}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setSelectedEvidenceId(insight.id)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Ver evidencias</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const recommendation = evidenceEngine.recommendations.find((item) => item.id === insight.relatedRecommendationId) ?? evidenceEngine.recommendations[0];
+                    if (recommendation) openBriefing(recommendation);
+                  }}
+                  className="h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white"
+                >
+                  Criar briefing
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
       </Card>
 
       <Card className="border-[#E9CBD1] p-4 sm:p-5">
@@ -2466,13 +2573,85 @@ function EvidenceEngineView({
                   </div>
                 ))}
               </div>
-              <button type="button" onClick={() => openBriefing(recommendation)} className="mt-4 h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white">
-                Gerar briefing
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setSelectedEvidenceId(recommendation.id)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Por que?</button>
+                <button type="button" onClick={() => openBriefing(recommendation)} className="h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white">
+                  Criar briefing
+                </button>
+              </div>
             </article>
           ))}
         </div>
       </Card>
+
+      {selectedPattern ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 p-4">
+          <Card className="my-6 w-full max-w-4xl border-[#E9CBD1] bg-white p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-brand-clay">Post analisado</p>
+                <h2 className="mt-1 text-xl font-semibold text-brand-teal">{selectedPattern.contentTitle}</h2>
+              </div>
+              <button type="button" onClick={() => setSelectedPatternId(null)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Fechar</button>
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+              <div className="overflow-hidden rounded-md border border-brand-sand bg-brand-cream/40">
+                {selectedPattern.imageUrl ? <img src={selectedPattern.imageUrl} alt="" className="h-full min-h-64 w-full object-cover" /> : <div className="flex min-h-64 items-center justify-center p-6 text-sm font-bold text-brand-teal/55">Imagem nao disponivel</div>}
+              </div>
+              <div className="space-y-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <MissionMeta label="Data" value={new Date(selectedPattern.publishedAt).toLocaleString("pt-BR")} />
+                  <MissionMeta label="Formato" value={selectedPattern.format} />
+                  <MissionMeta label="Produto" value={selectedPattern.productName ?? "-"} />
+                  <MissionMeta label="Janela" value={`${selectedPattern.influenceHours}h`} />
+                </div>
+                <p className="rounded-md border border-brand-sand bg-white/80 p-3 text-sm leading-6 text-brand-teal/70">
+                  {selectedPattern.contentCaption ?? "Sem legenda sincronizada."}
+                </p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {["alcance", "likes", "comentarios", "salvos", "compartilhamentos", "engajamento_score"].map((key) => (
+                    <MissionMeta key={key} label={key.replace("_", " ")} value={String(selectedPattern.performanceSnapshot?.[key] ?? "-")} />
+                  ))}
+                </div>
+                {selectedPattern.permalink ? (
+                  <a href={selectedPattern.permalink} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center rounded-md bg-brand-teal px-3 text-sm font-bold text-white">
+                    Abrir post
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          </Card>
+        </div>
+      ) : null}
+
+      {selectedEvidence ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 p-4">
+          <Card className="my-6 w-full max-w-3xl border-[#E9CBD1] bg-white p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-brand-clay">Evidencias utilizadas</p>
+                <h2 className="mt-1 text-xl font-semibold text-brand-teal">{selectedEvidence.title}</h2>
+              </div>
+              <button type="button" onClick={() => setSelectedEvidenceId(null)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Fechar</button>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-brand-teal/70">
+              {"interpretation" in selectedEvidence ? selectedEvidence.interpretation : selectedEvidence.expectedImpact}
+            </p>
+            <div className="mt-4 space-y-3">
+              {selectedEvidence.evidenceCards.map((card) => (
+                <article key={card.id} className="rounded-md border border-brand-sand bg-brand-cream/40 p-3">
+                  <p className="text-[11px] font-black uppercase text-brand-clay">{card.source} - confianca {card.confidence}%</p>
+                  <h3 className="mt-1 text-sm font-semibold text-brand-teal">{card.title}</h3>
+                  <p className="mt-1 text-sm leading-6 text-brand-teal/65">{card.description}</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-brand-teal/60">
+                    {card.details.map((detail) => <li key={detail}>{detail}</li>)}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 }

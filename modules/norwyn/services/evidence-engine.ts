@@ -4,6 +4,7 @@ import type {
   NorwynCommercialSale,
   NorwynContentEvent,
   NorwynEvidenceCard,
+  NorwynEvidenceInsight,
   NorwynEvidenceRecommendation,
   NorwynLaunchPattern,
   NorwynSignal,
@@ -22,13 +23,19 @@ type EvidenceEngineResult = {
   cards: NorwynEvidenceCard[];
   launchPatterns: NorwynLaunchPattern[];
   recommendations: NorwynEvidenceRecommendation[];
+  insights: NorwynEvidenceInsight[];
+  comparisons: Array<{ label: string; patterns: number; uniqueSales: number; uniqueRevenue: number; avgInfluence: number }>;
   summary: {
     bestFormat: string | null;
-    bestHour: string | null;
-    bestWeekday: string | null;
+    bestPublishingHour: string | null;
+    bestConversionHour: string | null;
+    bestPublishingWeekday: string | null;
+    bestSalesWeekday: string | null;
     topProduct: string | null;
     totalWindowSales: number;
     totalWindowRevenue: number;
+    uniqueSales: number;
+    uniqueRevenue: number;
   };
 };
 
@@ -56,6 +63,29 @@ function clamp(value: number, min = 0, max = 100) {
 
 function revenue(value: number | null | undefined) {
   return Number(value ?? 0);
+}
+
+function saleKey(sale: NorwynCommercialSale) {
+  return sale.transaction_id || sale.id;
+}
+
+function uniqueSales(sales: NorwynCommercialSale[]) {
+  const map = new Map<string, NorwynCommercialSale>();
+  for (const sale of sales) {
+    const key = saleKey(sale);
+    if (key) map.set(key, sale);
+  }
+  return [...map.values()];
+}
+
+function metadataText(event: NorwynContentEvent, keys: string[]) {
+  for (const key of keys) {
+    const metadataValue = event.metadata?.[key];
+    const performanceValue = event.performance_snapshot?.[key];
+    const value = metadataValue ?? performanceValue;
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function uniqueProducts(sales: NorwynCommercialSale[]) {
@@ -128,10 +158,11 @@ function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[]):
   if (!publishedAt) return null;
 
   const windowEnd = new Date(publishedAt.getTime() + Math.max(1, event.influence_hours) * 60 * 60 * 1000);
-  const salesInWindow = sales
+  const salesInWindow = uniqueSales(sales
     .map((sale) => ({ sale, date: toDate(sale.data_aprovacao ?? sale.data_compra) }))
     .filter(({ date }) => date && date >= publishedAt && date <= windowEnd)
-    .map(({ sale, date }) => ({ sale, date: date as Date }));
+    .map(({ sale }) => sale))
+    .map((sale) => ({ sale, date: toDate(sale.data_aprovacao ?? sale.data_compra) as Date }));
 
   if (!salesInWindow.length) return null;
 
@@ -153,6 +184,9 @@ function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[]):
   const level = influenceLevel(score);
   const format = formatOf(event);
   const productName = bestSale?.sale.produto_nome ?? null;
+  const associatedProducts = uniqueProducts(salesInWindow.map((item) => item.sale)).slice(0, 5);
+  const permalink = metadataText(event, ["permalink", "post_url", "url"]);
+  const imageUrl = metadataText(event, ["image_url", "thumbnail_url", "media_url", "picture"]);
 
   const evidenceCards: NorwynEvidenceCard[] = [
     {
@@ -195,15 +229,26 @@ function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[]):
     id: `${event.id}-${productName ?? "sem-produto"}`,
     contentEventId: event.id,
     contentTitle: event.title || "Conteudo sem titulo",
+    contentCaption: event.caption,
+    permalink,
+    imageUrl,
+    missionId: event.mission_id,
+    campaignId: event.campaign_id,
     format,
     publishedAt: event.published_at,
     influenceHours: event.influence_hours,
     productName,
+    associatedProducts,
+    transactionIds: salesInWindow.map((item) => saleKey(item.sale)).filter(Boolean),
+    transactionRevenue: salesInWindow
+      .map((item) => ({ id: saleKey(item.sale), value: revenue(item.sale.valor_bruto) }))
+      .filter((item) => Boolean(item.id)),
     productMatchScore: clamp(avgProductMatch),
     influenceScore: score,
     influenceLevel: level,
     salesInWindow: salesInWindow.length,
     revenueInWindow: totalRevenue,
+    performanceSnapshot: event.performance_snapshot,
     evidenceCards,
   };
 }
@@ -216,6 +261,82 @@ function topBy<T>(items: T[], getKey: (item: T) => string | null | undefined, ge
     totals.set(key, (totals.get(key) ?? 0) + getValue(item));
   }
   return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+function salesFromPatterns(patterns: NorwynLaunchPattern[], sourceSales: NorwynCommercialSale[]) {
+  const ids = new Set(patterns.flatMap((pattern) => pattern.transactionIds));
+  return uniqueSales(sourceSales.filter((sale) => ids.has(saleKey(sale))));
+}
+
+function comparison(label: string, patterns: NorwynLaunchPattern[], sales: NorwynCommercialSale[]) {
+  const unique = salesFromPatterns(patterns, sales);
+  return {
+    label,
+    patterns: patterns.length,
+    uniqueSales: unique.length,
+    uniqueRevenue: unique.reduce((sum, sale) => sum + revenue(sale.valor_bruto), 0),
+    avgInfluence: patterns.length ? clamp(patterns.reduce((sum, pattern) => sum + pattern.influenceScore, 0) / patterns.length) : 0,
+  };
+}
+
+function inLastDays(value: string, days: number) {
+  const date = toDate(value);
+  if (!date) return false;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - days);
+  return date >= start;
+}
+
+function buildInsights(patterns: NorwynLaunchPattern[], recommendations: NorwynEvidenceRecommendation[]): NorwynEvidenceInsight[] {
+  const topPattern = patterns[0];
+  const highPatterns = patterns.filter((pattern) => pattern.influenceScore >= 65);
+  const format = topBy(highPatterns, (pattern) => pattern.format, (pattern) => pattern.influenceScore) ?? topPattern?.format ?? null;
+  const product = topBy(patterns, (pattern) => pattern.productName, (pattern) => pattern.revenueInWindow) ?? topPattern?.productName ?? null;
+  const insights: NorwynEvidenceInsight[] = [];
+
+  if (topPattern) {
+    insights.push({
+      id: "repeat-proven-angle",
+      title: "Repetir o melhor padrao com ajuste controlado",
+      interpretation: `${topPattern.contentTitle} concentrou ${topPattern.salesInWindow} venda(s) e ${currencyFormatter.format(topPattern.revenueInWindow)} na janela analisada. Use como referencia, nao como atribuicao direta.`,
+      confidence: topPattern.influenceScore,
+      sourceCount: topPattern.evidenceCards.length,
+      action: `Criar novo briefing em formato ${topPattern.format} com CTA explicito para ${topPattern.productName ?? "produto prioritario"}.`,
+      relatedRecommendationId: recommendations[0]?.id ?? null,
+      evidenceCards: topPattern.evidenceCards,
+    });
+  }
+
+  if (format) {
+    const formatPatterns = patterns.filter((pattern) => pattern.format === format);
+    insights.push({
+      id: "format-priority",
+      title: `Formato com melhor resposta: ${format}`,
+      interpretation: `${formatPatterns.length} conteudo(s) desse formato apareceram em janelas com venda. O sinal serve para priorizar teste de formato no proximo ciclo.`,
+      confidence: clamp(formatPatterns.reduce((sum, pattern) => sum + pattern.influenceScore, 0) / Math.max(1, formatPatterns.length)),
+      sourceCount: formatPatterns.length,
+      action: `Planejar uma peca ${format} reaproveitando a promessa e a objecao do melhor conteudo.`,
+      relatedRecommendationId: recommendations.find((item) => item.suggestedFormat === format)?.id ?? null,
+      evidenceCards: formatPatterns.flatMap((pattern) => pattern.evidenceCards).slice(0, 4),
+    });
+  }
+
+  if (product) {
+    const productPatterns = patterns.filter((pattern) => pattern.productName === product || pattern.associatedProducts.includes(product));
+    insights.push({
+      id: "product-demand",
+      title: `Produto com maior sinal comercial: ${product}`,
+      interpretation: "As vendas confirmadas no periodo analisado se concentraram nesse produto dentro das janelas de conteudo. A leitura ajuda a decidir foco de pauta e CTA.",
+      confidence: clamp(45 + productPatterns.length * 8),
+      sourceCount: productPatterns.length,
+      action: `Reforcar conteudos de duvida, prova e proximo passo para ${product}.`,
+      relatedRecommendationId: recommendations.find((item) => item.productName === product)?.id ?? null,
+      evidenceCards: productPatterns.flatMap((pattern) => pattern.evidenceCards).slice(0, 4),
+    });
+  }
+
+  return insights.slice(0, 4);
 }
 
 function buildRecommendations(patterns: NorwynLaunchPattern[], input: EvidenceEngineInput): NorwynEvidenceRecommendation[] {
@@ -304,36 +425,58 @@ function buildRecommendations(patterns: NorwynLaunchPattern[], input: EvidenceEn
 }
 
 export function buildEvidenceEngine(input: EvidenceEngineInput): EvidenceEngineResult {
-  const confirmedSales = input.commercialSales.filter((sale) => {
+  const confirmedSales = uniqueSales(input.commercialSales.filter((sale) => {
     const group = normalizeText(sale.grupo_comercial);
     const status = normalizeText(sale.status_normalizado ?? sale.status_original);
     return group === "confirmed" || ["approved", "complete", "confirmed"].includes(status);
-  });
+  }));
   const patterns = input.contentEvents
     .map((event) => buildPattern(event, confirmedSales))
     .filter((pattern): pattern is NorwynLaunchPattern => Boolean(pattern))
     .sort((a, b) => b.influenceScore - a.influenceScore);
 
+  const uniqueSalesInPatterns = salesFromPatterns(patterns, confirmedSales);
+  const recommendations = buildRecommendations(patterns, input);
   const cards = patterns.flatMap((pattern) => pattern.evidenceCards);
+  const last30 = patterns.filter((pattern) => inLastDays(pattern.publishedAt, 30));
+  const lastLaunch = patterns.filter((pattern) => pattern.influenceScore >= 65).slice(0, 12);
+  const currentLaunch = patterns.filter((pattern) => inLastDays(pattern.publishedAt, 10));
   const summary = {
     bestFormat: topBy(patterns, (pattern) => pattern.format, (pattern) => pattern.influenceScore),
-    bestHour: topBy(patterns, (pattern) => {
+    bestPublishingHour: topBy(patterns, (pattern) => {
       const date = toDate(pattern.publishedAt);
       return date ? `${String(date.getHours()).padStart(2, "0")}h` : null;
-    }, (pattern) => pattern.salesInWindow),
-    bestWeekday: topBy(patterns, (pattern) => {
+    }, (pattern) => pattern.influenceScore),
+    bestConversionHour: topBy(confirmedSales, (sale) => {
+      const date = toDate(sale.data_aprovacao ?? sale.data_compra);
+      return date ? `${String(date.getHours()).padStart(2, "0")}h` : null;
+    }, (sale) => revenue(sale.valor_bruto)),
+    bestPublishingWeekday: topBy(patterns, (pattern) => {
       const date = toDate(pattern.publishedAt);
       return date ? weekdays[date.getDay()] : null;
-    }, (pattern) => pattern.salesInWindow),
+    }, (pattern) => pattern.influenceScore),
+    bestSalesWeekday: topBy(confirmedSales, (sale) => {
+      const date = toDate(sale.data_aprovacao ?? sale.data_compra);
+      return date ? weekdays[date.getDay()] : null;
+    }, (sale) => revenue(sale.valor_bruto)),
     topProduct: topBy(patterns, (pattern) => pattern.productName, (pattern) => pattern.revenueInWindow),
     totalWindowSales: patterns.reduce((sum, pattern) => sum + pattern.salesInWindow, 0),
     totalWindowRevenue: patterns.reduce((sum, pattern) => sum + pattern.revenueInWindow, 0),
+    uniqueSales: uniqueSalesInPatterns.length,
+    uniqueRevenue: uniqueSalesInPatterns.reduce((sum, sale) => sum + revenue(sale.valor_bruto), 0),
   };
 
   return {
     cards,
     launchPatterns: patterns,
-    recommendations: buildRecommendations(patterns, input),
+    recommendations,
+    insights: buildInsights(patterns, recommendations),
+    comparisons: [
+      comparison("Historico", patterns, confirmedSales),
+      comparison("Ultimo lancamento", lastLaunch, confirmedSales),
+      comparison("Ultimos 30 dias", last30, confirmedSales),
+      comparison("Lancamento atual", currentLaunch, confirmedSales),
+    ],
     summary,
   };
 }
@@ -352,8 +495,12 @@ export function evidenceRecommendationToBriefingSeed(recommendation: NorwynEvide
     missionId: missionId ?? undefined,
     recommendationOrigin: "Evidence Engine",
     objective: recommendation.objective,
-    context: recommendation.expectedImpact,
-    evidence: recommendation.evidenceCards.flatMap((card) => [card.title, ...card.details]).slice(0, 8),
+    context: `${recommendation.expectedImpact} Proximo passo: ${recommendation.nextStep}`,
+    evidence: [
+      `Missao/produto: ${recommendation.productName ?? "sem produto unico"}`,
+      `Formato sugerido: ${recommendation.suggestedFormat}`,
+      ...recommendation.evidenceCards.flatMap((card) => [card.title, ...card.details]),
+    ].slice(0, 10),
     product: recommendation.productName ?? undefined,
     centralMessage: recommendation.nextStep,
     cta: "Transformar evidencia em acao revisavel.",

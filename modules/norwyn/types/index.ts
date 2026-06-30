@@ -76,19 +76,39 @@ export type NorwynEvidenceCard = {
   relatedContentId?: string | null;
 };
 
+export type NorwynEvidenceInsight = {
+  id: string;
+  title: string;
+  interpretation: string;
+  confidence: number;
+  sourceCount: number;
+  action: string;
+  relatedRecommendationId?: string | null;
+  evidenceCards: NorwynEvidenceCard[];
+};
+
 export type NorwynLaunchPattern = {
   id: string;
   contentEventId: string;
   contentTitle: string;
+  contentCaption: string | null;
+  permalink: string | null;
+  imageUrl: string | null;
+  missionId: string | null;
+  campaignId: string | null;
   format: string;
   publishedAt: string;
   influenceHours: number;
   productName: string | null;
+  associatedProducts: string[];
+  transactionIds: string[];
+  transactionRevenue: Array<{ id: string; value: number }>;
   productMatchScore: number;
   influenceScore: number;
   influenceLevel: "Baixa" | "Media" | "Alta" | "Influencia Potencial";
   salesInWindow: number;
   revenueInWindow: number;
+  performanceSnapshot: Record<string, unknown> | null;
   evidenceCards: NorwynEvidenceCard[];
 };
 
