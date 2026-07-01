@@ -812,6 +812,55 @@ function metadataString(metadata: Record<string, unknown>, key: string) {
   return typeof value === "string" ? value : null;
 }
 
+function productMetadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function productMetadataNumber(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function productPartnershipType(product: ComercialNorwynProduct | null | undefined) {
+  if (!product) return "proprio";
+  const raw = productMetadataString(product.metadata, "partnership_type");
+  if (!raw && product.percentual_coproducao != null && product.percentual_coproducao > 0) return "coproducao";
+  const key = normalizeProductKey(raw ?? "Proprio");
+  if (key.includes("coprodu")) return "coproducao";
+  if (key.includes("coaut")) return "coautoria";
+  if (key.includes("licenc")) return "licenciamento";
+  if (key.includes("afili")) return "afiliado";
+  if (key.includes("outro")) return "outro";
+  return "proprio";
+}
+
+function productPartnershipPercent(product: ComercialNorwynProduct | null | undefined) {
+  if (!product) return null;
+  const type = productPartnershipType(product);
+  const coproduction = product.percentual_coproducao;
+  const coauthor = productMetadataNumber(product.metadata, "percentual_coautoria");
+  if (type === "proprio") return 0;
+  if (type === "coproducao") return coproduction;
+  if (type === "coautoria") return coauthor;
+  return coproduction ?? coauthor;
+}
+
+function productPartnershipMissingReason(product: ComercialNorwynProduct | null | undefined) {
+  if (!product) return null;
+  const type = productPartnershipType(product);
+  if (type === "proprio") return null;
+  if (type === "coproducao" && product.percentual_coproducao == null) return "sem coproducao";
+  if (type === "coautoria" && productMetadataNumber(product.metadata, "percentual_coautoria") == null) return "sem coautoria";
+  if (["licenciamento", "afiliado", "outro"].includes(type) && productPartnershipPercent(product) == null) return "sem percentual de parceria";
+  return null;
+}
+
 function findNorwynProductForSale(sale: ComercialVenda, products: ComercialNorwynProduct[]) {
   const idCandidates = [
     sale.hotmart_product_id,
@@ -837,9 +886,13 @@ function findNorwynProductForSale(sale: ComercialVenda, products: ComercialNorwy
     .filter((product) => product.ativo !== false)
     .map((product) => {
       const keys = productMatchKeys(product);
+      const hotmartIds = [
+        productMetadataString(product.metadata, "hotmart_product_id"),
+        productMetadataString(product.metadata, "product_id"),
+      ].map(normalizeProductKey).filter(Boolean);
       let score = 0;
 
-      if (idCandidates.some((candidate) => candidate === normalizeProductKey(product.id) || keys.aliases.includes(candidate))) score = Math.max(score, 120);
+      if (idCandidates.some((candidate) => candidate === normalizeProductKey(product.id) || hotmartIds.includes(candidate) || keys.aliases.includes(candidate))) score = Math.max(score, 130);
       if (nameCandidates.some((candidate) => candidate === keys.official)) score = Math.max(score, 110);
       if (nameCandidates.some((candidate) => keys.aliases.includes(candidate))) score = Math.max(score, 100);
       if (nameCandidates.some((candidate) => candidate === keys.base)) score = Math.max(score, 90);
@@ -867,6 +920,8 @@ function pendingSuggestionFor(reasons: string[]) {
   if (reasons.includes("sem alias/produto base")) return "criar alias ou vincular a produto existente";
   if (reasons.includes("sem categoria fiscal")) return "definir categoria fiscal";
   if (reasons.includes("sem coproducao")) return "definir coproducao";
+  if (reasons.includes("sem coautoria")) return "definir percentual de coautoria";
+  if (reasons.includes("sem percentual de parceria")) return "definir percentual de parceria";
   if (reasons.includes("sem preco")) return "definir preco oficial";
   if (reasons.includes("sem regra tributaria")) return "criar regra tributaria vigente";
   if (reasons.includes("sem Business Profile")) return "configurar Business Profile";
@@ -907,18 +962,20 @@ function buildEstimatedFinancials({
 
   let tax = 0;
   const taxBuckets = new Map<string, { category: string; gross: number; tax: number; percent: number }>();
-  const pendingProducts = new Map<string, { product: string; hotmartProductId: string | null; gross: number; count: number; reasons: Set<string> }>();
+  const pendingProducts = new Map<string, { product: string; hotmartProductId: string | null; productId: string | null; gross: number; count: number; reasons: Set<string> }>();
 
-  function addPending(sale: ComercialVenda, reasons: string[]) {
+  function addPending(sale: ComercialVenda, reasons: string[], product?: ComercialNorwynProduct | null) {
     const productName = sale.produto_nome ?? sale.hotmart_product_id ?? "Produto sem mapeamento";
     const current = pendingProducts.get(productName) ?? {
       product: productName,
       hotmartProductId: sale.hotmart_product_id,
+      productId: product?.id ?? null,
       gross: 0,
       count: 0,
       reasons: new Set<string>(),
     };
     current.hotmartProductId = current.hotmartProductId ?? sale.hotmart_product_id;
+    current.productId = current.productId ?? product?.id ?? null;
     current.gross += sale.valor_bruto;
     current.count += 1;
     reasons.forEach((reason) => current.reasons.add(reason));
@@ -933,17 +990,18 @@ function buildEstimatedFinancials({
     if (!profile) reasons.push("sem Business Profile");
     if (!product) reasons.push("sem alias/produto base");
     if (product && !product.fiscal_category) reasons.push("sem categoria fiscal");
-    if (product && product.percentual_coproducao === null) reasons.push("sem coproducao");
+    const partnershipMissingReason = productPartnershipMissingReason(product);
+    if (partnershipMissingReason) reasons.push(partnershipMissingReason);
     if (product?.fiscal_category && !rule) reasons.push("sem regra tributaria");
 
     if (reasons.length) {
-      addPending(sale, reasons);
+      addPending(sale, reasons, product);
       return;
     }
 
     configuredGross += sale.valor_bruto;
     configuredSales += 1;
-    coproduction += sale.valor_bruto * ((product!.percentual_coproducao ?? 0) / 100);
+    coproduction += sale.valor_bruto * ((productPartnershipPercent(product) ?? 0) / 100);
     const appliedRule = rule!;
     const saleTax = sale.valor_bruto * ((appliedRule.tax_percent ?? 0) / 100);
     tax += saleTax;
@@ -966,6 +1024,7 @@ function buildEstimatedFinancials({
       return {
         product: item.product,
         hotmartProductId: item.hotmartProductId,
+        productId: item.productId,
         gross: item.gross,
         count: item.count,
         reasons,
@@ -2587,7 +2646,7 @@ function EstimatedFinancialsCard({
         <MiniMetric label="Receita configurada" value={formatMoney(estimate.configuredGross)} helper={`${estimate.configuredSales} vendas na estimativa`} />
         <MiniMetric label="Receita pendente" value={formatMoney(estimate.pendingGross)} helper="produtos sem configuracao completa" />
         <MiniMetric label="Taxas Hotmart" value={formatMoney(estimate.hotmartPercentFee + estimate.fixedFee)} helper="percentual + taxa fixa configurada" />
-        <MiniMetric label="Coproducao" value={formatMoney(estimate.coproduction)} helper="por produto configurado" />
+        <MiniMetric label="Parceria" value={formatMoney(estimate.coproduction)} helper="coproducao/coautoria por produto" />
         <MiniMetric label="Imposto/DAS" value={formatMoney(estimate.tax)} helper="por regra tributaria vigente" />
         <MiniMetric label="Liquido estimado" value={estimate.estimatedNet === null ? "Indisponivel" : formatMoney(estimate.estimatedNet)} helper="nao oficial Hotmart" />
         <MiniMetric label="Cobertura" value={estimate.coveragePercent === null ? "-" : formatPercent(estimate.coveragePercent)} helper="receita configurada / total" />
@@ -2618,7 +2677,12 @@ function EstimatedFinancialsCard({
                 formatMoney(item.gross),
                 String(item.count),
                 item.reasons.join(", "),
-                item.suggestion,
+                <span key={`${item.product}-action`}>
+                  {item.suggestion}
+                  <a href={`/norwyn?tab=products${item.productId ? `&productId=${item.productId}` : ""}`} className="ml-2 inline-flex rounded-md border border-brand-sand px-2 py-1 text-[10px] font-black uppercase text-brand-teal">
+                    Editar produto
+                  </a>
+                </span>,
               ])}
               empty="Sem pendencias de produto."
               minWidth="900px"

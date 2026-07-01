@@ -1479,6 +1479,14 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [signals, setSignals] = useState<NorwynSignal[]>(context.signals ?? []);
   const [engineMessage, setEngineMessage] = useState<string>("");
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab") as NorwynTab | null;
+    if (tab && ["home", "business", "mission", "products", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, []);
+
   const suggestions = useMemo(() => buildSuggestedMissions(context), [context]);
   const activeObjectives = businessObjectives.filter((objective) => objective.status !== "Arquivado");
   const primaryObjective =
@@ -2662,7 +2670,7 @@ function FinancialPeriodCard({ period }: { period: ReturnType<typeof buildFinanc
         <MissionMeta label="Liquido estimado" value={estimatedValueLabel(period, period.estimatedNet, { requiresComplete: true })} />
         <MissionMeta label="Imposto/DAS estimado" value={estimatedValueLabel(period, period.tax, { requiresComplete: true })} />
         <MissionMeta label="Taxas Hotmart estimadas" value={estimatedValueLabel(period, (period.hotmartPercentFee ?? 0) + (period.hotmartFixedFee ?? 0))} />
-        <MissionMeta label="Coproducao estimada" value={estimatedValueLabel(period, period.coproduction)} />
+        <MissionMeta label="Parceria estimada" value={estimatedValueLabel(period, period.coproduction)} />
         <MissionMeta label="Cobertura da estimativa" value={period.coveragePercent == null ? "-" : percent(period.coveragePercent)} />
       </div>
       {issueText ? (
@@ -2693,7 +2701,12 @@ function FinancialPeriodCard({ period }: { period: ReturnType<typeof buildFinanc
                     <td className="px-2 py-2 text-brand-teal/70">{currency(item.gross)}</td>
                     <td className="px-2 py-2 text-brand-teal/70">{item.count}</td>
                     <td className="px-2 py-2 text-brand-teal/70">{item.reasons.join(", ")}</td>
-                    <td className="px-2 py-2 text-brand-teal/70">{item.suggestion}</td>
+                    <td className="px-2 py-2 text-brand-teal/70">
+                      {item.suggestion}
+                      <a href={`/norwyn?tab=products${item.productId ? `&productId=${item.productId}` : ""}`} className="ml-2 inline-flex rounded-md border border-brand-sand px-2 py-1 text-[10px] font-black uppercase text-brand-teal">
+                        Editar produto
+                      </a>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -4079,44 +4092,54 @@ const emptyProductDraft = {
   id: "",
   nome_oficial: "",
   produto_base: "",
+  hotmart_product_id: "",
   categoria: "",
   fiscal_category: "",
   financial_notes: "",
   descricao: "",
   status: "ativo",
   tipo: "Entrada",
+  partnership_type: "Proprio",
   preco_oficial: "",
   duracao: "",
   unidade_duracao: "",
   link_oferta: "",
   percentual_coproducao: "",
+  percentual_coautoria: "",
   percentual_hotmart: "",
   percentual_gateway: "",
   percentual_imposto: "",
+  partner_name: "",
   observacoes: "",
   ativo: true,
 };
 
 function productToDraft(product?: NorwynProduct | null) {
   if (!product) return emptyProductDraft;
+  const partnershipType = productMetadataString(product.metadata, "partnership_type")
+    ?? (product.percentual_coproducao != null && product.percentual_coproducao > 0 ? "Coproducao" : "Proprio");
   return {
     id: product.id,
     nome_oficial: product.nome_oficial ?? "",
     produto_base: product.produto_base ?? "",
+    hotmart_product_id: productMetadataString(product.metadata, "hotmart_product_id") ?? "",
     categoria: product.categoria ?? "",
     fiscal_category: product.fiscal_category ?? "",
     financial_notes: product.financial_notes ?? "",
     descricao: product.descricao ?? "",
     status: product.status ?? "ativo",
-    tipo: product.tipo ?? "Entrada",
+    tipo: productTypeValue(product),
+    partnership_type: partnershipType,
     preco_oficial: product.preco_oficial != null ? String(product.preco_oficial) : "",
     duracao: product.duracao != null ? String(product.duracao) : "",
     unidade_duracao: product.unidade_duracao ?? "",
     link_oferta: product.link_oferta ?? "",
     percentual_coproducao: product.percentual_coproducao != null ? String(product.percentual_coproducao) : "",
+    percentual_coautoria: productMetadataNumber(product.metadata, "percentual_coautoria") != null ? String(productMetadataNumber(product.metadata, "percentual_coautoria")) : "",
     percentual_hotmart: product.percentual_hotmart != null ? String(product.percentual_hotmart) : "",
     percentual_gateway: product.percentual_gateway != null ? String(product.percentual_gateway) : "",
     percentual_imposto: product.percentual_imposto != null ? String(product.percentual_imposto) : "",
+    partner_name: productMetadataString(product.metadata, "partner_name") ?? "",
     observacoes: product.observacoes ?? "",
     ativo: product.ativo !== false,
   };
@@ -4127,6 +4150,17 @@ function numericOrNull(value: string) {
   if (!normalized) return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+const legacyProductTypes = ["Entrada", "Upsell", "Order Bump", "Flagship", "Satelite", "Satélite"];
+
+function productTypeValue(product: Pick<NorwynProduct, "tipo" | "metadata"> | null | undefined) {
+  if (!product) return "Entrada";
+  return productMetadataString(product.metadata, "product_type") ?? product.tipo ?? "Entrada";
+}
+
+function productTypeForStorage(value: string) {
+  return legacyProductTypes.includes(value) ? value : "Flagship";
 }
 
 const emptyBusinessProfileDraft = {
@@ -4212,12 +4246,69 @@ function saleMetadataString(metadata: Record<string, unknown> | null | undefined
   return typeof value === "string" ? value : null;
 }
 
+function productMetadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function productMetadataNumber(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function productHotmartIdKeys(product: NorwynProduct) {
+  return [
+    productMetadataString(product.metadata, "hotmart_product_id"),
+    productMetadataString(product.metadata, "product_id"),
+  ].map((value) => normalizeKey(value)).filter(Boolean);
+}
+
+function productPartnershipType(product: NorwynProduct | null | undefined) {
+  if (!product) return "proprio";
+  const raw = productMetadataString(product.metadata, "partnership_type");
+  if (!raw && product.percentual_coproducao != null && product.percentual_coproducao > 0) return "coproducao";
+  const key = normalizeKey(raw ?? "Proprio");
+  if (key.includes("coprodu")) return "coproducao";
+  if (key.includes("coaut")) return "coautoria";
+  if (key.includes("licenc")) return "licenciamento";
+  if (key.includes("afili")) return "afiliado";
+  if (key.includes("outro")) return "outro";
+  return "proprio";
+}
+
+function productPartnershipPercent(product: NorwynProduct | null | undefined) {
+  if (!product) return null;
+  const type = productPartnershipType(product);
+  const coproduction = product.percentual_coproducao;
+  const coauthor = productMetadataNumber(product.metadata, "percentual_coautoria");
+  if (type === "proprio") return 0;
+  if (type === "coproducao") return coproduction;
+  if (type === "coautoria") return coauthor;
+  return coproduction ?? coauthor;
+}
+
+function productPartnershipMissingReason(product: NorwynProduct | null | undefined) {
+  if (!product) return null;
+  const type = productPartnershipType(product);
+  if (type === "proprio") return null;
+  if (type === "coproducao" && product.percentual_coproducao == null) return "sem coproducao";
+  if (type === "coautoria" && productMetadataNumber(product.metadata, "percentual_coautoria") == null) return "sem coautoria";
+  if (["licenciamento", "afiliado", "outro"].includes(type) && productPartnershipPercent(product) == null) return "sem percentual de parceria";
+  return null;
+}
+
 function norwynProductMatchKeys(product: NorwynProduct) {
   const aliases = (product.product_aliases ?? []).filter((alias) => alias.ativo !== false);
   const components = (product.product_components ?? []).filter((component) => component.ativo !== false);
   return {
     official: normalizeKey(product.nome_oficial),
     base: normalizeKey(product.produto_base),
+    hotmartIds: productHotmartIdKeys(product),
     aliases: aliases.flatMap((alias) => [alias.alias, alias.produto_base]).map((value) => normalizeKey(value)).filter(Boolean),
     components: components.map((component) => normalizeKey(component.componente)).filter(Boolean),
   };
@@ -4245,7 +4336,7 @@ function productForSale(sale: NorwynCommercialSale, products: NorwynProduct[]) {
       const keys = norwynProductMatchKeys(product);
       let score = 0;
 
-      if (idCandidates.some((candidate) => candidate === normalizeKey(product.id) || keys.aliases.includes(candidate))) score = Math.max(score, 120);
+      if (idCandidates.some((candidate) => candidate === normalizeKey(product.id) || keys.hotmartIds.includes(candidate) || keys.aliases.includes(candidate))) score = Math.max(score, 130);
       if (nameCandidates.some((candidate) => candidate === keys.official)) score = Math.max(score, 110);
       if (nameCandidates.some((candidate) => keys.aliases.includes(candidate))) score = Math.max(score, 100);
       if (nameCandidates.some((candidate) => candidate === keys.base)) score = Math.max(score, 90);
@@ -4272,6 +4363,8 @@ function productPendingSuggestion(reasons: string[]) {
   if (reasons.includes("sem alias/produto base")) return "criar alias ou vincular a produto existente";
   if (reasons.includes("sem categoria fiscal")) return "definir categoria fiscal";
   if (reasons.includes("sem coproducao")) return "definir coproducao";
+  if (reasons.includes("sem coautoria")) return "definir percentual de coautoria";
+  if (reasons.includes("sem percentual de parceria")) return "definir percentual de parceria";
   if (reasons.includes("sem preco")) return "definir preco oficial";
   if (reasons.includes("sem regra tributaria")) return "criar regra tributaria vigente";
   if (reasons.includes("sem Business Profile")) return "configurar Business Profile";
@@ -4399,18 +4492,20 @@ function buildFinancialPeriodEstimate({
   let configuredSalesCount = 0;
   let coproduction = 0;
   const byCategory = new Map<string, { gross: number; tax: number; taxPercent: number | null; count: number }>();
-  const pendingProducts = new Map<string, { product: string; hotmartProductId: string | null; gross: number; count: number; reasons: Set<string> }>();
+  const pendingProducts = new Map<string, { product: string; hotmartProductId: string | null; productId: string | null; gross: number; count: number; reasons: Set<string> }>();
 
-  function addPending(sale: NorwynCommercialSale, reasons: string[]) {
+  function addPending(sale: NorwynCommercialSale, reasons: string[], product?: NorwynProduct | null) {
     const key = sale.produto_nome || sale.transaction_id || "Produto sem alias/produto base";
     const current = pendingProducts.get(key) ?? {
       product: key,
       hotmartProductId: sale.hotmart_product_id,
+      productId: product?.id ?? null,
       gross: 0,
       count: 0,
       reasons: new Set<string>(),
     };
     current.hotmartProductId = current.hotmartProductId ?? sale.hotmart_product_id;
+    current.productId = current.productId ?? product?.id ?? null;
     current.gross += Number(sale.valor_bruto ?? 0);
     current.count += 1;
     reasons.forEach((reason) => current.reasons.add(reason));
@@ -4428,9 +4523,10 @@ function buildFinancialPeriodEstimate({
       missingFiscalCategory += 1;
       reasons.push("sem categoria fiscal");
     }
-    if (product && product.percentual_coproducao == null) {
+    const partnershipMissingReason = productPartnershipMissingReason(product);
+    if (partnershipMissingReason) {
       missingCoproduction += 1;
-      reasons.push("sem coproducao");
+      reasons.push(partnershipMissingReason);
     }
     if (product && product.preco_oficial == null) missingPrice += 1;
     const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
@@ -4440,14 +4536,14 @@ function buildFinancialPeriodEstimate({
     }
     if (!hasProfile) reasons.push("sem Business Profile");
     if (reasons.length) {
-      addPending(sale, reasons);
+      addPending(sale, reasons, product);
       continue;
     }
     const category = product?.fiscal_category ?? "Sem categoria fiscal";
     const saleGross = Number(sale.valor_bruto ?? 0);
     configuredGross += saleGross;
     configuredSalesCount += 1;
-    coproduction += saleGross * ((product?.percentual_coproducao ?? 0) / 100);
+    coproduction += saleGross * ((productPartnershipPercent(product) ?? 0) / 100);
     const taxPercent = rule?.tax_percent ?? 0;
     const current = byCategory.get(category) ?? { gross: 0, tax: 0, taxPercent: rule?.tax_percent ?? null, count: 0 };
     current.gross += saleGross;
@@ -4499,6 +4595,7 @@ function buildFinancialPeriodEstimate({
       return {
         product: item.product,
         hotmartProductId: item.hotmartProductId,
+        productId: item.productId,
         gross: item.gross,
         count: item.count,
         reasons,
@@ -4585,6 +4682,11 @@ function ProductIntelligenceView({
   const forecast = useMemo(() => buildTaxForecast({ profile: businessProfile, taxRules, products, commercialSales }), [businessProfile, taxRules, products, commercialSales]);
 
   useEffect(() => {
+    const productId = new URLSearchParams(window.location.search).get("productId");
+    if (productId && products.some((product) => product.id === productId)) {
+      setSelectedId(productId);
+      return;
+    }
     if (!selectedId && products[0]?.id) setSelectedId(products[0].id);
   }, [products, selectedId]);
 
@@ -4599,7 +4701,10 @@ function ProductIntelligenceView({
   const selectedTaxRule = activeTaxRuleFor(productDraft.fiscal_category, new Date().toISOString(), taxRules);
   const productHotmartPercent = price != null ? price * ((businessProfile?.hotmart_percent_fee ?? 0) / 100) : null;
   const productGateway = price != null ? price * ((businessProfile?.gateway_percent_fee ?? 0) / 100) : null;
-  const productCoproduction = price != null ? price * ((businessProfile?.default_coproduction_percent ?? 0) / 100) : null;
+  const draftPartnershipPercent = productDraft.partnership_type === "Proprio"
+    ? 0
+    : numericOrNull(productDraft.partnership_type === "Coautoria" ? productDraft.percentual_coautoria : productDraft.percentual_coproducao);
+  const productCoproduction = price != null && draftPartnershipPercent != null ? price * (draftPartnershipPercent / 100) : null;
   const productTax = price != null ? price * ((selectedTaxRule?.tax_percent ?? 0) / 100) : null;
   const productFixed = price != null ? businessProfile?.hotmart_fixed_fee ?? 0 : null;
   const productEstimatedNet = price != null
@@ -4695,13 +4800,22 @@ function ProductIntelligenceView({
         financial_notes: productDraft.financial_notes,
         descricao: productDraft.descricao,
         status: productDraft.status,
-        tipo: productDraft.tipo,
+        tipo: productTypeForStorage(productDraft.tipo),
         unidade_duracao: productDraft.unidade_duracao,
         link_oferta: productDraft.link_oferta,
         observacoes: productDraft.observacoes,
         ativo: productDraft.ativo,
         preco_oficial: numericOrNull(productDraft.preco_oficial),
         duracao: numericOrNull(productDraft.duracao),
+        percentual_coproducao: numericOrNull(productDraft.percentual_coproducao),
+        metadata: {
+          ...(selectedProduct?.metadata ?? {}),
+          product_type: productDraft.tipo,
+          hotmart_product_id: productDraft.hotmart_product_id.trim() || null,
+          partnership_type: productDraft.partnership_type,
+          percentual_coautoria: numericOrNull(productDraft.percentual_coautoria),
+          partner_name: productDraft.partner_name.trim() || null,
+        },
       },
     }, "Produto salvo.");
   }
@@ -4813,7 +4927,7 @@ function ProductIntelligenceView({
             <MissionMeta label="Receita liquida estimada" value={forecast.estimatedNet === null ? "Indisponivel" : currency(forecast.estimatedNet)} />
             <MissionMeta label="DAS estimado" value={currency(forecast.tax)} />
             <MissionMeta label="Taxas Hotmart" value={currency(forecast.hotmartPercentFee + forecast.hotmartFixedFee)} />
-            <MissionMeta label="Coproducao" value={currency(forecast.coproduction)} />
+            <MissionMeta label="Parceria" value={currency(forecast.coproduction)} />
             <MissionMeta label="Cobertura" value={forecast.coveragePercent === null ? "-" : percent(forecast.coveragePercent)} />
             <MissionMeta label="Projecao fechamento" value={currency(forecast.projectedGross)} />
             <MissionMeta label="Crescimento vs mes anterior" value={percent(forecast.growth)} />
@@ -4843,7 +4957,12 @@ function ProductIntelligenceView({
                         <td className="px-2 py-2 text-brand-teal/70">{currency(item.gross)}</td>
                         <td className="px-2 py-2 text-brand-teal/70">{item.count}</td>
                         <td className="px-2 py-2 text-brand-teal/70">{item.reasons.join(", ")}</td>
-                        <td className="px-2 py-2 text-brand-teal/70">{item.suggestion}</td>
+                        <td className="px-2 py-2 text-brand-teal/70">
+                          {item.suggestion}
+                          <a href={`/norwyn?tab=products${item.productId ? `&productId=${item.productId}` : ""}`} className="ml-2 inline-flex rounded-md border border-brand-sand px-2 py-1 text-[10px] font-black uppercase text-brand-teal">
+                            Editar produto
+                          </a>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -4936,7 +5055,7 @@ function ProductIntelligenceView({
                   <div>
                     <p className="text-sm font-semibold text-brand-teal">{product.nome_oficial}</p>
                     <p className="mt-1 text-xs font-bold text-brand-clay">{product.produto_base}</p>
-                    <p className="mt-1 text-xs text-brand-teal/55">{product.tipo ?? "Entrada"} - {product.source ?? "sem origem"}</p>
+                    <p className="mt-1 text-xs text-brand-teal/55">{productTypeValue(product)} - {product.source ?? "sem origem"}</p>
                   </div>
                   <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${product.ativo === false ? "bg-[#FDE7EA] text-[#A33E4B]" : "bg-[#E5F6EA] text-[#2F8D55]"}`}>{product.ativo === false ? "arquivado" : "ativo"}</span>
                 </div>
@@ -4959,6 +5078,7 @@ function ProductIntelligenceView({
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <Field label="Nome oficial"><input value={productDraft.nome_oficial} onChange={(event) => setProductDraft({ ...productDraft, nome_oficial: event.target.value })} className="form-input" /></Field>
               <Field label="Produto base"><input value={productDraft.produto_base} onChange={(event) => setProductDraft({ ...productDraft, produto_base: event.target.value })} className="form-input" /></Field>
+              <Field label="Hotmart Product ID"><input value={productDraft.hotmart_product_id} onChange={(event) => setProductDraft({ ...productDraft, hotmart_product_id: event.target.value })} className="form-input" placeholder="8014065" /></Field>
               <Field label="Categoria"><input value={productDraft.categoria} onChange={(event) => setProductDraft({ ...productDraft, categoria: event.target.value })} className="form-input" /></Field>
               <Field label="Categoria fiscal">
                 <select value={productDraft.fiscal_category} onChange={(event) => setProductDraft({ ...productDraft, fiscal_category: event.target.value })} className="form-input">
@@ -4968,10 +5088,18 @@ function ProductIntelligenceView({
               </Field>
               <Field label="Tipo">
                 <select value={productDraft.tipo} onChange={(event) => setProductDraft({ ...productDraft, tipo: event.target.value })} className="form-input">
-                  {["Entrada", "Upsell", "Order Bump", "Flagship", "Satelite", "Satélite"].map((item) => <option key={item} value={item}>{item}</option>)}
+                  {["Entrada", "Upsell", "Order Bump", "Flagship", "Satelite", "Satélite", "Combo", "Outro"].map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
               </Field>
               <Field label="Status"><input value={productDraft.status} onChange={(event) => setProductDraft({ ...productDraft, status: event.target.value })} className="form-input" /></Field>
+              <Field label="Tipo de parceria">
+                <select value={productDraft.partnership_type} onChange={(event) => setProductDraft({ ...productDraft, partnership_type: event.target.value })} className="form-input">
+                  {["Proprio", "Coproducao", "Coautoria", "Licenciamento", "Afiliado", "Outro"].map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </Field>
+              <Field label="% coproducao"><input value={productDraft.percentual_coproducao} onChange={(event) => setProductDraft({ ...productDraft, percentual_coproducao: event.target.value })} className="form-input" placeholder="30" /></Field>
+              <Field label="% coautoria"><input value={productDraft.percentual_coautoria} onChange={(event) => setProductDraft({ ...productDraft, percentual_coautoria: event.target.value })} className="form-input" placeholder="30" /></Field>
+              <Field label="Parceiro/coautor"><input value={productDraft.partner_name} onChange={(event) => setProductDraft({ ...productDraft, partner_name: event.target.value })} className="form-input" /></Field>
               <Field label="Preco oficial"><input value={productDraft.preco_oficial} onChange={(event) => setProductDraft({ ...productDraft, preco_oficial: event.target.value })} className="form-input" placeholder="R$ 1.000,00" /></Field>
               <Field label="Duracao"><input value={productDraft.duracao} onChange={(event) => setProductDraft({ ...productDraft, duracao: event.target.value })} className="form-input" /></Field>
               <Field label="Unidade"><input value={productDraft.unidade_duracao} onChange={(event) => setProductDraft({ ...productDraft, unidade_duracao: event.target.value })} className="form-input" placeholder="dias, meses, anos" /></Field>
@@ -4988,10 +5116,10 @@ function ProductIntelligenceView({
                 <MissionMeta label="Imposto estimado" value={productTax != null ? currency(productTax) : "sem categoria fiscal"} />
                 <MissionMeta label="Taxa Hotmart %" value={productHotmartPercent != null ? currency(productHotmartPercent) : "-"} />
                 <MissionMeta label="Taxa fixa Hotmart" value={productFixed != null ? currency(productFixed) : "-"} />
-                <MissionMeta label="Coproducao" value={productCoproduction != null ? currency(productCoproduction) : "-"} />
+                <MissionMeta label="Parceria" value={productCoproduction != null ? currency(productCoproduction) : "-"} />
               </div>
               <p className="mt-3 text-xs font-semibold text-brand-clay">
-                Produto guarda apenas categoria fiscal e dados comerciais. Taxas, coproducao e imposto vem do Business Profile e das regras tributarias vigentes.
+                Produto guarda categoria fiscal, relacao com a Hotmart e regra de parceria. Taxas e imposto vem do Business Profile e das regras tributarias vigentes.
               </p>
             </div>
             <button type="button" disabled={saving} onClick={saveProduct} className="mt-4 h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">

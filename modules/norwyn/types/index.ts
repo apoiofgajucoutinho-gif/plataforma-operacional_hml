@@ -131,6 +131,7 @@ export type NorwynProduct = {
   ativo: boolean | null;
   source: string | null;
   manually_edited_at: string | null;
+  metadata: Record<string, unknown> | null;
   product_aliases?: NorwynProductAlias[];
   product_components?: NorwynProductComponent[];
   product_batches?: NorwynProductBatch[];

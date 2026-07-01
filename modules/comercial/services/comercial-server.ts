@@ -196,7 +196,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
         .limit(50),
       dataClient
         .from("products")
-        .select("id, tenant_id, nome_oficial, produto_base, categoria, fiscal_category, preco_oficial, percentual_coproducao, ativo, product_aliases(id, alias, produto_base, principal, ativo), product_components(id, componente, categoria, ativo)")
+        .select("id, tenant_id, nome_oficial, produto_base, categoria, fiscal_category, preco_oficial, percentual_coproducao, metadata, ativo, product_aliases(id, alias, produto_base, principal, ativo), product_components(id, componente, categoria, ativo)")
         .eq("tenant_id", membership.tenant_id)
         .order("nome_oficial"),
       dataClient

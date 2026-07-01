@@ -27,6 +27,7 @@ export type ComercialNorwynProduct = {
   fiscal_category: string | null;
   preco_oficial: number | null;
   percentual_coproducao: number | null;
+  metadata: Record<string, unknown> | null;
   ativo: boolean;
   product_aliases?: Array<{
     id: string;
