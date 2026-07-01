@@ -2182,7 +2182,7 @@ function ExecutiveHomeView({
     objective: primaryObjective,
     mission: activeMission,
   });
-  const taxForecast = buildTaxForecast({
+  const executiveFinancials = buildExecutiveFinancialOverview({
     profile: context.businessProfile,
     taxRules: context.taxRules,
     products: context.products,
@@ -2212,26 +2212,7 @@ function ExecutiveHomeView({
         </div>
       </Card>
 
-      <Card className="border-[#E9CBD1] p-4 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Financeiro estimado do mes" />
-          <span className="rounded-full bg-brand-cream px-3 py-1 text-[11px] font-black uppercase text-brand-teal">
-            Estimativa Norwyn
-          </span>
-        </div>
-        <p className="mt-2 text-sm leading-6 text-brand-teal/65">
-          Receita liquida e imposto estimados com base no Business Profile, nas regras tributarias vigentes e nas vendas confirmadas do mes.
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <MissionMeta label="Receita bruta" value={currency(taxForecast.gross)} />
-          <MissionMeta label="Liquido estimado" value={currency(taxForecast.estimatedNet)} />
-          <MissionMeta label="Imposto estimado" value={currency(taxForecast.tax)} />
-          <MissionMeta label="Projecao bruta" value={currency(taxForecast.projectedGross)} />
-        </div>
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-          Valores estimados pela Norwyn. Nao substituem valores oficiais da Hotmart, conciliacao financeira ou contabilidade.
-        </p>
-      </Card>
+      <ExecutiveFinancialOverviewCard overview={executiveFinancials} />
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <ExecutiveSummaryCard summary={summary} knowledgeEvents={knowledgeEvents} />
@@ -2613,6 +2594,85 @@ function MissionCenterView({
           ))}
         </div>
       </Card>
+    </div>
+  );
+}
+
+function estimatedValueLabel(
+  period: ReturnType<typeof buildFinancialPeriodEstimate>,
+  value: number | null,
+  options?: { requiresComplete?: boolean },
+) {
+  if (!period.hasSales) return "Sem vendas registradas no periodo";
+  if (!period.hasProfile) return "Configuracao financeira pendente";
+  if (options?.requiresComplete && period.incomplete) return "Estimativa incompleta";
+  if (value == null || !Number.isFinite(value)) return "Estimativa incompleta";
+  return currency(value);
+}
+
+function ExecutiveFinancialOverviewCard({ overview }: { overview: ReturnType<typeof buildExecutiveFinancialOverview> }) {
+  return (
+    <Card className="border-[#E9CBD1] p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Financeiro estimado" />
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-brand-teal/65">
+            Leitura operacional separando fechamento do mes anterior e projecao parcial do mes atual.
+          </p>
+        </div>
+        <span className="rounded-full bg-brand-cream px-3 py-1 text-[11px] font-black uppercase text-brand-teal">
+          Estimativa Norwyn
+        </span>
+      </div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <FinancialPeriodCard period={overview.previousMonth} />
+        <FinancialPeriodCard period={overview.currentMonth} />
+      </div>
+      <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+        Valores estimados pela Norwyn. Nao substituem valores oficiais da Hotmart, conciliacao financeira ou contabilidade.
+      </p>
+    </Card>
+  );
+}
+
+function FinancialPeriodCard({ period }: { period: ReturnType<typeof buildFinancialPeriodEstimate> }) {
+  const issueText = !period.hasSales
+    ? "Sem vendas registradas no periodo."
+    : !period.hasProfile
+      ? "Configuracao financeira pendente."
+      : period.incomplete
+        ? `Estimativa incompleta: ${[
+          period.missingProduct ? `${period.missingProduct} venda(s) sem produto mapeado` : "",
+          period.missingFiscalCategory ? `${period.missingFiscalCategory} produto(s) sem categoria fiscal` : "",
+          period.missingTaxRule ? `${period.missingTaxRule} categoria(s) sem regra tributaria vigente` : "",
+        ].filter(Boolean).join("; ")}.`
+        : null;
+
+  return (
+    <div className="rounded-lg border border-brand-sand bg-white/85 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-brand-clay">{period.label}</p>
+          <p className="mt-1 text-sm font-semibold text-brand-teal">{period.periodLabel}</p>
+          <p className="mt-2 text-xs leading-5 text-brand-teal/60">{period.supportText}</p>
+        </div>
+        <span className="rounded-full bg-brand-cream px-2 py-1 text-[10px] font-black uppercase text-brand-teal">
+          {period.updatedLabel}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <MissionMeta label="Receita bruta" value={period.hasSales ? currency(period.gross) : "Sem vendas registradas no periodo"} />
+        <MissionMeta label="Liquido estimado" value={estimatedValueLabel(period, period.estimatedNet, { requiresComplete: true })} />
+        <MissionMeta label="Imposto/DAS estimado" value={estimatedValueLabel(period, period.tax, { requiresComplete: true })} />
+        <MissionMeta label="Taxas Hotmart estimadas" value={estimatedValueLabel(period, (period.hotmartPercentFee ?? 0) + (period.hotmartFixedFee ?? 0))} />
+        <MissionMeta label="Coproducao estimada" value={estimatedValueLabel(period, period.coproduction)} />
+        <MissionMeta label="Vendas consideradas" value={String(period.salesCount)} />
+      </div>
+      {issueText ? (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900">
+          {issueText}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -4216,6 +4276,146 @@ function buildTaxForecast({
     growth,
     salesCount: currentMonthSales.length,
     byCategory: [...byCategory.entries()].map(([category, data]) => ({ category, ...data })),
+  };
+}
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function endOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+}
+
+function formatPeriodLabel(start: Date, end: Date) {
+  return `${start.toLocaleDateString("pt-BR")} a ${end.toLocaleDateString("pt-BR")}`;
+}
+
+function buildFinancialPeriodEstimate({
+  label,
+  supportText,
+  start,
+  end,
+  profile,
+  taxRules,
+  products,
+  commercialSales,
+  partial,
+}: {
+  label: string;
+  supportText: string;
+  start: Date;
+  end: Date;
+  profile: NorwynBusinessProfile | null;
+  taxRules: NorwynBusinessTaxRule[];
+  products: NorwynProduct[];
+  commercialSales: NorwynCommercialSale[];
+  partial: boolean;
+}) {
+  const confirmedSales = commercialSales.filter((sale) => {
+    if (sale.grupo_comercial !== "confirmed") return false;
+    const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
+    return Number.isFinite(date.getTime()) && date >= start && date <= end;
+  });
+  const gross = confirmedSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
+  const hasSales = confirmedSales.length > 0;
+  const hasProfile = Boolean(profile);
+  let missingProduct = 0;
+  let missingFiscalCategory = 0;
+  let missingTaxRule = 0;
+  const byCategory = new Map<string, { gross: number; tax: number; taxPercent: number | null; count: number }>();
+
+  for (const sale of confirmedSales) {
+    const product = productForSale(sale, products);
+    if (!product) missingProduct += 1;
+    if (product && !product.fiscal_category) missingFiscalCategory += 1;
+    const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
+    if (product?.fiscal_category && !rule) missingTaxRule += 1;
+    const category = product?.fiscal_category ?? "Sem categoria fiscal";
+    const saleGross = Number(sale.valor_bruto ?? 0);
+    const taxPercent = rule?.tax_percent ?? 0;
+    const current = byCategory.get(category) ?? { gross: 0, tax: 0, taxPercent: rule?.tax_percent ?? null, count: 0 };
+    current.gross += saleGross;
+    current.tax += saleGross * (taxPercent / 100);
+    current.count += 1;
+    if (rule?.tax_percent != null) current.taxPercent = rule.tax_percent;
+    byCategory.set(category, current);
+  }
+
+  const incomplete = hasSales && (!hasProfile || missingProduct > 0 || missingFiscalCategory > 0 || missingTaxRule > 0);
+  const hotmartPercentFee = hasProfile ? gross * ((profile?.hotmart_percent_fee ?? 0) / 100) : null;
+  const hotmartFixedFee = hasProfile ? confirmedSales.length * (profile?.hotmart_fixed_fee ?? 0) : null;
+  const gatewayFee = hasProfile ? gross * ((profile?.gateway_percent_fee ?? 0) / 100) : null;
+  const coproduction = hasProfile ? gross * ((profile?.default_coproduction_percent ?? 0) / 100) : null;
+  const withdrawFee = hasProfile && gross > 0 ? profile?.hotmart_withdraw_fee ?? 0 : hasProfile ? 0 : null;
+  const tax = hasProfile ? [...byCategory.values()].reduce((sum, item) => sum + item.tax, 0) : null;
+  const estimatedNet = hasProfile && !incomplete
+    ? gross - (hotmartPercentFee ?? 0) - (hotmartFixedFee ?? 0) - (gatewayFee ?? 0) - (coproduction ?? 0) - (tax ?? 0) - (withdrawFee ?? 0)
+    : null;
+
+  return {
+    label,
+    supportText,
+    periodLabel: formatPeriodLabel(start, end),
+    updatedLabel: partial ? `Atualizado ate ${end.toLocaleDateString("pt-BR")}` : "Periodo fechado",
+    partial,
+    salesCount: confirmedSales.length,
+    gross,
+    hotmartPercentFee,
+    hotmartFixedFee,
+    gatewayFee,
+    coproduction,
+    withdrawFee,
+    tax,
+    estimatedNet,
+    hasSales,
+    hasProfile,
+    incomplete,
+    missingProduct,
+    missingFiscalCategory,
+    missingTaxRule,
+    byCategory: [...byCategory.entries()].map(([category, data]) => ({ category, ...data })),
+  };
+}
+
+function buildExecutiveFinancialOverview({
+  profile,
+  taxRules,
+  products,
+  commercialSales,
+}: {
+  profile: NorwynBusinessProfile | null;
+  taxRules: NorwynBusinessTaxRule[];
+  products: NorwynProduct[];
+  commercialSales: NorwynCommercialSale[];
+}) {
+  const now = new Date();
+  const currentStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const previousStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousEnd = endOfDay(new Date(now.getFullYear(), now.getMonth(), 0));
+  return {
+    previousMonth: buildFinancialPeriodEstimate({
+      label: "Mes anterior - base de pagamento",
+      supportText: "Usado como referencia para fechamento, impostos e pagamentos do mes.",
+      start: previousStart,
+      end: previousEnd,
+      profile,
+      taxRules,
+      products,
+      commercialSales,
+      partial: false,
+    }),
+    currentMonth: buildFinancialPeriodEstimate({
+      label: "Mes atual - projecao parcial",
+      supportText: "Projecao parcial. O mes ainda esta em aberto.",
+      start: currentStart,
+      end: endOfDay(startOfDay(now)),
+      profile,
+      taxRules,
+      products,
+      commercialSales,
+      partial: true,
+    }),
   };
 }
 
