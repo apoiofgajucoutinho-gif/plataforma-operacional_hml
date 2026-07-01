@@ -35,6 +35,12 @@ export type ComercialNorwynProduct = {
     principal: boolean;
     ativo: boolean;
   }>;
+  product_components?: Array<{
+    id: string;
+    componente: string;
+    categoria: string | null;
+    ativo: boolean;
+  }>;
 };
 
 export type ComercialBusinessProfile = {

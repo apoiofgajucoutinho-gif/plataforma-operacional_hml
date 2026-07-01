@@ -149,7 +149,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       .limit(800),
     dataClient
       .from("comercial_vendas")
-      .select("id, transaction_id, produto_nome, comprador_email, status_original, status_normalizado, grupo_comercial, forma_pagamento, valor_bruto, data_compra, data_aprovacao, source_sck, imported_at, last_event_at")
+      .select("id, transaction_id, produto_id, hotmart_product_id, produto_nome, comprador_email, status_original, status_normalizado, grupo_comercial, forma_pagamento, valor_bruto, data_compra, data_aprovacao, source_sck, imported_at, last_event_at, metadata")
       .eq("tenant_id", membership.tenant_id)
       .order("data_compra", { ascending: false, nullsFirst: false })
       .limit(3000),

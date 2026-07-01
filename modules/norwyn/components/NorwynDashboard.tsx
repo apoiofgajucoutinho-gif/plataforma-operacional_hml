@@ -2671,16 +2671,35 @@ function FinancialPeriodCard({ period }: { period: ReturnType<typeof buildFinanc
         </p>
       ) : null}
       {period.pendingProducts.length ? (
-        <div className="mt-3 rounded-md border border-brand-sand bg-brand-cream/40 p-3">
-          <p className="text-[11px] font-black uppercase text-brand-clay">Pendencias por produto</p>
-          <div className="mt-2 space-y-2">
-            {period.pendingProducts.slice(0, 5).map((item) => (
-              <div key={item.product} className="text-xs leading-5 text-brand-teal/75">
-                <strong className="text-brand-teal">{item.product}</strong> - {currency(item.gross)} - {item.reasons.join(", ")}
-              </div>
-            ))}
+        <details className="mt-3 rounded-md border border-brand-sand bg-brand-cream/40 p-3">
+          <summary className="cursor-pointer text-[11px] font-black uppercase text-brand-clay">Ver pendencias de produto</summary>
+          <div className="mt-3 overflow-x-auto">
+            <table className="min-w-[900px] w-full text-left text-xs">
+              <thead className="bg-[#F3DDE1] text-[10px] font-black uppercase text-brand-clay">
+                <tr>
+                  <th className="px-2 py-2">Produto Hotmart</th>
+                  <th className="px-2 py-2">Product ID</th>
+                  <th className="px-2 py-2">Receita</th>
+                  <th className="px-2 py-2">Vendas</th>
+                  <th className="px-2 py-2">Motivo</th>
+                  <th className="px-2 py-2">Acao sugerida</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-sand bg-white/70">
+                {period.pendingProducts.map((item) => (
+                  <tr key={item.product}>
+                    <td className="px-2 py-2 font-semibold text-brand-teal">{item.product}</td>
+                    <td className="px-2 py-2 text-brand-teal/70">{item.hotmartProductId ?? "-"}</td>
+                    <td className="px-2 py-2 text-brand-teal/70">{currency(item.gross)}</td>
+                    <td className="px-2 py-2 text-brand-teal/70">{item.count}</td>
+                    <td className="px-2 py-2 text-brand-teal/70">{item.reasons.join(", ")}</td>
+                    <td className="px-2 py-2 text-brand-teal/70">{item.suggestion}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
+        </details>
       ) : null}
     </div>
   );
@@ -4188,18 +4207,75 @@ function percent(value: number | null | undefined) {
   return `${value.toFixed(2).replace(".", ",")}%`;
 }
 
+function saleMetadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function norwynProductMatchKeys(product: NorwynProduct) {
+  const aliases = (product.product_aliases ?? []).filter((alias) => alias.ativo !== false);
+  const components = (product.product_components ?? []).filter((component) => component.ativo !== false);
+  return {
+    official: normalizeKey(product.nome_oficial),
+    base: normalizeKey(product.produto_base),
+    aliases: aliases.flatMap((alias) => [alias.alias, alias.produto_base]).map((value) => normalizeKey(value)).filter(Boolean),
+    components: components.map((component) => normalizeKey(component.componente)).filter(Boolean),
+  };
+}
+
 function productForSale(sale: NorwynCommercialSale, products: NorwynProduct[]) {
-  const saleName = normalizeKey(sale.produto_nome ?? "");
-  if (!saleName) return null;
-  return products.find((product) => {
-    const values = [
-      product.nome_oficial,
-      product.produto_base,
-      ...(product.product_aliases ?? []).map((alias) => alias.alias),
-      ...(product.product_components ?? []).map((component) => component.componente),
-    ].filter(Boolean).map((value) => normalizeKey(String(value)));
-    return values.some((value) => saleName.includes(value) || value.includes(saleName));
-  }) ?? null;
+  const idCandidates = [
+    sale.hotmart_product_id,
+    sale.produto_id,
+    saleMetadataString(sale.metadata, "product_id"),
+    saleMetadataString(sale.metadata, "hotmart_product_id"),
+  ].map((value) => normalizeKey(value)).filter(Boolean);
+
+  const nameCandidates = [
+    sale.produto_nome,
+    saleMetadataString(sale.metadata, "product_name"),
+    saleMetadataString(sale.metadata, "product"),
+  ].map((value) => normalizeKey(value)).filter(Boolean);
+
+  if (![...idCandidates, ...nameCandidates].length) return null;
+
+  const scored = products
+    .filter((product) => product.ativo !== false)
+    .map((product) => {
+      const keys = norwynProductMatchKeys(product);
+      let score = 0;
+
+      if (idCandidates.some((candidate) => candidate === normalizeKey(product.id) || keys.aliases.includes(candidate))) score = Math.max(score, 120);
+      if (nameCandidates.some((candidate) => candidate === keys.official)) score = Math.max(score, 110);
+      if (nameCandidates.some((candidate) => keys.aliases.includes(candidate))) score = Math.max(score, 100);
+      if (nameCandidates.some((candidate) => candidate === keys.base)) score = Math.max(score, 90);
+      if (keys.components.length >= 2 && nameCandidates.some((candidate) => keys.components.every((component) => candidate.includes(component)))) {
+        score = Math.max(score, 85 + keys.components.length);
+      }
+
+      const allKeys = [keys.official, keys.base, ...keys.aliases, ...keys.components].filter(Boolean);
+      const longestContainsMatch = Math.max(
+        0,
+        ...nameCandidates.flatMap((candidate) => allKeys.map((key) => candidate.includes(key) || key.includes(candidate) ? key.length : 0)),
+      );
+      if (longestContainsMatch) score = Math.max(score, 30 + longestContainsMatch / 10);
+
+      return { product, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.product ?? null;
+}
+
+function productPendingSuggestion(reasons: string[]) {
+  if (reasons.includes("sem alias/produto base")) return "criar alias ou vincular a produto existente";
+  if (reasons.includes("sem categoria fiscal")) return "definir categoria fiscal";
+  if (reasons.includes("sem coproducao")) return "definir coproducao";
+  if (reasons.includes("sem preco")) return "definir preco oficial";
+  if (reasons.includes("sem regra tributaria")) return "criar regra tributaria vigente";
+  if (reasons.includes("sem Business Profile")) return "configurar Business Profile";
+  return "revisar configuracao do produto";
 }
 
 function activeTaxRuleFor(category: string | null | undefined, date: string | null | undefined, taxRules: NorwynBusinessTaxRule[]) {
@@ -4323,11 +4399,18 @@ function buildFinancialPeriodEstimate({
   let configuredSalesCount = 0;
   let coproduction = 0;
   const byCategory = new Map<string, { gross: number; tax: number; taxPercent: number | null; count: number }>();
-  const pendingProducts = new Map<string, { product: string; gross: number; count: number; reasons: Set<string> }>();
+  const pendingProducts = new Map<string, { product: string; hotmartProductId: string | null; gross: number; count: number; reasons: Set<string> }>();
 
   function addPending(sale: NorwynCommercialSale, reasons: string[]) {
     const key = sale.produto_nome || sale.transaction_id || "Produto sem alias/produto base";
-    const current = pendingProducts.get(key) ?? { product: key, gross: 0, count: 0, reasons: new Set<string>() };
+    const current = pendingProducts.get(key) ?? {
+      product: key,
+      hotmartProductId: sale.hotmart_product_id,
+      gross: 0,
+      count: 0,
+      reasons: new Set<string>(),
+    };
+    current.hotmartProductId = current.hotmartProductId ?? sale.hotmart_product_id;
     current.gross += Number(sale.valor_bruto ?? 0);
     current.count += 1;
     reasons.forEach((reason) => current.reasons.add(reason));
@@ -4414,12 +4497,17 @@ function buildFinancialPeriodEstimate({
     missingCoproduction,
     missingPrice,
     missingTaxRule,
-    pendingProducts: [...pendingProducts.values()].map((item) => ({
-      product: item.product,
-      gross: item.gross,
-      count: item.count,
-      reasons: [...item.reasons],
-    })).sort((a, b) => b.gross - a.gross),
+    pendingProducts: [...pendingProducts.values()].map((item) => {
+      const reasons = [...item.reasons];
+      return {
+        product: item.product,
+        hotmartProductId: item.hotmartProductId,
+        gross: item.gross,
+        count: item.count,
+        reasons,
+        suggestion: productPendingSuggestion(reasons),
+      };
+    }).sort((a, b) => b.gross - a.gross),
     byCategory: [...byCategory.entries()].map(([category, data]) => ({ category, ...data })),
   };
 }
@@ -4735,17 +4823,36 @@ function ProductIntelligenceView({
             <MissionMeta label="Vendas consideradas" value={String(forecast.salesCount)} />
           </div>
           {forecast.pendingProducts.length ? (
-            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
+            <details className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
+              <summary className="cursor-pointer font-black uppercase">Ver pendencias de produto</summary>
               <p>Estimativa calculada parcialmente com base nos produtos configurados. Produtos sem configuracao financeira foram excluidos da estimativa e listados como pendencia.</p>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
-                {forecast.pendingProducts.slice(0, 6).map((item) => (
-                  <div key={item.product} className="rounded-md bg-white/70 p-2">
-                    <p className="truncate">{item.product}</p>
-                    <p className="text-amber-800/75">{currency(item.gross)} - {item.reasons.join(", ")}</p>
-                  </div>
-                ))}
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-[900px] w-full text-left text-xs">
+                  <thead className="bg-[#F3DDE1] text-[10px] font-black uppercase text-brand-clay">
+                    <tr>
+                      <th className="px-2 py-2">Produto Hotmart</th>
+                      <th className="px-2 py-2">Product ID</th>
+                      <th className="px-2 py-2">Receita</th>
+                      <th className="px-2 py-2">Vendas</th>
+                      <th className="px-2 py-2">Motivo</th>
+                      <th className="px-2 py-2">Acao sugerida</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-brand-sand bg-white/70">
+                    {forecast.pendingProducts.map((item) => (
+                      <tr key={item.product}>
+                        <td className="px-2 py-2 text-brand-teal">{item.product}</td>
+                        <td className="px-2 py-2 text-brand-teal/70">{item.hotmartProductId ?? "-"}</td>
+                        <td className="px-2 py-2 text-brand-teal/70">{currency(item.gross)}</td>
+                        <td className="px-2 py-2 text-brand-teal/70">{item.count}</td>
+                        <td className="px-2 py-2 text-brand-teal/70">{item.reasons.join(", ")}</td>
+                        <td className="px-2 py-2 text-brand-teal/70">{item.suggestion}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            </details>
           ) : null}
           <div className="mt-4 overflow-hidden rounded-md border border-brand-sand">
             <table className="w-full text-left text-sm">

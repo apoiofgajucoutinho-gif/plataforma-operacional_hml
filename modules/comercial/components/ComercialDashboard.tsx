@@ -796,29 +796,81 @@ function normalizeProductKey(value: string | null | undefined) {
     .trim();
 }
 
+function productMatchKeys(product: ComercialNorwynProduct) {
+  const aliases = (product.product_aliases ?? []).filter((alias) => alias.ativo !== false);
+  const components = (product.product_components ?? []).filter((component) => component.ativo !== false);
+  return {
+    official: normalizeProductKey(product.nome_oficial),
+    base: normalizeProductKey(product.produto_base),
+    aliases: aliases.flatMap((alias) => [alias.alias, alias.produto_base]).map(normalizeProductKey).filter(Boolean),
+    components: components.map((component) => component.componente).map(normalizeProductKey).filter(Boolean),
+  };
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" ? value : null;
+}
+
 function findNorwynProductForSale(sale: ComercialVenda, products: ComercialNorwynProduct[]) {
-  const candidates = [
-    sale.produto_nome,
+  const idCandidates = [
     sale.hotmart_product_id,
-    typeof sale.metadata?.product_name === "string" ? sale.metadata.product_name : null,
-    typeof sale.metadata?.product_id === "string" ? sale.metadata.product_id : null,
+    sale.produto_id,
+    metadataString(sale.metadata, "product_id"),
+    metadataString(sale.metadata, "hotmart_product_id"),
   ]
     .map(normalizeProductKey)
     .filter(Boolean);
 
+  const nameCandidates = [
+    sale.produto_nome,
+    metadataString(sale.metadata, "product_name"),
+    metadataString(sale.metadata, "product"),
+  ]
+    .map(normalizeProductKey)
+    .filter(Boolean);
+
+  const candidates = [...idCandidates, ...nameCandidates];
   if (!candidates.length) return null;
 
-  return products.find((product) => {
-    const productKeys = [
-      product.nome_oficial,
-      product.produto_base,
-      ...(product.product_aliases ?? []).filter((alias) => alias.ativo !== false).flatMap((alias) => [alias.alias, alias.produto_base]),
-    ]
-      .map(normalizeProductKey)
-      .filter(Boolean);
+  const scored = products
+    .filter((product) => product.ativo !== false)
+    .map((product) => {
+      const keys = productMatchKeys(product);
+      let score = 0;
 
-    return candidates.some((candidate) => productKeys.some((key) => key === candidate || candidate.includes(key) || key.includes(candidate)));
-  }) ?? null;
+      if (idCandidates.some((candidate) => candidate === normalizeProductKey(product.id) || keys.aliases.includes(candidate))) score = Math.max(score, 120);
+      if (nameCandidates.some((candidate) => candidate === keys.official)) score = Math.max(score, 110);
+      if (nameCandidates.some((candidate) => keys.aliases.includes(candidate))) score = Math.max(score, 100);
+      if (nameCandidates.some((candidate) => candidate === keys.base)) score = Math.max(score, 90);
+
+      if (keys.components.length >= 2 && nameCandidates.some((candidate) => keys.components.every((component) => candidate.includes(component)))) {
+        score = Math.max(score, 85 + keys.components.length);
+      }
+
+      const allKeys = [keys.official, keys.base, ...keys.aliases, ...keys.components].filter(Boolean);
+      const longestContainsMatch = Math.max(
+        0,
+        ...nameCandidates.flatMap((candidate) => allKeys.map((key) => candidate.includes(key) || key.includes(candidate) ? key.length : 0)),
+      );
+      if (longestContainsMatch) score = Math.max(score, 30 + longestContainsMatch / 10);
+
+      return { product, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.product ?? null;
+}
+
+function pendingSuggestionFor(reasons: string[]) {
+  if (reasons.includes("sem alias/produto base")) return "criar alias ou vincular a produto existente";
+  if (reasons.includes("sem categoria fiscal")) return "definir categoria fiscal";
+  if (reasons.includes("sem coproducao")) return "definir coproducao";
+  if (reasons.includes("sem preco")) return "definir preco oficial";
+  if (reasons.includes("sem regra tributaria")) return "criar regra tributaria vigente";
+  if (reasons.includes("sem Business Profile")) return "configurar Business Profile";
+  return "revisar configuracao do produto";
 }
 
 function activeTaxRuleFor(category: string | null | undefined, date: string | null | undefined, rules: ComercialBusinessTaxRule[]) {
@@ -855,12 +907,20 @@ function buildEstimatedFinancials({
 
   let tax = 0;
   const taxBuckets = new Map<string, { category: string; gross: number; tax: number; percent: number }>();
-  const pendingProducts = new Map<string, { product: string; gross: number; reasons: Set<string> }>();
+  const pendingProducts = new Map<string, { product: string; hotmartProductId: string | null; gross: number; count: number; reasons: Set<string> }>();
 
   function addPending(sale: ComercialVenda, reasons: string[]) {
     const productName = sale.produto_nome ?? sale.hotmart_product_id ?? "Produto sem mapeamento";
-    const current = pendingProducts.get(productName) ?? { product: productName, gross: 0, reasons: new Set<string>() };
+    const current = pendingProducts.get(productName) ?? {
+      product: productName,
+      hotmartProductId: sale.hotmart_product_id,
+      gross: 0,
+      count: 0,
+      reasons: new Set<string>(),
+    };
+    current.hotmartProductId = current.hotmartProductId ?? sale.hotmart_product_id;
     current.gross += sale.valor_bruto;
+    current.count += 1;
     reasons.forEach((reason) => current.reasons.add(reason));
     pendingProducts.set(productName, current);
   }
@@ -902,7 +962,17 @@ function buildEstimatedFinancials({
   const coveragePercent = gross ? (configuredGross / gross) * 100 : null;
   const estimatedNet = configuredSales ? configuredGross - hotmartPercentFee - fixedFee - gatewayFee - coproduction - tax : null;
   const pendingList = [...pendingProducts.values()]
-    .map((item) => ({ product: item.product, gross: item.gross, reasons: [...item.reasons] }))
+    .map((item) => {
+      const reasons = [...item.reasons];
+      return {
+        product: item.product,
+        hotmartProductId: item.hotmartProductId,
+        gross: item.gross,
+        count: item.count,
+        reasons,
+        suggestion: pendingSuggestionFor(reasons),
+      };
+    })
     .sort((a, b) => b.gross - a.gross);
 
   return {
@@ -2538,17 +2608,24 @@ function EstimatedFinancialsCard({
         {estimate.pendingProducts.length ? " Estimativa calculada parcialmente com base nos produtos configurados. Produtos sem configuracao financeira foram excluidos da estimativa e listados como pendencia." : ""}
       </p>
       {estimate.pendingProducts.length ? (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
-          <p className="text-xs font-black uppercase text-amber-900">Pendencias de configuracao</p>
-          <div className="mt-2 grid gap-2 md:grid-cols-2">
-            {estimate.pendingProducts.slice(0, 6).map((item) => (
-              <div key={item.product} className="rounded-md bg-white/70 p-2 text-xs font-bold text-amber-900">
-                <p className="truncate">{item.product}</p>
-                <p className="mt-1 text-amber-800/75">{formatMoney(item.gross)} - {item.reasons.join(", ")}</p>
-              </div>
-            ))}
+        <details className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <summary className="cursor-pointer text-xs font-black uppercase text-amber-900">Ver pendencias de produto</summary>
+          <div className="mt-3 overflow-x-auto">
+            <SimpleTable
+              headers={["Produto Hotmart", "Product ID", "Receita", "Vendas", "Motivo", "Acao sugerida"]}
+              rows={estimate.pendingProducts.map((item) => [
+                item.product,
+                item.hotmartProductId ?? "-",
+                formatMoney(item.gross),
+                String(item.count),
+                item.reasons.join(", "),
+                item.suggestion,
+              ])}
+              empty="Sem pendencias de produto."
+              minWidth="900px"
+            />
           </div>
-        </div>
+        </details>
       ) : null}
     </Card>
   );

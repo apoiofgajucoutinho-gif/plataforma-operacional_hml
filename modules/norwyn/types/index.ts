@@ -3,6 +3,8 @@ import type { InstagramInteraction, InstagramPostMetric } from "@/modules/instag
 export type NorwynCommercialSale = {
   id: string;
   transaction_id: string | null;
+  produto_id: string | null;
+  hotmart_product_id: string | null;
   produto_nome: string | null;
   comprador_email: string | null;
   status_original: string | null;
@@ -15,6 +17,7 @@ export type NorwynCommercialSale = {
   source_sck: string | null;
   imported_at: string | null;
   last_event_at: string | null;
+  metadata: Record<string, unknown> | null;
 };
 
 export type NorwynAdsRow = {
