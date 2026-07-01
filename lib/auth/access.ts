@@ -3,9 +3,10 @@ import { allModules, readyModules } from "@/lib/auth/modules";
 import { getLocalBypassAllowedModules, localBypassUser } from "@/lib/auth/local-bypass";
 import { createClient } from "@/lib/supabase/server";
 
-const landingPriority = ["instagram", "ads", "objetivos", "agenda", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
+const landingPriority = ["norwyn", "instagram", "ads", "objetivos", "agenda", "financeiro", "ocorrencias", "adocao", "atividades", "relatorios", "admin"];
 
 const modulePaths: Record<string, string> = {
+  norwyn: "/norwyn",
   agenda: "/agenda",
   instagram: "/instagram",
   ads: "/ads",

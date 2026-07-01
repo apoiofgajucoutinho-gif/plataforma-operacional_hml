@@ -767,6 +767,162 @@ function missionIsAudience(mission: NorwynMission | null) {
   return ["crescimento", "autoridade", "seguidor", "alcance", "interacao", "audiencia"].some((item) => text.includes(item));
 }
 
+function strategicObjectiveLabels(objective: BusinessObjective | null) {
+  if (!objective) return [];
+  const text = normalizeKey([
+    objective.name,
+    objective.description,
+    objective.target,
+    objective.notes,
+    ...objective.kpis,
+  ].join(" "));
+  return productAliases
+    .filter((alias) => alias.keys.some((key) => text.includes(key)) || text.includes(normalizeKey(alias.label)))
+    .map((alias) => alias.label);
+}
+
+function patternSearchText(pattern: NorwynLaunchPattern) {
+  return normalizeKey([
+    pattern.contentTitle,
+    pattern.contentCaption,
+    pattern.format,
+    pattern.productName,
+    ...pattern.associatedProducts,
+  ].join(" "));
+}
+
+function patternMatchesProductLabels(pattern: NorwynLaunchPattern, labels: string[]) {
+  if (!labels.length) return false;
+  const text = patternSearchText(pattern);
+  return labels.some((label) => {
+    const alias = productAliases.find((item) => normalizeKey(item.label) === normalizeKey(label));
+    const keys = alias?.keys ?? [normalizeKey(label)];
+    return keys.some((key) => text.includes(key)) || productMatchesAlias(pattern.productName, label) || pattern.associatedProducts.some((product) => productMatchesAlias(product, label));
+  });
+}
+
+function performanceMetric(pattern: NorwynLaunchPattern, keys: string[]) {
+  for (const key of keys) {
+    const value = Number(pattern.performanceSnapshot?.[key] ?? 0);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return 0;
+}
+
+function daysSince(value: string) {
+  const date = parseDate(value);
+  if (!date) return 9999;
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / 86_400_000));
+}
+
+function formatShortDate(value: string) {
+  const date = parseDate(value);
+  return date ? date.toLocaleDateString("pt-BR") : "-";
+}
+
+function playbookBriefingSeed(pattern: NorwynLaunchPattern, missionId?: string | null): BriefingSeed {
+  return {
+    title: `Nova versao - ${pattern.contentTitle}`,
+    objective: `Revisitar um conteudo historico em formato ${pattern.format} com evidencias de impacto para ${friendlyProductName(pattern.productName) || "produto prioritario"}.`,
+    context: `Conteudo publicado em ${formatShortDate(pattern.publishedAt)}. Teve ${pattern.salesInWindow} venda(s) na janela e ${pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} de receita bruta associada.`,
+    evidence: [
+      `Product Match Score: ${pattern.productMatchScore}%.`,
+      `Influence Score: ${pattern.influenceScore}%.`,
+      `${pattern.salesInWindow} venda(s) na janela analisada.`,
+      `Receita bruta na janela: ${pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+    ],
+    priority: pattern.influenceScore >= 65 ? "Alta" : "Media",
+    type: pattern.format.includes("Stories") ? "Stories" : pattern.format.includes("Reel") ? "Reels" : "Carrossel",
+    product: friendlyProductName(pattern.productName),
+    rule: "Playbook Recomendado contextual",
+    sourceModule: "Norwyn",
+    recommendationOrigin: `Evidence Pattern ${pattern.id}`,
+    confidence: pattern.influenceScore,
+    missionId: missionId ?? pattern.missionId ?? undefined,
+  };
+}
+
+function buildRecommendedPlaybook({
+  patterns,
+  objective,
+  mission,
+}: {
+  patterns: NorwynLaunchPattern[];
+  objective: BusinessObjective | null;
+  mission: NorwynMission | null;
+}) {
+  const objectiveLabels = strategicObjectiveLabels(objective);
+  const missionLabels = missionProductLabels(mission);
+  const missionText = normalizeKey(`${mission?.type ?? ""} ${mission?.name ?? ""} ${mission?.objective ?? ""} ${mission?.mainGoal ?? ""}`);
+  const objectiveText = normalizeKey(`${objective?.name ?? ""} ${objective?.description ?? ""} ${objective?.target ?? ""} ${objective?.notes ?? ""}`);
+  const audienceMission = missionIsAudience(mission) || ["crescimento", "autoridade", "instagram", "organico"].some((term) => missionText.includes(term) || objectiveText.includes(term));
+  const launchMission = missionIsCommercial(mission) || ["lancamento", "funil", "venda", "receita", "aasi"].some((term) => missionText.includes(term) || objectiveText.includes(term));
+
+  const scored = patterns.map((pattern) => {
+    const objectiveMatch = patternMatchesProductLabels(pattern, objectiveLabels) || Boolean(objectiveText && patternSearchText(pattern).includes(objectiveText.split("-")[0] ?? ""));
+    const missionProductMatch = patternMatchesProductLabels(pattern, missionLabels);
+    const productMatch = objectiveMatch || missionProductMatch || pattern.productMatchScore >= 65;
+    const reach = performanceMetric(pattern, ["alcance", "reach", "impressoes", "views", "visualizacoes"]);
+    const saves = performanceMetric(pattern, ["salvos", "saves"]);
+    const shares = performanceMetric(pattern, ["compartilhamentos", "shares"]);
+    const comments = performanceMetric(pattern, ["comentarios", "comments"]);
+    const engagementScore = Math.min(100, Math.log10(Math.max(reach + saves * 30 + shares * 35 + comments * 20, 1)) * 28);
+    const revenueScore = Math.min(100, Math.log10(Math.max(pattern.revenueInWindow, 1)) * 22);
+    const salesScore = Math.min(100, pattern.salesInWindow * 16);
+    const recencyScore = Math.max(0, 100 - daysSince(pattern.publishedAt) / 12);
+    const evidenceScore = audienceMission
+      ? pattern.productMatchScore * 0.2 + pattern.influenceScore * 0.2 + engagementScore * 0.45 + recencyScore * 0.15
+      : pattern.productMatchScore * 0.25 + pattern.influenceScore * 0.25 + revenueScore * 0.2 + salesScore * 0.2 + engagementScore * 0.1;
+    const missionMatch = missionProductMatch || (pattern.missionId && pattern.missionId === mission?.id) || (launchMission && pattern.salesInWindow > 0);
+    const score =
+      (objectiveMatch ? 35 : 0) +
+      (missionMatch ? 25 : 0) +
+      (productMatch ? 15 : 0) +
+      evidenceScore * 0.2 +
+      recencyScore * 0.05;
+    const reasons = [
+      objectiveMatch ? "Relacionado ao objetivo estrategico atual." : null,
+      missionMatch ? "Alinhado a missao ativa e ao contexto operacional." : null,
+      productMatch ? "Produto compativel por alias, tags ou score de match." : null,
+      pattern.productMatchScore >= 65 ? "Alto Product Match Score." : null,
+      pattern.influenceScore >= 65 ? "Alto Influence Score." : null,
+      pattern.salesInWindow > 0 ? "Antecedeu venda(s) na janela analisada." : null,
+      audienceMission && engagementScore >= 45 ? "Bom sinal de alcance, salvamentos, compartilhamentos ou comentarios." : null,
+      recencyScore >= 70 ? "Conteudo relativamente recente dentro do historico analisado." : null,
+    ].filter(Boolean) as string[];
+
+    return { pattern, score, reasons, diversityKey: `${friendlyProductName(pattern.productName) || "sem-produto"}-${angleForSeed({ title: pattern.contentTitle }, pattern.contentCaption ?? "")}-${pattern.format}` };
+  }).sort((a, b) => b.score - a.score || daysSince(a.pattern.publishedAt) - daysSince(b.pattern.publishedAt));
+
+  const picked: typeof scored = [];
+  const titleKeys = new Set<string>();
+  const diversityCount = new Map<string, number>();
+
+  for (const item of scored) {
+    const titleKey = normalizeKey(item.pattern.contentTitle).slice(0, 50);
+    if (titleKeys.has(titleKey)) continue;
+    const count = diversityCount.get(item.diversityKey) ?? 0;
+    if (count >= 1 && picked.length < 3) continue;
+    if (count >= 2) continue;
+    picked.push(item);
+    titleKeys.add(titleKey);
+    diversityCount.set(item.diversityKey, count + 1);
+    if (picked.length >= 5) break;
+  }
+
+  if (picked.length < 3) {
+    for (const item of scored) {
+      const titleKey = normalizeKey(item.pattern.contentTitle).slice(0, 50);
+      if (titleKeys.has(titleKey)) continue;
+      picked.push(item);
+      titleKeys.add(titleKey);
+      if (picked.length >= Math.min(5, scored.length)) break;
+    }
+  }
+
+  return picked;
+}
+
 function angleForSeed(seed: Partial<BriefingSeed>, contextText = "") {
   const text = normalizeKey(`${seed.title ?? ""} ${seed.objective ?? ""} ${seed.context ?? ""} ${seed.rule ?? ""} ${contextText}`);
   if (text.includes("obje") || text.includes("duvida") || text.includes("faq")) return "Quebra de objecao";
@@ -1971,7 +2127,11 @@ function ExecutiveHomeView({
   const upcomingEvents = context.agendaEvents.filter((event) => inLastDays(event.inicio, -30) || parseDate(event.inicio));
   const criticalTasks = context.atividades.filter((task) => ["Alta", "Urgente"].includes(String(task.prioridade ?? "")) && task.status !== "concluida");
   const openIncidents = context.ocorrencias.filter((item) => !["Resolvido", "Cancelado", "Ignorado"].includes(String(item.status ?? "")));
-  const topPlay = evidenceEngine.launchPatterns[0] ?? null;
+  const playbookItems = buildRecommendedPlaybook({
+    patterns: evidenceEngine.launchPatterns,
+    objective: primaryObjective,
+    mission: activeMission,
+  });
 
   return (
     <div className="space-y-4">
@@ -2030,20 +2190,53 @@ function ExecutiveHomeView({
         </Card>
 
         <Card className="border-[#E9CBD1] p-4 sm:p-5">
-          <SectionTitle icon={<Sparkles className="h-5 w-5" />} title="Winning Plays" />
-          {topPlay ? (
-            <article className="mt-4 rounded-md border border-brand-sand bg-white/85 p-3">
-              <p className="text-xs font-black uppercase text-brand-clay">{topPlay.format}</p>
-              <h3 className="mt-1 text-sm font-semibold text-brand-teal">{topPlay.contentTitle}</h3>
-              <p className="mt-2 text-xs text-brand-teal/65">
-                {topPlay.salesInWindow} venda(s) na janela e {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(topPlay.revenueInWindow)} de receita bruta associada.
-              </p>
-              <p className="mt-2 text-xs font-bold text-brand-teal/55">Motivo: influencia {topPlay.influenceLevel.toLowerCase()} com evidencia historica.</p>
-              <button type="button" onClick={() => goTo("briefing")} className="mt-3 h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Criar nova versao</button>
-            </article>
-          ) : (
-            <EmptyState>Sem play historico suficiente para sugerir repeticao.</EmptyState>
-          )}
+          <SectionTitle icon={<Sparkles className="h-5 w-5" />} title="Playbook Recomendado" />
+          <p className="mt-2 text-xs leading-5 text-brand-teal/60">
+            Conteudos historicos priorizados pelo objetivo estrategico, missao ativa, match de produto, evidencias e recencia. Nao e um ranking global.
+          </p>
+          <div className="mt-4 space-y-3">
+            {playbookItems.length ? playbookItems.map((item, index) => {
+              const pattern = item.pattern;
+              const briefingSeed = playbookBriefingSeed(pattern, activeMission?.id);
+              return (
+                <article key={pattern.id} className="rounded-md border border-brand-sand bg-white/85 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black uppercase text-brand-clay">#{index + 1} - {pattern.format}</p>
+                      <h3 className="mt-1 text-sm font-semibold text-brand-teal">{pattern.contentTitle}</h3>
+                      <p className="mt-1 text-xs text-brand-teal/60">Publicado: {formatShortDate(pattern.publishedAt)} - Score contextual {Math.round(item.score)}</p>
+                    </div>
+                    <span className="rounded-full bg-brand-cream px-2 py-1 text-[11px] font-black text-brand-teal">{pattern.influenceLevel}</span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-brand-teal/70">
+                    <p className="font-black uppercase text-brand-clay">Por que foi selecionado?</p>
+                    {item.reasons.slice(0, 6).map((reason) => (
+                      <p key={reason}>✓ {reason}</p>
+                    ))}
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <MissionMeta label="Resultado observado" value={`${pattern.salesInWindow} venda(s)`} />
+                    <MissionMeta label="Receita bruta" value={pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+                    <MissionMeta label="Match Score" value={`${pattern.productMatchScore}%`} />
+                    <MissionMeta label="Influence Score" value={`${pattern.influenceScore}%`} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {pattern.permalink ? (
+                      <a href={pattern.permalink} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">
+                        Ver post
+                      </a>
+                    ) : (
+                      <button type="button" disabled className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal/40">Ver post</button>
+                    )}
+                    <button type="button" onClick={() => goTo("evidence")} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Ver evidencias</button>
+                    <button type="button" onClick={() => openBriefing(briefingSeed)} className="h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white">Criar nova versao</button>
+                  </div>
+                </article>
+              );
+            }) : (
+              <EmptyState>Sem evidencias suficientes para montar um playbook contextual agora.</EmptyState>
+            )}
+          </div>
         </Card>
 
         <Card className="border-[#E9CBD1] p-4 sm:p-5">

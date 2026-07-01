@@ -11,7 +11,7 @@ export default async function HomePage() {
 
   if (!user) {
     if (isLocalAuthBypassEnabled()) {
-      redirect("/comercial");
+      redirect("/norwyn");
     }
 
     redirect("/login");
