@@ -48,7 +48,7 @@ async function getAuthContext() {
 async function loadProducts(dataClient: SupabaseAny, tenantId: string) {
   const { data, error } = await dataClient
     .from("products")
-    .select("id, tenant_id, nome_oficial, produto_base, categoria, descricao, status, tipo, preco_oficial, duracao, unidade_duracao, link_oferta, percentual_coproducao, percentual_hotmart, percentual_gateway, percentual_imposto, receita_liquida_estimada_pct, observacoes, ativo, source, manually_edited_at, product_aliases(id, alias, produto_base, origem, confianca, principal, ativo, source, manually_edited_at), product_components(id, componente, categoria, ordem, duracao, unidade_duracao, link, observacoes, ativo, source, manually_edited_at), product_batches(id, turma, inicio, fim, status, meta_alunos, alunos, receita_meta, receita_real, observacoes, ativo, source, manually_edited_at)")
+    .select("id, tenant_id, nome_oficial, produto_base, categoria, fiscal_category, financial_notes, descricao, status, tipo, preco_oficial, duracao, unidade_duracao, link_oferta, percentual_coproducao, percentual_hotmart, percentual_gateway, percentual_imposto, receita_liquida_estimada_pct, observacoes, ativo, source, manually_edited_at, product_aliases(id, alias, produto_base, origem, confianca, principal, ativo, source, manually_edited_at), product_components(id, componente, categoria, ordem, duracao, unidade_duracao, link, observacoes, ativo, source, manually_edited_at), product_batches(id, turma, inicio, fim, status, meta_alunos, alunos, receita_meta, receita_real, observacoes, ativo, source, manually_edited_at)")
     .eq("tenant_id", tenantId)
     .order("produto_base", { ascending: true });
 
@@ -90,6 +90,8 @@ export async function POST(request: Request) {
         nome_oficial: nomeOficial,
         produto_base: produtoBase,
         categoria: product.categoria,
+        fiscal_category: product.fiscal_category,
+        financial_notes: product.financial_notes,
         descricao: product.descricao,
         status: product.status || "ativo",
         tipo: product.tipo || "Entrada",

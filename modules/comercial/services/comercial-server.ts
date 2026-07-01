@@ -5,7 +5,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type {
   ComercialAluno,
+  ComercialBusinessProfile,
+  ComercialBusinessTaxRule,
   ComercialContext,
+  ComercialNorwynProduct,
   ComercialProduto,
   ComercialRawImport,
   ComercialRecebivel,
@@ -154,7 +157,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
   }
 
   try {
-    const [tenantResult, vendasResult, recebiveisResult, alunosResult, produtosResult, rawImportsResult] = await Promise.all([
+    const [tenantResult, vendasResult, recebiveisResult, alunosResult, produtosResult, rawImportsResult, norwynProductsResult, businessProfileResult, taxRulesResult] = await Promise.all([
       dataClient.from("tenants").select("id, nome").eq("id", membership.tenant_id).maybeSingle(),
       fetchTenantRows({
         client: dataClient,
@@ -191,6 +194,22 @@ export async function getComercialContext(): Promise<ComercialContext> {
         .eq("tenant_id", membership.tenant_id)
         .order("received_at", { ascending: false })
         .limit(50),
+      dataClient
+        .from("products")
+        .select("id, tenant_id, nome_oficial, produto_base, categoria, fiscal_category, preco_oficial, ativo, product_aliases(id, alias, produto_base, principal, ativo)")
+        .eq("tenant_id", membership.tenant_id)
+        .order("nome_oficial"),
+      dataClient
+        .from("business_profile")
+        .select("id, tenant_id, company_name, tax_regime, default_coproduction_percent, hotmart_percent_fee, hotmart_fixed_fee, hotmart_withdraw_fee, gateway_percent_fee, status")
+        .eq("tenant_id", membership.tenant_id)
+        .eq("status", "current")
+        .maybeSingle(),
+      dataClient
+        .from("business_tax_rules")
+        .select("id, tenant_id, business_profile_id, category, cnae, tax_percent, description, starts_at, ends_at, status")
+        .eq("tenant_id", membership.tenant_id)
+        .order("category"),
     ]);
 
     if (produtosResult.error) throw new Error(produtosResult.error.message);
@@ -201,6 +220,9 @@ export async function getComercialContext(): Promise<ComercialContext> {
     const alunos = alunosResult as ComercialAluno[];
     const produtos = produtosResult.data as ComercialProduto[];
     const rawImports = rawImportsResult.data as ComercialRawImport[];
+    const norwynProducts = norwynProductsResult.error ? [] : (norwynProductsResult.data as ComercialNorwynProduct[]);
+    const businessProfile = businessProfileResult.error ? null : (businessProfileResult.data as ComercialBusinessProfile | null);
+    const taxRules = taxRulesResult.error ? [] : (taxRulesResult.data as ComercialBusinessTaxRule[]);
 
     return {
       tenant: tenantResult.data,
@@ -212,6 +234,9 @@ export async function getComercialContext(): Promise<ComercialContext> {
       recebiveis,
       alunos,
       produtos,
+      norwynProducts,
+      businessProfile,
+      taxRules,
       rawImports,
     };
   } catch (error) {
@@ -234,6 +259,9 @@ function emptyContext(diagnostic: string): ComercialContext {
     recebiveis: [],
     alunos: [],
     produtos: [],
+    norwynProducts: [],
+    businessProfile: null,
+    taxRules: [],
     rawImports: [],
   };
 }

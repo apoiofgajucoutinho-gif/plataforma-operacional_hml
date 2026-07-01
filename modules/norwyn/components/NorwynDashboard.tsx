@@ -26,7 +26,7 @@ import { Card } from "@/components/ui/Card";
 import { StrategyPlanner } from "@/modules/norwyn/components/StrategyPlanner";
 import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/modules/norwyn/services/evidence-engine";
 import type { InstagramPostMetric } from "@/modules/instagram/types";
-import type { NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus } from "@/modules/norwyn/types";
+import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCommercialSale, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus } from "@/modules/norwyn/types";
 
 type NorwynTab = "home" | "business" | "mission" | "products" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
 type MissionPriority = "Principal" | "Estrategica" | "Continua";
@@ -1460,6 +1460,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [activeTab, setActiveTab] = useState<NorwynTab>("home");
   const [products, setProducts] = useState<NorwynProduct[]>(context.products);
   const [productsMessage, setProductsMessage] = useState<string | null>(null);
+  const [businessProfile, setBusinessProfile] = useState<NorwynBusinessProfile | null>(context.businessProfile);
+  const [taxRules, setTaxRules] = useState<NorwynBusinessTaxRule[]>(context.taxRules);
+  const [businessProfileMessage, setBusinessProfileMessage] = useState<string | null>(null);
   const [businessObjectives, setBusinessObjectives] = useState<BusinessObjective[]>([]);
   const [missions, setMissions] = useState<NorwynMission[]>([]);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
@@ -1640,6 +1643,20 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     if (!response.ok) throw new Error(json.error ?? "Nao foi possivel salvar o catalogo de produtos.");
     if (Array.isArray(json.products)) setProducts(json.products);
     setProductsMessage(json.message ?? "Catalogo atualizado.");
+  }
+
+  async function mutateBusinessProfile(payload: Record<string, unknown>) {
+    setBusinessProfileMessage(null);
+    const response = await fetch("/api/norwyn/business-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json.error ?? "Nao foi possivel salvar o Business Profile.");
+    setBusinessProfile(json.businessProfile ?? null);
+    if (Array.isArray(json.taxRules)) setTaxRules(json.taxRules);
+    setBusinessProfileMessage(json.message ?? "Business Profile atualizado.");
   }
 
   function addKnowledgeEvent(event: Omit<KnowledgeEvent, "id" | "createdAt" | "updatedAt">) {
@@ -2047,8 +2064,13 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
       {activeTab === "products" ? (
         <ProductIntelligenceView
           products={products}
+          businessProfile={businessProfile}
+          taxRules={taxRules}
           message={productsMessage}
+          businessProfileMessage={businessProfileMessage}
           mutateCatalog={mutateProductCatalog}
+          mutateBusinessProfile={mutateBusinessProfile}
+          commercialSales={context.commercialSales}
         />
       ) : null}
 
@@ -2160,6 +2182,12 @@ function ExecutiveHomeView({
     objective: primaryObjective,
     mission: activeMission,
   });
+  const taxForecast = buildTaxForecast({
+    profile: context.businessProfile,
+    taxRules: context.taxRules,
+    products: context.products,
+    commercialSales: context.commercialSales,
+  });
 
   return (
     <div className="space-y-4">
@@ -2182,6 +2210,27 @@ function ExecutiveHomeView({
           <MiniCounter label="Oportunidades" value={opportunities.length} />
           <MiniCounter label="Alertas" value={criticalTasks.length + openIncidents.length} />
         </div>
+      </Card>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Financeiro estimado do mes" />
+          <span className="rounded-full bg-brand-cream px-3 py-1 text-[11px] font-black uppercase text-brand-teal">
+            Estimativa Norwyn
+          </span>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-brand-teal/65">
+          Receita liquida e imposto estimados com base no Business Profile, nas regras tributarias vigentes e nas vendas confirmadas do mes.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <MissionMeta label="Receita bruta" value={currency(taxForecast.gross)} />
+          <MissionMeta label="Liquido estimado" value={currency(taxForecast.estimatedNet)} />
+          <MissionMeta label="Imposto estimado" value={currency(taxForecast.tax)} />
+          <MissionMeta label="Projecao bruta" value={currency(taxForecast.projectedGross)} />
+        </div>
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+          Valores estimados pela Norwyn. Nao substituem valores oficiais da Hotmart, conciliacao financeira ou contabilidade.
+        </p>
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
@@ -3943,6 +3992,8 @@ const emptyProductDraft = {
   nome_oficial: "",
   produto_base: "",
   categoria: "",
+  fiscal_category: "",
+  financial_notes: "",
   descricao: "",
   status: "ativo",
   tipo: "Entrada",
@@ -3965,6 +4016,8 @@ function productToDraft(product?: NorwynProduct | null) {
     nome_oficial: product.nome_oficial ?? "",
     produto_base: product.produto_base ?? "",
     categoria: product.categoria ?? "",
+    fiscal_category: product.fiscal_category ?? "",
+    financial_notes: product.financial_notes ?? "",
     descricao: product.descricao ?? "",
     status: product.status ?? "ativo",
     tipo: product.tipo ?? "Entrada",
@@ -3988,23 +4041,217 @@ function numericOrNull(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const emptyBusinessProfileDraft = {
+  id: "",
+  company_name: "",
+  cnpj: "",
+  tax_regime: "Simples Nacional",
+  default_coproduction_percent: "",
+  hotmart_percent_fee: "7,90",
+  hotmart_fixed_fee: "1,59",
+  hotmart_withdraw_fee: "1,99",
+  gateway_percent_fee: "",
+  observations: "",
+  starts_at: "2026-01-01",
+  ends_at: "",
+  status: "current",
+  source_key: "",
+};
+
+function businessProfileToDraft(profile?: NorwynBusinessProfile | null) {
+  if (!profile) return emptyBusinessProfileDraft;
+  return {
+    id: profile.id,
+    company_name: profile.company_name ?? "",
+    cnpj: profile.cnpj ?? "",
+    tax_regime: profile.tax_regime ?? "Simples Nacional",
+    default_coproduction_percent: profile.default_coproduction_percent != null ? String(profile.default_coproduction_percent) : "",
+    hotmart_percent_fee: profile.hotmart_percent_fee != null ? String(profile.hotmart_percent_fee) : "",
+    hotmart_fixed_fee: profile.hotmart_fixed_fee != null ? String(profile.hotmart_fixed_fee) : "",
+    hotmart_withdraw_fee: profile.hotmart_withdraw_fee != null ? String(profile.hotmart_withdraw_fee) : "",
+    gateway_percent_fee: profile.gateway_percent_fee != null ? String(profile.gateway_percent_fee) : "",
+    observations: profile.observations ?? "",
+    starts_at: profile.starts_at ?? "2026-01-01",
+    ends_at: profile.ends_at ?? "",
+    status: profile.status ?? "current",
+    source_key: profile.source_key ?? "",
+  };
+}
+
+const emptyTaxRuleDraft = {
+  id: "",
+  business_profile_id: "",
+  category: "Treinamento",
+  cnae: "",
+  tax_percent: "",
+  description: "",
+  starts_at: "2026-01-01",
+  ends_at: "",
+  status: "current",
+  observations: "",
+  source_key: "",
+};
+
+function taxRuleToDraft(rule?: NorwynBusinessTaxRule | null, profileId?: string) {
+  if (!rule) return { ...emptyTaxRuleDraft, business_profile_id: profileId ?? "" };
+  return {
+    id: rule.id,
+    business_profile_id: rule.business_profile_id,
+    category: rule.category ?? "",
+    cnae: rule.cnae ?? "",
+    tax_percent: rule.tax_percent != null ? String(rule.tax_percent) : "",
+    description: rule.description ?? "",
+    starts_at: rule.starts_at ?? "2026-01-01",
+    ends_at: rule.ends_at ?? "",
+    status: rule.status ?? "current",
+    observations: rule.observations ?? "",
+    source_key: rule.source_key ?? "",
+  };
+}
+
+function currency(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "Indisponivel";
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function percent(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${value.toFixed(2).replace(".", ",")}%`;
+}
+
+function productForSale(sale: NorwynCommercialSale, products: NorwynProduct[]) {
+  const saleName = normalizeKey(sale.produto_nome ?? "");
+  if (!saleName) return null;
+  return products.find((product) => {
+    const values = [
+      product.nome_oficial,
+      product.produto_base,
+      ...(product.product_aliases ?? []).map((alias) => alias.alias),
+      ...(product.product_components ?? []).map((component) => component.componente),
+    ].filter(Boolean).map((value) => normalizeKey(String(value)));
+    return values.some((value) => saleName.includes(value) || value.includes(saleName));
+  }) ?? null;
+}
+
+function activeTaxRuleFor(category: string | null | undefined, date: string | null | undefined, taxRules: NorwynBusinessTaxRule[]) {
+  if (!category) return null;
+  const target = date ? new Date(date) : new Date();
+  return taxRules
+    .filter((rule) => rule.status !== "archived" && normalizeKey(rule.category) === normalizeKey(category))
+    .filter((rule) => {
+      const starts = rule.starts_at ? new Date(`${rule.starts_at}T00:00:00`) : null;
+      const ends = rule.ends_at ? new Date(`${rule.ends_at}T23:59:59`) : null;
+      return (!starts || target >= starts) && (!ends || target <= ends);
+    })
+    .sort((a, b) => String(b.starts_at).localeCompare(String(a.starts_at)))[0] ?? null;
+}
+
+function buildTaxForecast({
+  profile,
+  taxRules,
+  products,
+  commercialSales,
+}: {
+  profile: NorwynBusinessProfile | null;
+  taxRules: NorwynBusinessTaxRule[];
+  products: NorwynProduct[];
+  commercialSales: NorwynCommercialSale[];
+}) {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const confirmedSales = commercialSales.filter((sale) => sale.grupo_comercial === "confirmed");
+  const currentMonthSales = confirmedSales.filter((sale) => {
+    const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
+    return Number.isFinite(date.getTime()) && date >= monthStart && date < nextMonthStart;
+  });
+  const previousMonthSales = confirmedSales.filter((sale) => {
+    const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
+    return Number.isFinite(date.getTime()) && date >= previousMonthStart && date < monthStart;
+  });
+
+  const gross = currentMonthSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
+  const previousGross = previousMonthSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
+  const hotmartPercentFee = gross * ((profile?.hotmart_percent_fee ?? 0) / 100);
+  const hotmartFixedFee = currentMonthSales.length * (profile?.hotmart_fixed_fee ?? 0);
+  const gatewayFee = gross * ((profile?.gateway_percent_fee ?? 0) / 100);
+  const coproduction = gross * ((profile?.default_coproduction_percent ?? 0) / 100);
+  const withdrawFee = gross > 0 ? profile?.hotmart_withdraw_fee ?? 0 : 0;
+  const byCategory = new Map<string, { gross: number; tax: number; taxPercent: number | null; cnae: string | null; count: number }>();
+
+  for (const sale of currentMonthSales) {
+    const product = productForSale(sale, products);
+    const category = product?.fiscal_category ?? "Sem categoria fiscal";
+    const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
+    const saleGross = Number(sale.valor_bruto ?? 0);
+    const taxPercent = rule?.tax_percent ?? 0;
+    const current = byCategory.get(category) ?? { gross: 0, tax: 0, taxPercent: rule?.tax_percent ?? null, cnae: rule?.cnae ?? null, count: 0 };
+    current.gross += saleGross;
+    current.tax += saleGross * (taxPercent / 100);
+    current.count += 1;
+    if (rule?.tax_percent != null) current.taxPercent = rule.tax_percent;
+    if (rule?.cnae) current.cnae = rule.cnae;
+    byCategory.set(category, current);
+  }
+
+  const tax = [...byCategory.values()].reduce((sum, item) => sum + item.tax, 0);
+  const estimatedNet = gross - hotmartPercentFee - hotmartFixedFee - gatewayFee - coproduction - tax - withdrawFee;
+  const daysElapsed = Math.max(1, now.getDate());
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const projectedGross = gross / daysElapsed * daysInMonth;
+  const growth = previousGross > 0 ? ((gross - previousGross) / previousGross) * 100 : null;
+
+  return {
+    gross,
+    previousGross,
+    projectedGross,
+    hotmartPercentFee,
+    hotmartFixedFee,
+    gatewayFee,
+    coproduction,
+    withdrawFee,
+    tax,
+    estimatedNet,
+    growth,
+    salesCount: currentMonthSales.length,
+    byCategory: [...byCategory.entries()].map(([category, data]) => ({ category, ...data })),
+  };
+}
+
 function ProductIntelligenceView({
   products,
+  businessProfile,
+  taxRules,
   message,
+  businessProfileMessage,
   mutateCatalog,
+  mutateBusinessProfile,
+  commercialSales,
 }: {
   products: NorwynProduct[];
+  businessProfile: NorwynBusinessProfile | null;
+  taxRules: NorwynBusinessTaxRule[];
   message: string | null;
+  businessProfileMessage: string | null;
   mutateCatalog: (payload: Record<string, unknown>) => Promise<void>;
+  mutateBusinessProfile: (payload: Record<string, unknown>) => Promise<void>;
+  commercialSales: NorwynCommercialSale[];
 }) {
   const [selectedId, setSelectedId] = useState(products[0]?.id ?? "");
   const selectedProduct = products.find((product) => product.id === selectedId) ?? products[0] ?? null;
   const [productDraft, setProductDraft] = useState(productToDraft(selectedProduct));
   const [saving, setSaving] = useState(false);
+  const [savingBusinessProfile, setSavingBusinessProfile] = useState(false);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [localBusinessMessage, setLocalBusinessMessage] = useState<string | null>(null);
+  const [profileDraft, setProfileDraft] = useState(businessProfileToDraft(businessProfile));
+  const [taxRuleDraft, setTaxRuleDraft] = useState(taxRuleToDraft(null, businessProfile?.id));
   const [aliasDraft, setAliasDraft] = useState({ id: "", alias: "", produto_base: "", origem: "Manual", confianca: "90", principal: false });
   const [componentDraft, setComponentDraft] = useState({ id: "", componente: "", categoria: "Curso", ordem: "1", duracao: "", unidade_duracao: "", link: "", observacoes: "" });
   const [batchDraft, setBatchDraft] = useState({ id: "", turma: "", inicio: "", fim: "", status: "planejada", meta_alunos: "", alunos: "", receita_meta: "", receita_real: "", observacoes: "" });
+  const fiscalCategories = useMemo(() => [...new Set(taxRules.map((rule) => rule.category).filter(Boolean))], [taxRules]);
+  const forecast = useMemo(() => buildTaxForecast({ profile: businessProfile, taxRules, products, commercialSales }), [businessProfile, taxRules, products, commercialSales]);
 
   useEffect(() => {
     if (!selectedId && products[0]?.id) setSelectedId(products[0].id);
@@ -4017,14 +4264,16 @@ function ProductIntelligenceView({
     setBatchDraft({ id: "", turma: "", inicio: "", fim: "", status: "planejada", meta_alunos: "", alunos: "", receita_meta: "", receita_real: "", observacoes: "" });
   }, [selectedProduct?.id]);
 
-  const estimatedNetPct =
-    100 -
-    (numericOrNull(productDraft.percentual_coproducao) ?? 0) -
-    (numericOrNull(productDraft.percentual_hotmart) ?? 0) -
-    (numericOrNull(productDraft.percentual_gateway) ?? 0) -
-    (numericOrNull(productDraft.percentual_imposto) ?? 0);
   const price = numericOrNull(productDraft.preco_oficial);
-  const estimatedNet = price != null ? Math.max(0, estimatedNetPct) * price / 100 : null;
+  const selectedTaxRule = activeTaxRuleFor(productDraft.fiscal_category, new Date().toISOString(), taxRules);
+  const productHotmartPercent = price != null ? price * ((businessProfile?.hotmart_percent_fee ?? 0) / 100) : null;
+  const productGateway = price != null ? price * ((businessProfile?.gateway_percent_fee ?? 0) / 100) : null;
+  const productCoproduction = price != null ? price * ((businessProfile?.default_coproduction_percent ?? 0) / 100) : null;
+  const productTax = price != null ? price * ((selectedTaxRule?.tax_percent ?? 0) / 100) : null;
+  const productFixed = price != null ? businessProfile?.hotmart_fixed_fee ?? 0 : null;
+  const productEstimatedNet = price != null
+    ? Math.max(0, price - (productHotmartPercent ?? 0) - (productGateway ?? 0) - (productCoproduction ?? 0) - (productTax ?? 0) - (productFixed ?? 0))
+    : null;
 
   async function runMutation(payload: Record<string, unknown>, successMessage: string) {
     setSaving(true);
@@ -4039,6 +4288,66 @@ function ProductIntelligenceView({
     }
   }
 
+  async function runBusinessMutation(payload: Record<string, unknown>, successMessage: string) {
+    setSavingBusinessProfile(true);
+    setLocalBusinessMessage(null);
+    try {
+      await mutateBusinessProfile(payload);
+      setLocalBusinessMessage(successMessage);
+    } catch (error) {
+      setLocalBusinessMessage(error instanceof Error ? error.message : "Nao foi possivel salvar.");
+    } finally {
+      setSavingBusinessProfile(false);
+    }
+  }
+
+  useEffect(() => {
+    setProfileDraft(businessProfileToDraft(businessProfile));
+    setTaxRuleDraft((current) => ({ ...current, business_profile_id: businessProfile?.id ?? current.business_profile_id }));
+  }, [businessProfile?.id]);
+
+  async function saveBusinessProfile() {
+    if (!profileDraft.company_name.trim()) {
+      setLocalBusinessMessage("Informe o nome da empresa.");
+      return;
+    }
+    await runBusinessMutation({
+      action: "upsert_profile",
+      profile: {
+        ...profileDraft,
+        default_coproduction_percent: numericOrNull(profileDraft.default_coproduction_percent),
+        hotmart_percent_fee: numericOrNull(profileDraft.hotmart_percent_fee),
+        hotmart_fixed_fee: numericOrNull(profileDraft.hotmart_fixed_fee),
+        hotmart_withdraw_fee: numericOrNull(profileDraft.hotmart_withdraw_fee),
+        gateway_percent_fee: numericOrNull(profileDraft.gateway_percent_fee),
+      },
+    }, "Business Profile salvo.");
+  }
+
+  async function saveTaxRule() {
+    if (!businessProfile?.id && !taxRuleDraft.business_profile_id) {
+      setLocalBusinessMessage("Crie o Business Profile antes de cadastrar regras tributarias.");
+      return;
+    }
+    if (!taxRuleDraft.category.trim()) {
+      setLocalBusinessMessage("Informe a categoria fiscal.");
+      return;
+    }
+    await runBusinessMutation({
+      action: "upsert_tax_rule",
+      taxRule: {
+        ...taxRuleDraft,
+        business_profile_id: businessProfile?.id ?? taxRuleDraft.business_profile_id,
+        tax_percent: numericOrNull(taxRuleDraft.tax_percent),
+      },
+    }, "Regra tributaria salva.");
+    setTaxRuleDraft(taxRuleToDraft(null, businessProfile?.id));
+  }
+
+  async function archiveTaxRule(rule: NorwynBusinessTaxRule) {
+    await runBusinessMutation({ action: "archive_tax_rule", id: rule.id, ends_at: new Date().toISOString().slice(0, 10) }, "Regra encerrada.");
+  }
+
   async function saveProduct() {
     if (!productDraft.nome_oficial.trim() || !productDraft.produto_base.trim()) {
       setLocalMessage("Informe nome oficial e produto base.");
@@ -4047,13 +4356,21 @@ function ProductIntelligenceView({
     await runMutation({
       action: "upsert_product",
       product: {
-        ...productDraft,
+        id: productDraft.id,
+        nome_oficial: productDraft.nome_oficial,
+        produto_base: productDraft.produto_base,
+        categoria: productDraft.categoria,
+        fiscal_category: productDraft.fiscal_category,
+        financial_notes: productDraft.financial_notes,
+        descricao: productDraft.descricao,
+        status: productDraft.status,
+        tipo: productDraft.tipo,
+        unidade_duracao: productDraft.unidade_duracao,
+        link_oferta: productDraft.link_oferta,
+        observacoes: productDraft.observacoes,
+        ativo: productDraft.ativo,
         preco_oficial: numericOrNull(productDraft.preco_oficial),
         duracao: numericOrNull(productDraft.duracao),
-        percentual_coproducao: numericOrNull(productDraft.percentual_coproducao),
-        percentual_hotmart: numericOrNull(productDraft.percentual_hotmart),
-        percentual_gateway: numericOrNull(productDraft.percentual_gateway),
-        percentual_imposto: numericOrNull(productDraft.percentual_imposto),
       },
     }, "Produto salvo.");
   }
@@ -4122,6 +4439,122 @@ function ProductIntelligenceView({
         </div>
       </Card>
 
+      <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <SectionTitle icon={<BriefcaseBusiness className="h-5 w-5" />} title="Business Profile" />
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
+                Configuracao financeira editavel da empresa. As taxas abaixo alimentam apenas estimativas Norwyn.
+              </p>
+            </div>
+            <span className="rounded-full bg-[#FFF3C7] px-3 py-1 text-[11px] font-black uppercase text-[#8A5B18]">Estimativa Norwyn</span>
+          </div>
+          {(businessProfileMessage || localBusinessMessage) ? <p className="mt-3 rounded-md bg-brand-cream px-3 py-2 text-sm font-semibold text-brand-teal">{localBusinessMessage ?? businessProfileMessage}</p> : null}
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <Field label="Empresa"><input value={profileDraft.company_name} onChange={(event) => setProfileDraft({ ...profileDraft, company_name: event.target.value })} className="form-input" /></Field>
+            <Field label="CNPJ"><input value={profileDraft.cnpj} onChange={(event) => setProfileDraft({ ...profileDraft, cnpj: event.target.value })} className="form-input" /></Field>
+            <Field label="Regime tributario"><input value={profileDraft.tax_regime} onChange={(event) => setProfileDraft({ ...profileDraft, tax_regime: event.target.value })} className="form-input" /></Field>
+            <Field label="% Hotmart"><input value={profileDraft.hotmart_percent_fee} onChange={(event) => setProfileDraft({ ...profileDraft, hotmart_percent_fee: event.target.value })} className="form-input" /></Field>
+            <Field label="Taxa fixa Hotmart"><input value={profileDraft.hotmart_fixed_fee} onChange={(event) => setProfileDraft({ ...profileDraft, hotmart_fixed_fee: event.target.value })} className="form-input" /></Field>
+            <Field label="Taxa saque Hotmart"><input value={profileDraft.hotmart_withdraw_fee} onChange={(event) => setProfileDraft({ ...profileDraft, hotmart_withdraw_fee: event.target.value })} className="form-input" /></Field>
+            <Field label="% gateway"><input value={profileDraft.gateway_percent_fee} onChange={(event) => setProfileDraft({ ...profileDraft, gateway_percent_fee: event.target.value })} className="form-input" /></Field>
+            <Field label="% coproducao padrao"><input value={profileDraft.default_coproduction_percent} onChange={(event) => setProfileDraft({ ...profileDraft, default_coproduction_percent: event.target.value })} className="form-input" /></Field>
+            <Field label="Inicio vigencia"><input type="date" value={profileDraft.starts_at} onChange={(event) => setProfileDraft({ ...profileDraft, starts_at: event.target.value })} className="form-input" /></Field>
+            <Field label="Fim vigencia"><input type="date" value={profileDraft.ends_at} onChange={(event) => setProfileDraft({ ...profileDraft, ends_at: event.target.value })} className="form-input" /></Field>
+            <Field label="Status"><input value={profileDraft.status} onChange={(event) => setProfileDraft({ ...profileDraft, status: event.target.value })} className="form-input" /></Field>
+            <Field label="Observacoes"><textarea value={profileDraft.observations} onChange={(event) => setProfileDraft({ ...profileDraft, observations: event.target.value })} className="form-input min-h-20" /></Field>
+          </div>
+          <button type="button" disabled={savingBusinessProfile} onClick={saveBusinessProfile} className="mt-4 h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">
+            {savingBusinessProfile ? "Salvando..." : "Salvar Business Profile"}
+          </button>
+        </Card>
+
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Tax Forecast" />
+          <p className="mt-2 text-sm leading-6 text-brand-teal/70">
+            Estimativa mensal calculada com vendas confirmadas, produto_base, categoria fiscal e regras vigentes.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <MissionMeta label="Receita bruta mes" value={currency(forecast.gross)} />
+            <MissionMeta label="Receita liquida estimada" value={currency(forecast.estimatedNet)} />
+            <MissionMeta label="DAS estimado" value={currency(forecast.tax)} />
+            <MissionMeta label="Projecao fechamento" value={currency(forecast.projectedGross)} />
+            <MissionMeta label="Crescimento vs mes anterior" value={percent(forecast.growth)} />
+            <MissionMeta label="Vendas consideradas" value={String(forecast.salesCount)} />
+          </div>
+          <div className="mt-4 overflow-hidden rounded-md border border-brand-sand">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-[#F3DDE1] text-[11px] font-black uppercase text-brand-clay">
+                <tr>
+                  <th className="px-3 py-2">Categoria</th>
+                  <th className="px-3 py-2">Bruto</th>
+                  <th className="px-3 py-2">Aliquota</th>
+                  <th className="px-3 py-2">Imposto</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-sand bg-white/70">
+                {forecast.byCategory.map((item) => (
+                  <tr key={item.category}>
+                    <td className="px-3 py-2 font-semibold text-brand-teal">{item.category}</td>
+                    <td className="px-3 py-2 text-brand-teal/70">{currency(item.gross)}</td>
+                    <td className="px-3 py-2 text-brand-teal/70">{item.taxPercent != null ? `${percent(item.taxPercent)}${item.cnae ? ` - ${item.cnae}` : ""}` : "sem regra"}</td>
+                    <td className="px-3 py-2 text-brand-teal/70">{currency(item.tax)}</td>
+                  </tr>
+                ))}
+                {!forecast.byCategory.length ? (
+                  <tr><td colSpan={4} className="px-3 py-4 text-brand-teal/60">Sem vendas confirmadas no mes atual.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs font-semibold text-brand-clay">
+            Valores estimados pela Norwyn com base nas regras configuradas. Nao substituem valores oficiais da Hotmart ou da contabilidade.
+          </p>
+        </Card>
+      </div>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitle icon={<BookOpen className="h-5 w-5" />} title="Regras tributarias" />
+            <p className="mt-2 text-sm leading-6 text-brand-teal/70">Cada regra possui vigencia propria. Alteracoes futuras devem encerrar a regra antiga e criar uma nova vigencia.</p>
+          </div>
+          <button type="button" onClick={() => setTaxRuleDraft(taxRuleToDraft(null, businessProfile?.id))} className="h-9 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal">Nova regra</button>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Field label="Categoria fiscal"><input value={taxRuleDraft.category} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, category: event.target.value })} className="form-input" /></Field>
+          <Field label="CNAE"><input value={taxRuleDraft.cnae} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, cnae: event.target.value })} className="form-input" /></Field>
+          <Field label="Aliquota %"><input value={taxRuleDraft.tax_percent} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, tax_percent: event.target.value })} className="form-input" /></Field>
+          <Field label="Status"><input value={taxRuleDraft.status} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, status: event.target.value })} className="form-input" /></Field>
+          <Field label="Inicio vigencia"><input type="date" value={taxRuleDraft.starts_at} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, starts_at: event.target.value })} className="form-input" /></Field>
+          <Field label="Fim vigencia"><input type="date" value={taxRuleDraft.ends_at} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, ends_at: event.target.value })} className="form-input" /></Field>
+          <Field label="Descricao"><textarea value={taxRuleDraft.description} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, description: event.target.value })} className="form-input min-h-20" /></Field>
+          <Field label="Observacoes"><textarea value={taxRuleDraft.observations} onChange={(event) => setTaxRuleDraft({ ...taxRuleDraft, observations: event.target.value })} className="form-input min-h-20" /></Field>
+        </div>
+        <button type="button" disabled={savingBusinessProfile || !businessProfile?.id} onClick={saveTaxRule} className="mt-4 h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">Salvar regra</button>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {taxRules.map((rule) => (
+            <article key={rule.id} className="rounded-md border border-brand-sand bg-white/80 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-brand-teal">{rule.category}</p>
+                  <p className="mt-1 text-xs font-bold text-brand-clay">{rule.cnae || "sem CNAE"} - {percent(rule.tax_percent)}</p>
+                  <p className="mt-1 text-xs text-brand-teal/55">{rule.starts_at || "-"} a {rule.ends_at || "vigente"} - {rule.status}</p>
+                </div>
+                <span className="rounded-full bg-brand-cream px-2 py-1 text-[10px] font-black uppercase text-brand-clay">{rule.source ?? "manual"}</span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-brand-teal/65">{rule.description || rule.observations || "Sem observacao."}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setTaxRuleDraft(taxRuleToDraft(rule, businessProfile?.id))} className="h-7 rounded-md border border-brand-sand px-2 text-[11px] font-bold text-brand-teal">Editar</button>
+                <button type="button" onClick={() => archiveTaxRule(rule)} className="h-7 rounded-md border border-brand-sand px-2 text-[11px] font-bold text-brand-teal">Encerrar vigencia</button>
+              </div>
+            </article>
+          ))}
+          {!taxRules.length ? <EmptyState>Nenhuma regra tributaria cadastrada.</EmptyState> : null}
+        </div>
+      </Card>
+
       <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
         <Card className="overflow-hidden border-[#E9CBD1]">
           <div className="border-b border-brand-sand p-4">
@@ -4159,6 +4592,12 @@ function ProductIntelligenceView({
               <Field label="Nome oficial"><input value={productDraft.nome_oficial} onChange={(event) => setProductDraft({ ...productDraft, nome_oficial: event.target.value })} className="form-input" /></Field>
               <Field label="Produto base"><input value={productDraft.produto_base} onChange={(event) => setProductDraft({ ...productDraft, produto_base: event.target.value })} className="form-input" /></Field>
               <Field label="Categoria"><input value={productDraft.categoria} onChange={(event) => setProductDraft({ ...productDraft, categoria: event.target.value })} className="form-input" /></Field>
+              <Field label="Categoria fiscal">
+                <select value={productDraft.fiscal_category} onChange={(event) => setProductDraft({ ...productDraft, fiscal_category: event.target.value })} className="form-input">
+                  <option value="">Sem categoria fiscal</option>
+                  {fiscalCategories.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </Field>
               <Field label="Tipo">
                 <select value={productDraft.tipo} onChange={(event) => setProductDraft({ ...productDraft, tipo: event.target.value })} className="form-input">
                   {["Entrada", "Upsell", "Order Bump", "Flagship", "Satelite", "Satélite"].map((item) => <option key={item} value={item}>{item}</option>)}
@@ -4168,20 +4607,25 @@ function ProductIntelligenceView({
               <Field label="Preco oficial"><input value={productDraft.preco_oficial} onChange={(event) => setProductDraft({ ...productDraft, preco_oficial: event.target.value })} className="form-input" placeholder="R$ 1.000,00" /></Field>
               <Field label="Duracao"><input value={productDraft.duracao} onChange={(event) => setProductDraft({ ...productDraft, duracao: event.target.value })} className="form-input" /></Field>
               <Field label="Unidade"><input value={productDraft.unidade_duracao} onChange={(event) => setProductDraft({ ...productDraft, unidade_duracao: event.target.value })} className="form-input" placeholder="dias, meses, anos" /></Field>
-              <Field label="% coproducao"><input value={productDraft.percentual_coproducao} onChange={(event) => setProductDraft({ ...productDraft, percentual_coproducao: event.target.value })} className="form-input" /></Field>
-              <Field label="% Hotmart"><input value={productDraft.percentual_hotmart} onChange={(event) => setProductDraft({ ...productDraft, percentual_hotmart: event.target.value })} className="form-input" /></Field>
-              <Field label="% gateway"><input value={productDraft.percentual_gateway} onChange={(event) => setProductDraft({ ...productDraft, percentual_gateway: event.target.value })} className="form-input" /></Field>
-              <Field label="% imposto"><input value={productDraft.percentual_imposto} onChange={(event) => setProductDraft({ ...productDraft, percentual_imposto: event.target.value })} className="form-input" /></Field>
               <Field label="Link da oferta"><input value={productDraft.link_oferta} onChange={(event) => setProductDraft({ ...productDraft, link_oferta: event.target.value })} className="form-input" /></Field>
               <Field label="Descricao"><textarea value={productDraft.descricao} onChange={(event) => setProductDraft({ ...productDraft, descricao: event.target.value })} className="form-input min-h-20" /></Field>
+              <Field label="Notas financeiras"><textarea value={productDraft.financial_notes} onChange={(event) => setProductDraft({ ...productDraft, financial_notes: event.target.value })} className="form-input min-h-20" /></Field>
               <Field label="Observacoes"><textarea value={productDraft.observacoes} onChange={(event) => setProductDraft({ ...productDraft, observacoes: event.target.value })} className="form-input min-h-20" /></Field>
             </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <MissionMeta label="Receita bruta" value={price != null ? price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "sem preco"} />
-              <MissionMeta label="Liquida estimada" value={estimatedNet != null ? estimatedNet.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "sem estimativa"} />
-              <MissionMeta label="Retencao estimada" value={`${Math.max(0, estimatedNetPct).toFixed(2).replace(".", ",")}%`} />
+            <div className="mt-4 rounded-md border border-brand-sand bg-brand-cream/45 p-3">
+              <p className="text-xs font-black uppercase text-brand-clay">Estimativa Norwyn por produto</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <MissionMeta label="Receita bruta" value={price != null ? currency(price) : "sem preco"} />
+                <MissionMeta label="Liquida estimada" value={productEstimatedNet != null ? currency(productEstimatedNet) : "sem estimativa"} />
+                <MissionMeta label="Imposto estimado" value={productTax != null ? currency(productTax) : "sem categoria fiscal"} />
+                <MissionMeta label="Taxa Hotmart %" value={productHotmartPercent != null ? currency(productHotmartPercent) : "-"} />
+                <MissionMeta label="Taxa fixa Hotmart" value={productFixed != null ? currency(productFixed) : "-"} />
+                <MissionMeta label="Coproducao" value={productCoproduction != null ? currency(productCoproduction) : "-"} />
+              </div>
+              <p className="mt-3 text-xs font-semibold text-brand-clay">
+                Produto guarda apenas categoria fiscal e dados comerciais. Taxas, coproducao e imposto vem do Business Profile e das regras tributarias vigentes.
+              </p>
             </div>
-            <p className="mt-3 text-xs font-semibold text-brand-clay">Estimativa: nao substitui dados oficiais da Hotmart, DRE ou Financeiro.</p>
             <button type="button" disabled={saving} onClick={saveProduct} className="mt-4 h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">
               {saving ? "Salvando..." : "Salvar produto"}
             </button>

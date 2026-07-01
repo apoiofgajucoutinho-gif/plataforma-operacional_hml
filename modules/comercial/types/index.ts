@@ -18,6 +18,50 @@ export type ComercialProduto = {
   updated_at: string;
 };
 
+export type ComercialNorwynProduct = {
+  id: string;
+  tenant_id: string;
+  nome_oficial: string;
+  produto_base: string | null;
+  categoria: string | null;
+  fiscal_category: string | null;
+  preco_oficial: number | null;
+  ativo: boolean;
+  product_aliases?: Array<{
+    id: string;
+    alias: string;
+    produto_base: string | null;
+    principal: boolean;
+    ativo: boolean;
+  }>;
+};
+
+export type ComercialBusinessProfile = {
+  id: string;
+  tenant_id: string;
+  company_name: string | null;
+  tax_regime: string | null;
+  default_coproduction_percent: number | null;
+  hotmart_percent_fee: number | null;
+  hotmart_fixed_fee: number | null;
+  hotmart_withdraw_fee: number | null;
+  gateway_percent_fee: number | null;
+  status: string;
+};
+
+export type ComercialBusinessTaxRule = {
+  id: string;
+  tenant_id: string;
+  business_profile_id: string | null;
+  category: string;
+  cnae: string | null;
+  tax_percent: number | null;
+  description: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  status: string;
+};
+
 export type ComercialAluno = {
   id: string;
   tenant_id: string;
@@ -116,5 +160,8 @@ export type ComercialContext = {
   recebiveis: ComercialRecebivel[];
   alunos: ComercialAluno[];
   produtos: ComercialProduto[];
+  norwynProducts: ComercialNorwynProduct[];
+  businessProfile: ComercialBusinessProfile | null;
+  taxRules: ComercialBusinessTaxRule[];
   rawImports: ComercialRawImport[];
 };

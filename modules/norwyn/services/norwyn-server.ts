@@ -45,6 +45,8 @@ function emptyContext(partial?: Partial<NorwynContext>): NorwynContext {
     interactions: [],
     commercialSales: [],
     products: [],
+    businessProfile: null,
+    taxRules: [],
     adsRows: [],
     contentEvents: [],
     agendaEvents: [],
@@ -130,6 +132,8 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     signalsResult,
     contentEventsResult,
     productsResult,
+    businessProfileResult,
+    taxRulesResult,
   ] = await Promise.all([
     postQuery,
     dataClient
@@ -194,10 +198,25 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       .limit(800),
     dataClient
       .from("products")
-      .select("id, tenant_id, nome_oficial, produto_base, categoria, descricao, status, tipo, preco_oficial, duracao, unidade_duracao, link_oferta, percentual_coproducao, percentual_hotmart, percentual_gateway, percentual_imposto, receita_liquida_estimada_pct, observacoes, ativo, source, manually_edited_at, product_aliases(id, alias, produto_base, origem, confianca, principal, ativo, source, manually_edited_at), product_components(id, componente, categoria, ordem, duracao, unidade_duracao, link, observacoes, ativo, source, manually_edited_at), product_batches(id, turma, inicio, fim, status, meta_alunos, alunos, receita_meta, receita_real, observacoes, ativo, source, manually_edited_at)")
+      .select("id, tenant_id, nome_oficial, produto_base, categoria, fiscal_category, financial_notes, descricao, status, tipo, preco_oficial, duracao, unidade_duracao, link_oferta, percentual_coproducao, percentual_hotmart, percentual_gateway, percentual_imposto, receita_liquida_estimada_pct, observacoes, ativo, source, manually_edited_at, product_aliases(id, alias, produto_base, origem, confianca, principal, ativo, source, manually_edited_at), product_components(id, componente, categoria, ordem, duracao, unidade_duracao, link, observacoes, ativo, source, manually_edited_at), product_batches(id, turma, inicio, fim, status, meta_alunos, alunos, receita_meta, receita_real, observacoes, ativo, source, manually_edited_at)")
       .eq("tenant_id", membership.tenant_id)
       .order("produto_base", { ascending: true })
       .limit(500),
+    dataClient
+      .from("business_profile")
+      .select("id, tenant_id, company_name, cnpj, tax_regime, default_coproduction_percent, hotmart_percent_fee, hotmart_fixed_fee, hotmart_withdraw_fee, gateway_percent_fee, observations, starts_at, ends_at, status, source, source_key, manually_edited_at")
+      .eq("tenant_id", membership.tenant_id)
+      .eq("status", "current")
+      .order("starts_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    dataClient
+      .from("business_tax_rules")
+      .select("id, tenant_id, business_profile_id, category, cnae, tax_percent, description, starts_at, ends_at, status, observations, source, source_key, manually_edited_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("category", { ascending: true })
+      .order("starts_at", { ascending: false })
+      .limit(100),
   ]);
 
   const metricsByPost = new Map((followerMetricsResult.data ?? []).map((metric: any) => [metric.post_id, metric]));
@@ -251,6 +270,8 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     interactions: interactionsResult.data ?? [],
     commercialSales: salesResult.data ?? [],
     products: productsResult.data ?? [],
+    businessProfile: businessProfileResult.data ?? null,
+    taxRules: taxRulesResult.data ?? [],
     adsRows: adsResult.data ?? [],
     contentEvents: contentEventsResult.data ?? [],
     agendaEvents: agendaResult.data ?? [],

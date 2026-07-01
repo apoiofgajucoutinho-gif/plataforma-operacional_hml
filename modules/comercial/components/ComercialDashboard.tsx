@@ -29,7 +29,10 @@ import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
 import type {
   ComercialAluno,
+  ComercialBusinessProfile,
+  ComercialBusinessTaxRule,
   ComercialContext,
+  ComercialNorwynProduct,
   ComercialRawImport,
   ComercialRecebivel,
   ComercialVenda,
@@ -784,6 +787,110 @@ function grossTotal(rows: ComercialVenda[]) {
   return rows.reduce((sum, sale) => sum + sale.valor_bruto, 0);
 }
 
+function normalizeProductKey(value: string | null | undefined) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function findNorwynProductForSale(sale: ComercialVenda, products: ComercialNorwynProduct[]) {
+  const candidates = [
+    sale.produto_nome,
+    sale.hotmart_product_id,
+    typeof sale.metadata?.product_name === "string" ? sale.metadata.product_name : null,
+    typeof sale.metadata?.product_id === "string" ? sale.metadata.product_id : null,
+  ]
+    .map(normalizeProductKey)
+    .filter(Boolean);
+
+  if (!candidates.length) return null;
+
+  return products.find((product) => {
+    const productKeys = [
+      product.nome_oficial,
+      product.produto_base,
+      ...(product.product_aliases ?? []).filter((alias) => alias.ativo !== false).flatMap((alias) => [alias.alias, alias.produto_base]),
+    ]
+      .map(normalizeProductKey)
+      .filter(Boolean);
+
+    return candidates.some((candidate) => productKeys.some((key) => key === candidate || candidate.includes(key) || key.includes(candidate)));
+  }) ?? null;
+}
+
+function activeTaxRuleFor(category: string | null | undefined, date: string | null | undefined, rules: ComercialBusinessTaxRule[]) {
+  if (!category) return null;
+  const target = dateForFilter(date) ?? new Date();
+  const categoryKey = normalizeProductKey(category);
+
+  return rules
+    .filter((rule) => normalizeProductKey(rule.category) === categoryKey && rule.status !== "archived")
+    .filter((rule) => {
+      const start = dateForFilter(rule.starts_at);
+      const end = dateForFilter(rule.ends_at);
+      return (!start || start <= target) && (!end || end >= target);
+    })
+    .sort((a, b) => (dateForFilter(b.starts_at)?.getTime() ?? 0) - (dateForFilter(a.starts_at)?.getTime() ?? 0))[0] ?? null;
+}
+
+function buildEstimatedFinancials({
+  rows,
+  products,
+  profile,
+  taxRules,
+}: {
+  rows: ComercialVenda[];
+  products: ComercialNorwynProduct[];
+  profile: ComercialBusinessProfile | null;
+  taxRules: ComercialBusinessTaxRule[];
+}) {
+  const confirmed = rows.filter(isConfirmed);
+  const gross = grossTotal(confirmed);
+  const hotmartPercentFee = gross * ((profile?.hotmart_percent_fee ?? 0) / 100);
+  const gatewayFee = gross * ((profile?.gateway_percent_fee ?? 0) / 100);
+  const coproduction = gross * ((profile?.default_coproduction_percent ?? 0) / 100);
+  const fixedFee = confirmed.length * (profile?.hotmart_fixed_fee ?? 0);
+
+  let tax = 0;
+  const taxBuckets = new Map<string, { category: string; gross: number; tax: number; percent: number }>();
+  const unmappedProducts = new Set<string>();
+
+  confirmed.forEach((sale) => {
+    const product = findNorwynProductForSale(sale, products);
+    const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
+    if (!product?.fiscal_category || !rule) {
+      unmappedProducts.add(sale.produto_nome ?? sale.hotmart_product_id ?? "Produto sem mapeamento");
+      return;
+    }
+    const saleTax = sale.valor_bruto * ((rule.tax_percent ?? 0) / 100);
+    tax += saleTax;
+    const key = rule.category;
+    const current = taxBuckets.get(key) ?? { category: key, gross: 0, tax: 0, percent: rule.tax_percent ?? 0 };
+    current.gross += sale.valor_bruto;
+    current.tax += saleTax;
+    taxBuckets.set(key, current);
+  });
+
+  const estimatedNet = gross - hotmartPercentFee - fixedFee - gatewayFee - coproduction - tax;
+
+  return {
+    gross,
+    sales: confirmed.length,
+    hotmartPercentFee,
+    fixedFee,
+    gatewayFee,
+    coproduction,
+    tax,
+    estimatedNet,
+    taxBuckets: [...taxBuckets.values()].sort((a, b) => b.gross - a.gross),
+    unmappedProducts: [...unmappedProducts],
+    hasProfile: Boolean(profile),
+  };
+}
+
 function buildTemporalRows(rows: ComercialVenda[], range: LaunchRange) {
   const groups = new Map<string, ComercialVenda[]>();
   rows.forEach((row) => {
@@ -1411,6 +1518,18 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const launchMissingBuyerEmail = launchRows.filter((sale) => !sale.comprador_email);
   const launchMissingProduct = launchRows.filter((sale) => !sale.produto_id);
   const launchUnknownStatus = launchRows.filter((sale) => commercialGroup(sale) === "unknown");
+  const launchEstimatedFinancials = buildEstimatedFinancials({
+    rows: launchRows,
+    products: context.norwynProducts,
+    profile: context.businessProfile,
+    taxRules: context.taxRules,
+  });
+  const overviewEstimatedFinancials = buildEstimatedFinancials({
+    rows: overviewSales,
+    products: context.norwynProducts,
+    profile: context.businessProfile,
+    taxRules: context.taxRules,
+  });
   const officialReceivables = filteredReceivables.filter((item) => ["previsto", "disponivel"].includes(item.status) && item.fonte_previsao === "hotmart" && item.valor_liquido !== null && item.valor_liquido !== undefined && isTodayOrFuture(item.data_prevista));
   const hasOfficialNet = confirmedSalesWithNet.length > 0;
   const hasOfficialReceivables = officialReceivables.length > 0;
@@ -1527,6 +1646,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
           missingBuyerEmail={launchMissingBuyerEmail.length}
           missingProduct={launchMissingProduct.length}
           unknownStatus={launchUnknownStatus.length}
+          estimatedFinancials={launchEstimatedFinancials}
         />
       ) : null}
 
@@ -1563,6 +1683,8 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmedSales.length} helper="no período filtrado" />
             <Metric icon={<WalletCards />} label="Faturamento bruto" value={formatMoney(grossRevenue)} helper="receita bruta no período filtrado" />
+            <Metric icon={<TrendingUp />} label="Lucro líquido estimado" value={formatMoney(overviewEstimatedFinancials.estimatedNet)} helper="Estimativa Norwyn no filtro" />
+            <Metric icon={<ReceiptText />} label="Imposto estimado" value={formatMoney(overviewEstimatedFinancials.tax)} helper="DAS estimado pelas regras vigentes" />
             <Metric
               icon={<CheckCircle2 />}
               label="Líquido informado"
@@ -1587,6 +1709,8 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
             <MiniMetric label="Ticket líquido" value={hasOfficialNet ? formatMoney(netTicket) : "Indisponível"} helper="somente vendas com líquido" />
             <MiniMetric label="Saldo realizado" value={realizedTotal > 0 ? formatMoney(realizedTotal) : "Indisponível"} helper="líquido Hotmart recebido/disponível" />
           </div>
+
+          <EstimatedFinancialsCard title="Estimativa Norwyn do período" estimate={overviewEstimatedFinancials} />
 
           <div className="grid gap-4 xl:grid-cols-2">
             <DataCard title="Receita por período" helper="Receita bruta confirmada dentro dos filtros.">
@@ -1842,6 +1966,7 @@ function LaunchIntelligencePanel({
   missingBuyerEmail,
   missingProduct,
   unknownStatus,
+  estimatedFinancials,
 }: {
   updatedAt: string | null;
   period: LaunchPeriodKey;
@@ -1892,6 +2017,7 @@ function LaunchIntelligencePanel({
   missingBuyerEmail: number;
   missingProduct: number;
   unknownStatus: number;
+  estimatedFinancials: ReturnType<typeof buildEstimatedFinancials>;
 }) {
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [launchCurvePage, setLaunchCurvePage] = useState(1);
@@ -2099,6 +2225,8 @@ function LaunchIntelligencePanel({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Metric icon={<WalletCards />} label="Receita bruta" value={formatMoney(gross)} helper="oficial Hotmart" />
         <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmed.length} helper="APPROVED ou COMPLETE" />
+        <Metric icon={<TrendingUp />} label="Lucro líquido estimado" value={formatMoney(estimatedFinancials.estimatedNet)} helper="Estimativa Norwyn" />
+        <Metric icon={<ReceiptText />} label="Imposto estimado" value={formatMoney(estimatedFinancials.tax)} helper="DAS estimado" />
         <Metric icon={<TrendingUp />} label="Ticket médio bruto" value={formatMoney(ticket)} helper="bruto / confirmadas" />
         <Metric icon={<Users />} label="Compradores únicos" value={buyers} helper="confirmados no filtro" />
         <Metric icon={<Clock3 />} label="Pendentes" value={pending.length} helper="aguardando pagamento/análise" />
@@ -2106,6 +2234,8 @@ function LaunchIntelligencePanel({
         <Metric icon={<RefreshCw />} label="Reembolsos/chargebacks" value={refunded.length} helper="acompanhar separadamente" />
         <Metric icon={<Activity />} label="Última venda" value={latestSale ? formatDateTime(latestSale.data_compra ?? latestSale.data_aprovacao) : "-"} helper={latestMinutes !== null ? `há ${latestMinutes} min` : "sem venda no filtro"} />
       </div>
+
+      <EstimatedFinancialsCard title="Estimativa Norwyn do lançamento" estimate={estimatedFinancials} />
 
       <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <DataCard title="Receita em Risco" helper="Estimativa de valor bruto potencial em pendentes, perdidas e reembolsadas.">
@@ -2321,6 +2451,48 @@ function MiniMetric({ label, value, helper }: { label: string; value: ReactNode;
       <p className="mt-2 break-words text-xl font-black leading-tight text-brand-teal">{value}</p>
       <p className="mt-1 text-xs font-bold text-brand-teal/55">{helper}</p>
     </div>
+  );
+}
+
+function EstimatedFinancialsCard({
+  title,
+  estimate,
+}: {
+  title: string;
+  estimate: ReturnType<typeof buildEstimatedFinancials>;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-brand-clay">{title}</p>
+          <h3 className="mt-1 text-lg font-black text-brand-teal">Lucro líquido e imposto estimados</h3>
+        </div>
+        <span className="rounded-full bg-[#FFF3C7] px-3 py-1 text-[11px] font-black uppercase text-[#8A5B18]">Estimativa Norwyn</span>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MiniMetric label="Receita bruta" value={formatMoney(estimate.gross)} helper={`${estimate.sales} vendas confirmadas`} />
+        <MiniMetric label="Taxa Hotmart" value={formatMoney(estimate.hotmartPercentFee)} helper="percentual configurado" />
+        <MiniMetric label="Taxa fixa" value={formatMoney(estimate.fixedFee)} helper="por venda confirmada" />
+        <MiniMetric label="Coprodução" value={formatMoney(estimate.coproduction)} helper="padrão configurado" />
+        <MiniMetric label="Imposto estimado" value={formatMoney(estimate.tax)} helper="por categoria fiscal" />
+        <MiniMetric label="Líquido estimado" value={formatMoney(estimate.estimatedNet)} helper="não oficial Hotmart" />
+      </div>
+      {estimate.taxBuckets.length ? (
+        <div className="mt-4 overflow-x-auto">
+          <SimpleTable
+            headers={["Categoria fiscal", "Receita bruta", "Alíquota", "Imposto estimado"]}
+            rows={estimate.taxBuckets.map((bucket) => [bucket.category, formatMoney(bucket.gross), formatPercent(bucket.percent), formatMoney(bucket.tax)])}
+            empty="Sem categoria fiscal aplicada."
+            minWidth="560px"
+          />
+        </div>
+      ) : null}
+      <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
+        Valores estimados pela Norwyn com base no Business Profile e nas regras tributárias configuradas. Não substituem valores oficiais da Hotmart ou da contabilidade.
+        {estimate.unmappedProducts.length ? ` Produtos sem regra fiscal no filtro: ${estimate.unmappedProducts.slice(0, 3).join(", ")}${estimate.unmappedProducts.length > 3 ? "..." : ""}.` : ""}
+      </p>
+    </Card>
   );
 }
 

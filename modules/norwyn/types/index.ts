@@ -110,6 +110,8 @@ export type NorwynProduct = {
   nome_oficial: string;
   produto_base: string;
   categoria: string | null;
+  fiscal_category: string | null;
+  financial_notes: string | null;
   descricao: string | null;
   status: string | null;
   tipo: string | null;
@@ -129,6 +131,43 @@ export type NorwynProduct = {
   product_aliases?: NorwynProductAlias[];
   product_components?: NorwynProductComponent[];
   product_batches?: NorwynProductBatch[];
+};
+
+export type NorwynBusinessProfile = {
+  id: string;
+  tenant_id: string;
+  company_name: string;
+  cnpj: string | null;
+  tax_regime: string | null;
+  default_coproduction_percent: number | null;
+  hotmart_percent_fee: number | null;
+  hotmart_fixed_fee: number | null;
+  hotmart_withdraw_fee: number | null;
+  gateway_percent_fee: number | null;
+  observations: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  status: string;
+  source: string | null;
+  source_key: string | null;
+  manually_edited_at: string | null;
+};
+
+export type NorwynBusinessTaxRule = {
+  id: string;
+  tenant_id: string;
+  business_profile_id: string;
+  category: string;
+  cnae: string | null;
+  tax_percent: number | null;
+  description: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  status: string;
+  observations: string | null;
+  source: string | null;
+  source_key: string | null;
+  manually_edited_at: string | null;
 };
 
 export type NorwynEvidenceCard = {
@@ -295,6 +334,8 @@ export type NorwynContext = {
   interactions: InstagramInteraction[];
   commercialSales: NorwynCommercialSale[];
   products: NorwynProduct[];
+  businessProfile: NorwynBusinessProfile | null;
+  taxRules: NorwynBusinessTaxRule[];
   adsRows: NorwynAdsRow[];
   contentEvents: NorwynContentEvent[];
   agendaEvents: StrategyAgendaEvent[];
