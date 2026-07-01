@@ -849,36 +849,69 @@ function buildEstimatedFinancials({
 }) {
   const confirmed = rows.filter(isConfirmed);
   const gross = grossTotal(confirmed);
-  const hotmartPercentFee = gross * ((profile?.hotmart_percent_fee ?? 0) / 100);
-  const gatewayFee = gross * ((profile?.gateway_percent_fee ?? 0) / 100);
-  const coproduction = gross * ((profile?.default_coproduction_percent ?? 0) / 100);
-  const fixedFee = confirmed.length * (profile?.hotmart_fixed_fee ?? 0);
+  let configuredGross = 0;
+  let configuredSales = 0;
+  let coproduction = 0;
 
   let tax = 0;
   const taxBuckets = new Map<string, { category: string; gross: number; tax: number; percent: number }>();
-  const unmappedProducts = new Set<string>();
+  const pendingProducts = new Map<string, { product: string; gross: number; reasons: Set<string> }>();
+
+  function addPending(sale: ComercialVenda, reasons: string[]) {
+    const productName = sale.produto_nome ?? sale.hotmart_product_id ?? "Produto sem mapeamento";
+    const current = pendingProducts.get(productName) ?? { product: productName, gross: 0, reasons: new Set<string>() };
+    current.gross += sale.valor_bruto;
+    reasons.forEach((reason) => current.reasons.add(reason));
+    pendingProducts.set(productName, current);
+  }
 
   confirmed.forEach((sale) => {
     const product = findNorwynProductForSale(sale, products);
     const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
-    if (!product?.fiscal_category || !rule) {
-      unmappedProducts.add(sale.produto_nome ?? sale.hotmart_product_id ?? "Produto sem mapeamento");
+
+    const reasons: string[] = [];
+    if (!profile) reasons.push("sem Business Profile");
+    if (!product) reasons.push("sem alias/produto base");
+    if (product && !product.fiscal_category) reasons.push("sem categoria fiscal");
+    if (product && product.percentual_coproducao === null) reasons.push("sem coproducao");
+    if (product && product.preco_oficial === null) reasons.push("sem preco");
+    if (product?.fiscal_category && !rule) reasons.push("sem regra tributaria");
+
+    if (reasons.length) {
+      addPending(sale, reasons);
       return;
     }
-    const saleTax = sale.valor_bruto * ((rule.tax_percent ?? 0) / 100);
+
+    configuredGross += sale.valor_bruto;
+    configuredSales += 1;
+    coproduction += sale.valor_bruto * ((product!.percentual_coproducao ?? 0) / 100);
+    const appliedRule = rule!;
+    const saleTax = sale.valor_bruto * ((appliedRule.tax_percent ?? 0) / 100);
     tax += saleTax;
-    const key = rule.category;
-    const current = taxBuckets.get(key) ?? { category: key, gross: 0, tax: 0, percent: rule.tax_percent ?? 0 };
+    const key = appliedRule.category;
+    const current = taxBuckets.get(key) ?? { category: key, gross: 0, tax: 0, percent: appliedRule.tax_percent ?? 0 };
     current.gross += sale.valor_bruto;
     current.tax += saleTax;
     taxBuckets.set(key, current);
   });
 
-  const estimatedNet = gross - hotmartPercentFee - fixedFee - gatewayFee - coproduction - tax;
+  const hotmartPercentFee = configuredGross * ((profile?.hotmart_percent_fee ?? 0) / 100);
+  const gatewayFee = configuredGross * ((profile?.gateway_percent_fee ?? 0) / 100);
+  const fixedFee = configuredSales * (profile?.hotmart_fixed_fee ?? 0);
+  const pendingGross = Math.max(0, gross - configuredGross);
+  const coveragePercent = gross ? (configuredGross / gross) * 100 : null;
+  const estimatedNet = configuredSales ? configuredGross - hotmartPercentFee - fixedFee - gatewayFee - coproduction - tax : null;
+  const pendingList = [...pendingProducts.values()]
+    .map((item) => ({ product: item.product, gross: item.gross, reasons: [...item.reasons] }))
+    .sort((a, b) => b.gross - a.gross);
 
   return {
     gross,
     sales: confirmed.length,
+    configuredGross,
+    configuredSales,
+    pendingGross,
+    coveragePercent,
     hotmartPercentFee,
     fixedFee,
     gatewayFee,
@@ -886,7 +919,8 @@ function buildEstimatedFinancials({
     tax,
     estimatedNet,
     taxBuckets: [...taxBuckets.values()].sort((a, b) => b.gross - a.gross),
-    unmappedProducts: [...unmappedProducts],
+    pendingProducts: pendingList,
+    unmappedProducts: pendingList.map((item) => item.product),
     hasProfile: Boolean(profile),
   };
 }
@@ -1059,6 +1093,7 @@ function buildOverviewSummary({
   period,
   confirmed,
   gross,
+  estimatedFinancials,
   topProduct,
   pending,
   lost,
@@ -1069,6 +1104,7 @@ function buildOverviewSummary({
   period: PeriodKey;
   confirmed: number;
   gross: number;
+  estimatedFinancials: ReturnType<typeof buildEstimatedFinancials>;
   topProduct: string | null;
   pending: number;
   lost: number;
@@ -1082,11 +1118,14 @@ function buildOverviewSummary({
     lost ? `${lost} perdas comerciais` : null,
     refunded ? `${refunded} reembolsos/chargebacks` : null,
   ].filter(Boolean).join(", ");
+  const estimateText = estimatedFinancials.estimatedNet === null
+    ? " Estimativa Norwyn de liquido/imposto ainda indisponivel porque nenhum produto configurado entrou no filtro."
+    : ` Estimativa Norwyn: liquido de ${formatMoney(estimatedFinancials.estimatedNet)}, imposto/DAS de ${formatMoney(estimatedFinancials.tax)} e cobertura de ${estimatedFinancials.coveragePercent === null ? "-" : formatPercent(estimatedFinancials.coveragePercent)}.`;
   const dataText = !hasOfficialNet || !hasOfficialReceivables
     ? " Valores líquidos e recebíveis oficiais ainda não foram informados pela Hotmart neste payload."
     : " Valores líquidos e recebíveis oficiais estão disponíveis para o filtro atual.";
 
-  return `No período ${periodLabel(period).toLowerCase()}, foram registradas ${confirmed} vendas confirmadas, com receita bruta de ${formatMoney(gross)}.${productText}${riskText ? ` Há ${riskText} no funil.` : ""}${dataText}`;
+  return `No período ${periodLabel(period).toLowerCase()}, foram registradas ${confirmed} vendas confirmadas, com receita bruta de ${formatMoney(gross)}.${productText}${riskText ? ` Há ${riskText} no funil.` : ""}${estimateText}${dataText}`;
 }
 
 type LaunchTemporalRow = ReturnType<typeof buildTemporalRows>[number];
@@ -1543,6 +1582,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
     period,
     confirmed: confirmedSales.length,
     gross: grossRevenue,
+    estimatedFinancials: overviewEstimatedFinancials,
     topProduct: overviewProductRows[0]?.name ?? null,
     pending: pendingSales.length,
     lost: lostSales.length,
@@ -1683,7 +1723,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmedSales.length} helper="no período filtrado" />
             <Metric icon={<WalletCards />} label="Faturamento bruto" value={formatMoney(grossRevenue)} helper="receita bruta no período filtrado" />
-            <Metric icon={<TrendingUp />} label="Lucro líquido estimado" value={formatMoney(overviewEstimatedFinancials.estimatedNet)} helper="Estimativa Norwyn no filtro" />
+            <Metric icon={<TrendingUp />} label="Lucro líquido estimado" value={overviewEstimatedFinancials.estimatedNet === null ? "Indisponível" : formatMoney(overviewEstimatedFinancials.estimatedNet)} helper="Estimativa Norwyn no filtro" />
             <Metric icon={<ReceiptText />} label="Imposto estimado" value={formatMoney(overviewEstimatedFinancials.tax)} helper="DAS estimado pelas regras vigentes" />
             <Metric
               icon={<CheckCircle2 />}
@@ -2052,8 +2092,11 @@ function LaunchIntelligencePanel({
     () => buildCommercialHypotheses({ riskRows, productLossRows, lossReasonRows, sourceRows, productRows }),
     [riskRows, productLossRows, lossReasonRows, sourceRows, productRows],
   );
+  const financialSummaryText = estimatedFinancials.estimatedNet === null
+    ? " Estimativa Norwyn de liquido e imposto ainda indisponivel no filtro porque nenhum produto configurado entrou na leitura."
+    : ` Estimativa Norwyn: liquido de ${formatMoney(estimatedFinancials.estimatedNet)}, imposto/DAS de ${formatMoney(estimatedFinancials.tax)} e cobertura de ${estimatedFinancials.coveragePercent === null ? "-" : formatPercent(estimatedFinancials.coveragePercent)}.`;
   const summary = confirmed.length
-    ? `${range.label} registrou ${confirmed.length} vendas confirmadas, com receita bruta de ${formatMoney(gross)} e ticket medio bruto de ${formatMoney(ticket)}. ${topProduct ? `O produto com maior receita foi ${topProduct.name}.` : "Ainda nao ha produto dominante."} Receita em risco estimada: ${formatMoney(riskTotal)} (${formatPercent(riskPercent)} da receita bruta confirmada). ${refunded.length ? `Houve ${refunded.length} reembolsos/chargebacks no periodo.` : "Nao ha reembolsos ou chargebacks no periodo."} ${pending.length ? `Existem ${pending.length} pagamentos pendentes que merecem acompanhamento.` : "Nao ha pagamentos pendentes no periodo."}`
+    ? `${range.label} registrou ${confirmed.length} vendas confirmadas, com receita bruta de ${formatMoney(gross)} e ticket medio bruto de ${formatMoney(ticket)}. ${topProduct ? `O produto com maior receita foi ${topProduct.name}.` : "Ainda nao ha produto dominante."}${financialSummaryText} Receita em risco estimada: ${formatMoney(riskTotal)} (${formatPercent(riskPercent)} da receita bruta confirmada). ${refunded.length ? `Houve ${refunded.length} reembolsos/chargebacks no periodo.` : "Nao ha reembolsos ou chargebacks no periodo."} ${pending.length ? `Existem ${pending.length} pagamentos pendentes que merecem acompanhamento.` : "Nao ha pagamentos pendentes no periodo."}`
     : `${range.label} ainda nao possui vendas confirmadas no filtro aplicado. Use a leitura de eventos recentes e pendentes para validar se o lancamento esta sem movimentacao ou se o filtro precisa ser ajustado.`;
   const sortedLatestSales = useMemo(() => sortLaunchSales(rows, salesSort), [rows, salesSort]);
   const sortedProductRows = useMemo(() => sortLaunchProducts(productRows, productSort), [productRows, productSort]);
@@ -2225,7 +2268,7 @@ function LaunchIntelligencePanel({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Metric icon={<WalletCards />} label="Receita bruta" value={formatMoney(gross)} helper="oficial Hotmart" />
         <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmed.length} helper="APPROVED ou COMPLETE" />
-        <Metric icon={<TrendingUp />} label="Lucro líquido estimado" value={formatMoney(estimatedFinancials.estimatedNet)} helper="Estimativa Norwyn" />
+        <Metric icon={<TrendingUp />} label="Lucro líquido estimado" value={estimatedFinancials.estimatedNet === null ? "Indisponível" : formatMoney(estimatedFinancials.estimatedNet)} helper="Estimativa Norwyn" />
         <Metric icon={<ReceiptText />} label="Imposto estimado" value={formatMoney(estimatedFinancials.tax)} helper="DAS estimado" />
         <Metric icon={<TrendingUp />} label="Ticket médio bruto" value={formatMoney(ticket)} helper="bruto / confirmadas" />
         <Metric icon={<Users />} label="Compradores únicos" value={buyers} helper="confirmados no filtro" />
@@ -2470,13 +2513,15 @@ function EstimatedFinancialsCard({
         </div>
         <span className="rounded-full bg-[#FFF3C7] px-3 py-1 text-[11px] font-black uppercase text-[#8A5B18]">Estimativa Norwyn</span>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <MiniMetric label="Receita bruta" value={formatMoney(estimate.gross)} helper={`${estimate.sales} vendas confirmadas`} />
-        <MiniMetric label="Taxa Hotmart" value={formatMoney(estimate.hotmartPercentFee)} helper="percentual configurado" />
-        <MiniMetric label="Taxa fixa" value={formatMoney(estimate.fixedFee)} helper="por venda confirmada" />
-        <MiniMetric label="Coprodução" value={formatMoney(estimate.coproduction)} helper="padrão configurado" />
-        <MiniMetric label="Imposto estimado" value={formatMoney(estimate.tax)} helper="por categoria fiscal" />
-        <MiniMetric label="Líquido estimado" value={formatMoney(estimate.estimatedNet)} helper="não oficial Hotmart" />
+      <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+        <MiniMetric label="Receita bruta total" value={formatMoney(estimate.gross)} helper={`${estimate.sales} vendas confirmadas`} />
+        <MiniMetric label="Receita configurada" value={formatMoney(estimate.configuredGross)} helper={`${estimate.configuredSales} vendas na estimativa`} />
+        <MiniMetric label="Receita pendente" value={formatMoney(estimate.pendingGross)} helper="produtos sem configuracao completa" />
+        <MiniMetric label="Taxas Hotmart" value={formatMoney(estimate.hotmartPercentFee + estimate.fixedFee)} helper="percentual + taxa fixa configurada" />
+        <MiniMetric label="Coproducao" value={formatMoney(estimate.coproduction)} helper="por produto configurado" />
+        <MiniMetric label="Imposto/DAS" value={formatMoney(estimate.tax)} helper="por regra tributaria vigente" />
+        <MiniMetric label="Liquido estimado" value={estimate.estimatedNet === null ? "Indisponivel" : formatMoney(estimate.estimatedNet)} helper="nao oficial Hotmart" />
+        <MiniMetric label="Cobertura" value={estimate.coveragePercent === null ? "-" : formatPercent(estimate.coveragePercent)} helper="receita configurada / total" />
       </div>
       {estimate.taxBuckets.length ? (
         <div className="mt-4 overflow-x-auto">
@@ -2489,9 +2534,22 @@ function EstimatedFinancialsCard({
         </div>
       ) : null}
       <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
-        Valores estimados pela Norwyn com base no Business Profile e nas regras tributárias configuradas. Não substituem valores oficiais da Hotmart ou da contabilidade.
-        {estimate.unmappedProducts.length ? ` Produtos sem regra fiscal no filtro: ${estimate.unmappedProducts.slice(0, 3).join(", ")}${estimate.unmappedProducts.length > 3 ? "..." : ""}.` : ""}
+        Valores estimados pela Norwyn com base no Business Profile e nas regras tributarias configuradas. Nao substituem valores oficiais da Hotmart ou da contabilidade.
+        {estimate.pendingProducts.length ? " Estimativa calculada parcialmente com base nos produtos configurados. Produtos sem configuracao financeira foram excluidos da estimativa e listados como pendencia." : ""}
       </p>
+      {estimate.pendingProducts.length ? (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-black uppercase text-amber-900">Pendencias de configuracao</p>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {estimate.pendingProducts.slice(0, 6).map((item) => (
+              <div key={item.product} className="rounded-md bg-white/70 p-2 text-xs font-bold text-amber-900">
+                <p className="truncate">{item.product}</p>
+                <p className="mt-1 text-amber-800/75">{formatMoney(item.gross)} - {item.reasons.join(", ")}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }

@@ -2605,7 +2605,6 @@ function estimatedValueLabel(
 ) {
   if (!period.hasSales) return "Sem vendas registradas no periodo";
   if (!period.hasProfile) return "Configuracao financeira pendente";
-  if (options?.requiresComplete && period.incomplete) return "Estimativa incompleta";
   if (value == null || !Number.isFinite(value)) return "Estimativa incompleta";
   return currency(value);
 }
@@ -2641,11 +2640,7 @@ function FinancialPeriodCard({ period }: { period: ReturnType<typeof buildFinanc
     : !period.hasProfile
       ? "Configuracao financeira pendente."
       : period.incomplete
-        ? `Estimativa incompleta: ${[
-          period.missingProduct ? `${period.missingProduct} venda(s) sem produto mapeado` : "",
-          period.missingFiscalCategory ? `${period.missingFiscalCategory} produto(s) sem categoria fiscal` : "",
-          period.missingTaxRule ? `${period.missingTaxRule} categoria(s) sem regra tributaria vigente` : "",
-        ].filter(Boolean).join("; ")}.`
+        ? "Estimativa calculada parcialmente com base nos produtos configurados. Produtos sem configuracao financeira foram excluidos da estimativa e listados como pendencia."
         : null;
 
   return (
@@ -2662,16 +2657,30 @@ function FinancialPeriodCard({ period }: { period: ReturnType<typeof buildFinanc
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <MissionMeta label="Receita bruta" value={period.hasSales ? currency(period.gross) : "Sem vendas registradas no periodo"} />
+        <MissionMeta label="Receita configurada" value={period.hasSales ? currency(period.configuredGross) : "Sem vendas registradas no periodo"} />
+        <MissionMeta label="Receita pendente" value={period.hasSales ? currency(period.pendingGross) : "Sem vendas registradas no periodo"} />
         <MissionMeta label="Liquido estimado" value={estimatedValueLabel(period, period.estimatedNet, { requiresComplete: true })} />
         <MissionMeta label="Imposto/DAS estimado" value={estimatedValueLabel(period, period.tax, { requiresComplete: true })} />
         <MissionMeta label="Taxas Hotmart estimadas" value={estimatedValueLabel(period, (period.hotmartPercentFee ?? 0) + (period.hotmartFixedFee ?? 0))} />
         <MissionMeta label="Coproducao estimada" value={estimatedValueLabel(period, period.coproduction)} />
-        <MissionMeta label="Vendas consideradas" value={String(period.salesCount)} />
+        <MissionMeta label="Cobertura da estimativa" value={period.coveragePercent == null ? "-" : percent(period.coveragePercent)} />
       </div>
       {issueText ? (
         <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900">
           {issueText}
         </p>
+      ) : null}
+      {period.pendingProducts.length ? (
+        <div className="mt-3 rounded-md border border-brand-sand bg-brand-cream/40 p-3">
+          <p className="text-[11px] font-black uppercase text-brand-clay">Pendencias por produto</p>
+          <div className="mt-2 space-y-2">
+            {period.pendingProducts.slice(0, 5).map((item) => (
+              <div key={item.product} className="text-xs leading-5 text-brand-teal/75">
+                <strong className="text-brand-teal">{item.product}</strong> - {currency(item.gross)} - {item.reasons.join(", ")}
+              </div>
+            ))}
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -4219,63 +4228,48 @@ function buildTaxForecast({
 }) {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const confirmedSales = commercialSales.filter((sale) => sale.grupo_comercial === "confirmed");
-  const currentMonthSales = confirmedSales.filter((sale) => {
-    const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
-    return Number.isFinite(date.getTime()) && date >= monthStart && date < nextMonthStart;
-  });
   const previousMonthSales = confirmedSales.filter((sale) => {
     const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
     return Number.isFinite(date.getTime()) && date >= previousMonthStart && date < monthStart;
   });
-
-  const gross = currentMonthSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
+  const period = buildFinancialPeriodEstimate({
+    label: "Mes atual",
+    supportText: "Estimativa parcial do mes atual.",
+    start: monthStart,
+    end: endOfDay(startOfDay(now)),
+    profile,
+    taxRules,
+    products,
+    commercialSales,
+    partial: true,
+  });
   const previousGross = previousMonthSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
-  const hotmartPercentFee = gross * ((profile?.hotmart_percent_fee ?? 0) / 100);
-  const hotmartFixedFee = currentMonthSales.length * (profile?.hotmart_fixed_fee ?? 0);
-  const gatewayFee = gross * ((profile?.gateway_percent_fee ?? 0) / 100);
-  const coproduction = gross * ((profile?.default_coproduction_percent ?? 0) / 100);
-  const withdrawFee = gross > 0 ? profile?.hotmart_withdraw_fee ?? 0 : 0;
-  const byCategory = new Map<string, { gross: number; tax: number; taxPercent: number | null; cnae: string | null; count: number }>();
-
-  for (const sale of currentMonthSales) {
-    const product = productForSale(sale, products);
-    const category = product?.fiscal_category ?? "Sem categoria fiscal";
-    const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
-    const saleGross = Number(sale.valor_bruto ?? 0);
-    const taxPercent = rule?.tax_percent ?? 0;
-    const current = byCategory.get(category) ?? { gross: 0, tax: 0, taxPercent: rule?.tax_percent ?? null, cnae: rule?.cnae ?? null, count: 0 };
-    current.gross += saleGross;
-    current.tax += saleGross * (taxPercent / 100);
-    current.count += 1;
-    if (rule?.tax_percent != null) current.taxPercent = rule.tax_percent;
-    if (rule?.cnae) current.cnae = rule.cnae;
-    byCategory.set(category, current);
-  }
-
-  const tax = [...byCategory.values()].reduce((sum, item) => sum + item.tax, 0);
-  const estimatedNet = gross - hotmartPercentFee - hotmartFixedFee - gatewayFee - coproduction - tax - withdrawFee;
   const daysElapsed = Math.max(1, now.getDate());
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const projectedGross = gross / daysElapsed * daysInMonth;
-  const growth = previousGross > 0 ? ((gross - previousGross) / previousGross) * 100 : null;
+  const projectedGross = period.gross / daysElapsed * daysInMonth;
+  const growth = previousGross > 0 ? ((period.gross - previousGross) / previousGross) * 100 : null;
 
   return {
-    gross,
+    gross: period.gross,
+    configuredGross: period.configuredGross,
+    pendingGross: period.pendingGross,
+    coveragePercent: period.coveragePercent,
     previousGross,
     projectedGross,
-    hotmartPercentFee,
-    hotmartFixedFee,
-    gatewayFee,
-    coproduction,
-    withdrawFee,
-    tax,
-    estimatedNet,
+    hotmartPercentFee: period.hotmartPercentFee ?? 0,
+    hotmartFixedFee: period.hotmartFixedFee ?? 0,
+    gatewayFee: period.gatewayFee ?? 0,
+    coproduction: period.coproduction,
+    withdrawFee: period.withdrawFee ?? 0,
+    tax: period.tax ?? 0,
+    estimatedNet: period.estimatedNet,
     growth,
-    salesCount: currentMonthSales.length,
-    byCategory: [...byCategory.entries()].map(([category, data]) => ({ category, ...data })),
+    salesCount: period.salesCount,
+    configuredSalesCount: period.configuredSalesCount,
+    pendingProducts: period.pendingProducts,
+    byCategory: period.byCategory,
   };
 }
 
@@ -4322,17 +4316,58 @@ function buildFinancialPeriodEstimate({
   const hasProfile = Boolean(profile);
   let missingProduct = 0;
   let missingFiscalCategory = 0;
+  let missingCoproduction = 0;
+  let missingPrice = 0;
   let missingTaxRule = 0;
+  let configuredGross = 0;
+  let configuredSalesCount = 0;
+  let coproduction = 0;
   const byCategory = new Map<string, { gross: number; tax: number; taxPercent: number | null; count: number }>();
+  const pendingProducts = new Map<string, { product: string; gross: number; count: number; reasons: Set<string> }>();
+
+  function addPending(sale: NorwynCommercialSale, reasons: string[]) {
+    const key = sale.produto_nome || sale.transaction_id || "Produto sem alias/produto base";
+    const current = pendingProducts.get(key) ?? { product: key, gross: 0, count: 0, reasons: new Set<string>() };
+    current.gross += Number(sale.valor_bruto ?? 0);
+    current.count += 1;
+    reasons.forEach((reason) => current.reasons.add(reason));
+    pendingProducts.set(key, current);
+  }
 
   for (const sale of confirmedSales) {
     const product = productForSale(sale, products);
-    if (!product) missingProduct += 1;
-    if (product && !product.fiscal_category) missingFiscalCategory += 1;
+    const reasons: string[] = [];
+    if (!product) {
+      missingProduct += 1;
+      reasons.push("sem alias/produto base");
+    }
+    if (product && !product.fiscal_category) {
+      missingFiscalCategory += 1;
+      reasons.push("sem categoria fiscal");
+    }
+    if (product && product.percentual_coproducao == null) {
+      missingCoproduction += 1;
+      reasons.push("sem coproducao");
+    }
+    if (product && product.preco_oficial == null) {
+      missingPrice += 1;
+      reasons.push("sem preco");
+    }
     const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
-    if (product?.fiscal_category && !rule) missingTaxRule += 1;
+    if (product?.fiscal_category && !rule) {
+      missingTaxRule += 1;
+      reasons.push("sem regra tributaria");
+    }
+    if (!hasProfile) reasons.push("sem Business Profile");
+    if (reasons.length) {
+      addPending(sale, reasons);
+      continue;
+    }
     const category = product?.fiscal_category ?? "Sem categoria fiscal";
     const saleGross = Number(sale.valor_bruto ?? 0);
+    configuredGross += saleGross;
+    configuredSalesCount += 1;
+    coproduction += saleGross * ((product?.percentual_coproducao ?? 0) / 100);
     const taxPercent = rule?.tax_percent ?? 0;
     const current = byCategory.get(category) ?? { gross: 0, tax: 0, taxPercent: rule?.tax_percent ?? null, count: 0 };
     current.gross += saleGross;
@@ -4342,15 +4377,14 @@ function buildFinancialPeriodEstimate({
     byCategory.set(category, current);
   }
 
-  const incomplete = hasSales && (!hasProfile || missingProduct > 0 || missingFiscalCategory > 0 || missingTaxRule > 0);
-  const hotmartPercentFee = hasProfile ? gross * ((profile?.hotmart_percent_fee ?? 0) / 100) : null;
-  const hotmartFixedFee = hasProfile ? confirmedSales.length * (profile?.hotmart_fixed_fee ?? 0) : null;
-  const gatewayFee = hasProfile ? gross * ((profile?.gateway_percent_fee ?? 0) / 100) : null;
-  const coproduction = hasProfile ? gross * ((profile?.default_coproduction_percent ?? 0) / 100) : null;
-  const withdrawFee = hasProfile && gross > 0 ? profile?.hotmart_withdraw_fee ?? 0 : hasProfile ? 0 : null;
+  const incomplete = hasSales && pendingProducts.size > 0;
+  const hotmartPercentFee = hasProfile ? configuredGross * ((profile?.hotmart_percent_fee ?? 0) / 100) : null;
+  const hotmartFixedFee = hasProfile ? configuredSalesCount * (profile?.hotmart_fixed_fee ?? 0) : null;
+  const gatewayFee = hasProfile ? configuredGross * ((profile?.gateway_percent_fee ?? 0) / 100) : null;
+  const withdrawFee = hasProfile && configuredGross > 0 ? profile?.hotmart_withdraw_fee ?? 0 : hasProfile ? 0 : null;
   const tax = hasProfile ? [...byCategory.values()].reduce((sum, item) => sum + item.tax, 0) : null;
-  const estimatedNet = hasProfile && !incomplete
-    ? gross - (hotmartPercentFee ?? 0) - (hotmartFixedFee ?? 0) - (gatewayFee ?? 0) - (coproduction ?? 0) - (tax ?? 0) - (withdrawFee ?? 0)
+  const estimatedNet = hasProfile && configuredGross > 0
+    ? configuredGross - (hotmartPercentFee ?? 0) - (hotmartFixedFee ?? 0) - (gatewayFee ?? 0) - coproduction - (tax ?? 0) - (withdrawFee ?? 0)
     : null;
 
   return {
@@ -4360,7 +4394,11 @@ function buildFinancialPeriodEstimate({
     updatedLabel: partial ? `Atualizado ate ${end.toLocaleDateString("pt-BR")}` : "Periodo fechado",
     partial,
     salesCount: confirmedSales.length,
+    configuredSalesCount,
     gross,
+    configuredGross,
+    pendingGross: Math.max(0, gross - configuredGross),
+    coveragePercent: gross > 0 ? (configuredGross / gross) * 100 : null,
     hotmartPercentFee,
     hotmartFixedFee,
     gatewayFee,
@@ -4373,7 +4411,15 @@ function buildFinancialPeriodEstimate({
     incomplete,
     missingProduct,
     missingFiscalCategory,
+    missingCoproduction,
+    missingPrice,
     missingTaxRule,
+    pendingProducts: [...pendingProducts.values()].map((item) => ({
+      product: item.product,
+      gross: item.gross,
+      count: item.count,
+      reasons: [...item.reasons],
+    })).sort((a, b) => b.gross - a.gross),
     byCategory: [...byCategory.entries()].map(([category, data]) => ({ category, ...data })),
   };
 }
@@ -4677,12 +4723,30 @@ function ProductIntelligenceView({
           </p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <MissionMeta label="Receita bruta mes" value={currency(forecast.gross)} />
-            <MissionMeta label="Receita liquida estimada" value={currency(forecast.estimatedNet)} />
+            <MissionMeta label="Receita configurada" value={currency(forecast.configuredGross)} />
+            <MissionMeta label="Receita pendente" value={currency(forecast.pendingGross)} />
+            <MissionMeta label="Receita liquida estimada" value={forecast.estimatedNet === null ? "Indisponivel" : currency(forecast.estimatedNet)} />
             <MissionMeta label="DAS estimado" value={currency(forecast.tax)} />
+            <MissionMeta label="Taxas Hotmart" value={currency(forecast.hotmartPercentFee + forecast.hotmartFixedFee)} />
+            <MissionMeta label="Coproducao" value={currency(forecast.coproduction)} />
+            <MissionMeta label="Cobertura" value={forecast.coveragePercent === null ? "-" : percent(forecast.coveragePercent)} />
             <MissionMeta label="Projecao fechamento" value={currency(forecast.projectedGross)} />
             <MissionMeta label="Crescimento vs mes anterior" value={percent(forecast.growth)} />
             <MissionMeta label="Vendas consideradas" value={String(forecast.salesCount)} />
           </div>
+          {forecast.pendingProducts.length ? (
+            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
+              <p>Estimativa calculada parcialmente com base nos produtos configurados. Produtos sem configuracao financeira foram excluidos da estimativa e listados como pendencia.</p>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {forecast.pendingProducts.slice(0, 6).map((item) => (
+                  <div key={item.product} className="rounded-md bg-white/70 p-2">
+                    <p className="truncate">{item.product}</p>
+                    <p className="text-amber-800/75">{currency(item.gross)} - {item.reasons.join(", ")}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="mt-4 overflow-hidden rounded-md border border-brand-sand">
             <table className="w-full text-left text-sm">
               <thead className="bg-[#F3DDE1] text-[11px] font-black uppercase text-brand-clay">
@@ -4698,12 +4762,12 @@ function ProductIntelligenceView({
                   <tr key={item.category}>
                     <td className="px-3 py-2 font-semibold text-brand-teal">{item.category}</td>
                     <td className="px-3 py-2 text-brand-teal/70">{currency(item.gross)}</td>
-                    <td className="px-3 py-2 text-brand-teal/70">{item.taxPercent != null ? `${percent(item.taxPercent)}${item.cnae ? ` - ${item.cnae}` : ""}` : "sem regra"}</td>
+                    <td className="px-3 py-2 text-brand-teal/70">{item.taxPercent != null ? percent(item.taxPercent) : "sem regra"}</td>
                     <td className="px-3 py-2 text-brand-teal/70">{currency(item.tax)}</td>
                   </tr>
                 ))}
                 {!forecast.byCategory.length ? (
-                  <tr><td colSpan={4} className="px-3 py-4 text-brand-teal/60">Sem vendas confirmadas no mes atual.</td></tr>
+                  <tr><td colSpan={4} className="px-3 py-4 text-brand-teal/60">Sem vendas configuradas para estimativa no mes atual.</td></tr>
                 ) : null}
               </tbody>
             </table>
