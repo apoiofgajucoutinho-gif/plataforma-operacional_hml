@@ -4432,10 +4432,7 @@ function buildFinancialPeriodEstimate({
       missingCoproduction += 1;
       reasons.push("sem coproducao");
     }
-    if (product && product.preco_oficial == null) {
-      missingPrice += 1;
-      reasons.push("sem preco");
-    }
+    if (product && product.preco_oficial == null) missingPrice += 1;
     const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
     if (product?.fiscal_category && !rule) {
       missingTaxRule += 1;

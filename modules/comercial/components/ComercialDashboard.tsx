@@ -934,7 +934,6 @@ function buildEstimatedFinancials({
     if (!product) reasons.push("sem alias/produto base");
     if (product && !product.fiscal_category) reasons.push("sem categoria fiscal");
     if (product && product.percentual_coproducao === null) reasons.push("sem coproducao");
-    if (product && product.preco_oficial === null) reasons.push("sem preco");
     if (product?.fiscal_category && !rule) reasons.push("sem regra tributaria");
 
     if (reasons.length) {
