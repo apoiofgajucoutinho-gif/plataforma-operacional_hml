@@ -15,6 +15,7 @@ import {
   Flag,
   Home,
   Layers3,
+  Package,
   Pencil,
   Plus,
   Repeat,
@@ -25,9 +26,9 @@ import { Card } from "@/components/ui/Card";
 import { StrategyPlanner } from "@/modules/norwyn/components/StrategyPlanner";
 import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/modules/norwyn/services/evidence-engine";
 import type { InstagramPostMetric } from "@/modules/instagram/types";
-import type { NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus } from "@/modules/norwyn/types";
+import type { NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus } from "@/modules/norwyn/types";
 
-type NorwynTab = "home" | "business" | "mission" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
+type NorwynTab = "home" | "business" | "mission" | "products" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
 type MissionPriority = "Principal" | "Estrategica" | "Continua";
 type MissionStatus = "Planejada" | "Ativa" | "Pausada" | "Encerrada" | "Arquivada";
 type BusinessObjectiveHorizon = "Trimestral" | "Semestral" | "Anual" | "Continuo";
@@ -1457,6 +1458,8 @@ function TabButton({
 
 export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [activeTab, setActiveTab] = useState<NorwynTab>("home");
+  const [products, setProducts] = useState<NorwynProduct[]>(context.products);
+  const [productsMessage, setProductsMessage] = useState<string | null>(null);
   const [businessObjectives, setBusinessObjectives] = useState<BusinessObjective[]>([]);
   const [missions, setMissions] = useState<NorwynMission[]>([]);
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
@@ -1487,12 +1490,13 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
       buildEvidenceEngine({
         contentEvents: context.contentEvents,
         commercialSales: context.commercialSales,
+        products,
         signals,
         adsRows: context.adsRows,
         interactions: context.interactions,
         activeMissionName: activeMission?.name ?? null,
       }),
-    [context, signals, activeMission],
+    [context, products, signals, activeMission],
   );
   const evidenceOpportunities = useMemo(
     () =>
@@ -1623,6 +1627,19 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   function persistKnowledge(next: KnowledgeEvent[]) {
     setKnowledgeEvents(next.slice(0, 80));
     window.localStorage.setItem(KNOWLEDGE_KEY, JSON.stringify(next.slice(0, 80)));
+  }
+
+  async function mutateProductCatalog(payload: Record<string, unknown>) {
+    setProductsMessage(null);
+    const response = await fetch("/api/norwyn/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json.error ?? "Nao foi possivel salvar o catalogo de produtos.");
+    if (Array.isArray(json.products)) setProducts(json.products);
+    setProductsMessage(json.message ?? "Catalogo atualizado.");
   }
 
   function addKnowledgeEvent(event: Omit<KnowledgeEvent, "id" | "createdAt" | "updatedAt">) {
@@ -1926,6 +1943,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         <TabButton active={activeTab === "mission"} onClick={() => setActiveTab("mission")}>
           <Flag className="h-4 w-4" /> Mission Center
         </TabButton>
+        <TabButton active={activeTab === "products"} onClick={() => setActiveTab("products")}>
+          <Package className="h-4 w-4" /> Produtos
+        </TabButton>
         <TabButton active={activeTab === "intelligence"} onClick={() => setActiveTab("intelligence")}>
           <Layers3 className="h-4 w-4" /> Intelligence
         </TabButton>
@@ -2021,6 +2041,14 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
           activeMission={activeMission ? { name: activeMission.name, priority: activeMission.priority } : null}
           evidenceRecommendations={evidenceEngine.recommendations}
           onCreateBriefing={(seed) => openBriefing({ ...seed, missionId: activeMission?.id })}
+        />
+      ) : null}
+
+      {activeTab === "products" ? (
+        <ProductIntelligenceView
+          products={products}
+          message={productsMessage}
+          mutateCatalog={mutateProductCatalog}
         />
       ) : null}
 
@@ -3246,7 +3274,7 @@ function EvidenceEngineView({
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const products = useMemo(
     () =>
-      [...new Set(evidenceEngine.launchPatterns.flatMap((pattern) => [pattern.productName, ...pattern.associatedProducts]).map((product) => friendlyProductName(product)).filter(Boolean))].sort(),
+      [...new Set(evidenceEngine.launchPatterns.flatMap((pattern) => [pattern.productBaseName ?? pattern.productName, ...pattern.associatedProducts]).map((product) => friendlyProductName(product)).filter(Boolean))].sort(),
     [evidenceEngine.launchPatterns],
   );
   const contentOptions = useMemo(
@@ -3271,7 +3299,7 @@ function EvidenceEngineView({
         (periodFilter === "last-launch" && pattern.influenceScore >= 65) ||
         (periodFilter === "current-launch" && age <= 10) ||
         age <= Number(periodFilter);
-      const productOk = soldProductFilter === "all" || productMatchesAlias(pattern.productName, soldProductFilter) || pattern.associatedProducts.some((product) => productMatchesAlias(product, soldProductFilter));
+      const productOk = soldProductFilter === "all" || productMatchesAlias(pattern.productBaseName ?? pattern.productName, soldProductFilter) || pattern.associatedProducts.some((product) => productMatchesAlias(product, soldProductFilter));
       const contentOk = contentFilter === "all" || pattern.format === contentFilter;
       const campaignOk = campaignFilter === "all" || pattern.campaignId === campaignFilter;
       const missionOk = missionFilter === "all" || pattern.missionId === missionFilter;
@@ -3311,6 +3339,75 @@ function EvidenceEngineView({
     campaignFilter === "all" ? "Todas as campanhas" : `Campanha ${campaignFilter}`,
     missionFilter === "all" ? "Todas as missoes" : `Missao ${missionFilter}`,
   ].join(" • ");
+  const topPatterns = filteredPatterns.slice(0, 10);
+  const decisionPatternLabel = (pattern: NorwynLaunchPattern) => {
+    const theme = pattern.themeTags?.[0] ?? "";
+    const text = `${pattern.contentTitle} ${pattern.contentCaption ?? ""} ${theme}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (text.includes("caso") || text.includes("clin")) return "Casos clinicos aparecem antes de janelas de venda.";
+    if (text.includes("prova") || text.includes("depoimento")) return "Prova social aparece antes de picos de conversao.";
+    if (text.includes("duvida") || text.includes("faq") || text.includes("pergunta")) return "Conteudos de duvidas reduzem friccao comercial.";
+    if (text.includes("aula") || text.includes("tecnico")) return "Conteudo tecnico sustenta autoridade antes da venda.";
+    if (pattern.format.toLowerCase().includes("story")) return "Stories ajudam a aquecer relacionamento e perguntas.";
+    if (pattern.format.toLowerCase().includes("reel")) return "Reels ampliam alcance antes do interesse comercial.";
+    if (pattern.format.toLowerCase().includes("carrossel")) return "Carrosseis organizam argumentos para decisao de compra.";
+    return `${pattern.format} com sinal comercial deve ser revisitado com nova hipotese.`;
+  };
+  const patternsFound = [...filteredPatterns.reduce((map, pattern) => {
+    const label = decisionPatternLabel(pattern);
+    const current = map.get(label) ?? { label, patterns: [] as NorwynLaunchPattern[] };
+    current.patterns.push(pattern);
+    map.set(label, current);
+    return map;
+  }, new Map<string, { label: string; patterns: NorwynLaunchPattern[] }>()).values()]
+    .map((item) => {
+      const last = [...item.patterns].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())[0];
+      const avgConfidence = item.patterns.length ? Math.round(item.patterns.reduce((sum, pattern) => sum + pattern.influenceScore, 0) / item.patterns.length) : 0;
+      return { ...item, last, avgConfidence };
+    })
+    .sort((a, b) => b.avgConfidence - a.avgConfidence)
+    .slice(0, 6);
+  const opportunities = topPatterns.slice(0, 5).map((pattern) => ({
+    id: pattern.id,
+    title: pattern.themeTags?.[0]
+      ? `Criar novo ${pattern.format} sobre ${pattern.themeTags[0]}`
+      : `Reaproveitar ${pattern.format} com CTA mais claro`,
+    action: `Usar ${friendlyProductName(pattern.productBaseName ?? pattern.productName) || "produto prioritario"} como produto base e testar uma nova versao do conteudo "${pattern.contentTitle}".`,
+    confidence: pattern.influenceScore,
+  }));
+  useEffect(() => {
+    const items = topPatterns.slice(0, 5).map((pattern) => ({
+      source_module: "norwyn",
+      knowledge_type: "padrao",
+      title: decisionPatternLabel(pattern),
+      summary: `${pattern.contentTitle} teve ${pattern.salesInWindow} venda(s) e ${pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} na janela de ${pattern.influenceHours}h.`,
+      source_key: `launch-pattern:${pattern.id}`,
+      product_id: pattern.normalizedProductId ?? null,
+      produto_base: pattern.productBaseName ?? pattern.productName ?? null,
+      mission_id: pattern.missionId ?? null,
+      confidence_score: pattern.influenceScore,
+      evidence: pattern.evidenceCards.map((card) => ({ title: card.title, source: card.source, details: card.details })),
+      metadata: {
+        content_event_id: pattern.contentEventId,
+        format: pattern.format,
+        published_at: pattern.publishedAt,
+        sales_in_window: pattern.salesInWindow,
+        revenue_in_window: pattern.revenueInWindow,
+        deterministic: true,
+      },
+    }));
+    if (!items.length || typeof window === "undefined") return;
+    const signature = items.map((item) => `${item.source_key}:${item.confidence_score}`).join("|");
+    const storageKey = `norwyn-knowledge-sync:${signature}`;
+    if (window.sessionStorage.getItem(storageKey)) return;
+    window.sessionStorage.setItem(storageKey, "1");
+    fetch("/api/norwyn/knowledge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    }).catch(() => {
+      window.sessionStorage.removeItem(storageKey);
+    });
+  }, [topPatterns, decisionPatternLabel]);
 
   return (
     <div className="space-y-4">
@@ -3400,54 +3497,105 @@ function EvidenceEngineView({
       <Card className="border-[#E9CBD1] p-4 sm:p-5">
         <SectionTitle icon={<Target className="h-5 w-5" />} title="Launch Pattern Intelligence" />
         <p className="mt-2 text-sm leading-6 text-brand-teal/65">
-          Responde quais formatos, horarios, temas e produtos apareceram associados a janelas de venda. Use como sinal para decidir o proximo teste, nao como prova de origem.
+          Painel de decisao: mostra o que funcionou, por que funcionou, o que repetir e o que evitar. A leitura indica influencia potencial, nao atribuicao direta.
         </p>
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <DetailBlock label="Melhor horario para publicar (Instagram)" value={summary.bestPublishingHour ?? "-"} />
-          <DetailBlock label="Horario de maior conversao (Hotmart)" value={summary.bestConversionHour ?? "-"} />
-          <DetailBlock label="Melhor dia para publicar (Instagram)" value={summary.bestPublishingWeekday ?? "-"} />
-          <DetailBlock label="Melhor dia de vendas (Hotmart)" value={summary.bestSalesWeekday ?? "-"} />
+          <DetailBlock label="Historico" value={`${evidenceEngine.comparisons.find((item) => item.label === "Historico")?.uniqueSales ?? 0} vendas`} />
+          <DetailBlock label="Ultimo lancamento" value={`${evidenceEngine.comparisons.find((item) => item.label === "Ultimo lancamento")?.uniqueSales ?? 0} vendas`} />
+          <DetailBlock label="Lancamento atual" value={`${evidenceEngine.comparisons.find((item) => item.label === "Lancamento atual")?.uniqueSales ?? 0} vendas`} />
+          <DetailBlock label="Ultimos 30 dias" value={`${evidenceEngine.comparisons.find((item) => item.label === "Ultimos 30 dias")?.uniqueSales ?? 0} vendas`} />
+          <DetailBlock label="Melhor horario de postagem" value={summary.bestPublishingHour ?? "-"} />
+          <DetailBlock label="Melhor horario de conversao" value={summary.bestConversionHour ?? "-"} />
+          <DetailBlock label="Melhor dia para publicar" value={summary.bestPublishingWeekday ?? "-"} />
+          <DetailBlock label="Melhor dia de vendas" value={summary.bestSalesWeekday ?? "-"} />
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {evidenceEngine.comparisons.map((item) => (
-            <article key={item.label} className="rounded-md border border-brand-sand bg-white/85 p-3">
-              <p className="text-[11px] font-black uppercase text-brand-clay">{item.label}</p>
-              <p className="mt-2 text-xl font-semibold text-brand-teal">{item.uniqueSales.toLocaleString("pt-BR")} vendas</p>
-              <p className="mt-1 text-xs text-brand-teal/60">{item.uniqueRevenue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} unicos - score {item.avgInfluence}%</p>
-            </article>
-          ))}
-        </div>
+      </Card>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<Sparkles className="h-5 w-5" />} title="Top Conteudos" />
+        <p className="mt-2 text-sm text-brand-teal/65">Entre 5 e 10 conteudos com maior sinal para decisao no recorte atual.</p>
         <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-          {filteredPatterns.slice(0, 24).map((pattern) => (
+          {topPatterns.map((pattern) => (
             <article key={pattern.id} className="rounded-md border border-brand-sand bg-white/90 p-3 shadow-sm">
               <div className="flex gap-3">
                 <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md bg-brand-cream text-xs font-bold text-brand-teal/55">
                   {pattern.imageUrl ? <img src={pattern.imageUrl} alt="" className="h-full w-full object-cover" /> : pattern.format}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] font-black uppercase text-brand-clay">{pattern.format} - {new Date(pattern.publishedAt).toLocaleDateString("pt-BR")}</p>
+                  <p className="text-[11px] font-black uppercase text-brand-clay">{pattern.format} - {formatShortDate(pattern.publishedAt)}</p>
                   <h3 className="mt-1 line-clamp-2 text-sm font-semibold text-brand-teal">{pattern.contentTitle}</h3>
-                  <p className="mt-1 text-xs text-brand-teal/60">{friendlyProductName(pattern.productName) || "Produto nao identificado"}</p>
+                  <p className="mt-1 text-xs text-brand-teal/60">{friendlyProductName(pattern.productBaseName ?? pattern.productName) || "Produto nao identificado"} • {pattern.themeTags?.[0] ?? "Tema operacional"}</p>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <MissionMeta label="Vendas" value={pattern.salesInWindow.toLocaleString("pt-BR")} />
                 <MissionMeta label="Receita" value={pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
-                <MissionMeta label="Match Score" value={`${pattern.productMatchScore}%`} />
-                <MissionMeta label="Influence Score" value={`${pattern.influenceScore}%`} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="rounded-full bg-brand-cream px-2 py-1 text-xs font-black text-brand-clay">{pattern.influenceLevel}</span>
-                <span className="rounded-full bg-[#E7F4EF] px-2 py-1 text-xs font-black text-brand-teal">confianca {pattern.influenceScore}%</span>
+                <MissionMeta label="Influence" value={`${pattern.influenceScore}%`} />
+                <MissionMeta label="Match" value={`${pattern.productMatchScore}%`} />
+                <MissionMeta label="Confianca" value={`${pattern.influenceScore}%`} />
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button type="button" onClick={() => setSelectedEvidenceId(`pattern-${pattern.id}`)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Ver evidencias</button>
-                <button type="button" onClick={() => setSelectedPatternId(pattern.id)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Ver post</button>
+                <button type="button" onClick={() => setSelectedPatternId(pattern.id)} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">Ver publicacao</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const recommendation = evidenceEngine.recommendations.find((item) => productMatchesAlias(item.productName, pattern.productBaseName ?? pattern.productName ?? "")) ?? evidenceEngine.recommendations[0];
+                    if (recommendation) openBriefing(recommendation);
+                  }}
+                  className="h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white"
+                >
+                  Ver briefing
+                </button>
               </div>
             </article>
           ))}
         </div>
-        {!filteredPatterns.length ? <EmptyState>Nenhum padrao encontrado nos filtros atuais. Isso pode indicar ausencia de eventos sincronizados ou vendas fora das janelas configuradas.</EmptyState> : null}
+        {!topPatterns.length ? <EmptyState>Nenhum conteudo com vendas na janela foi encontrado nos filtros atuais.</EmptyState> : null}
+      </Card>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<CheckCircle2 className="h-5 w-5" />} title="Padroes Encontrados" />
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {patternsFound.map((item) => (
+            <article key={item.label} className="rounded-md border border-brand-sand bg-white/85 p-4">
+              <p className="text-[11px] font-black uppercase text-brand-clay">confianca {item.avgConfidence}% • {item.patterns.length} ocorrencia(s)</p>
+              <h3 className="mt-2 text-base font-semibold text-brand-teal">{item.label}</h3>
+              <p className="mt-2 text-sm leading-6 text-brand-teal/65">
+                Evidencias: {item.patterns.slice(0, 3).map((pattern) => pattern.contentTitle).join("; ")}.
+              </p>
+              <p className="mt-2 text-xs font-bold text-brand-teal/55">Ultima ocorrencia: {item.last ? formatShortDate(item.last.publishedAt) : "-"}</p>
+            </article>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<Flag className="h-5 w-5" />} title="Oportunidades" />
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {opportunities.map((opportunity) => (
+            <article key={opportunity.id} className="rounded-md border border-brand-sand bg-white/85 p-4">
+              <p className="text-[11px] font-black uppercase text-brand-clay">acao sugerida • confianca {opportunity.confidence}%</p>
+              <h3 className="mt-2 text-base font-semibold text-brand-teal">{opportunity.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-brand-teal/65">{opportunity.action}</p>
+            </article>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<Repeat className="h-5 w-5" />} title="Linha do Tempo" />
+        <div className="mt-4 space-y-3">
+          {topPatterns.slice(0, 8).map((pattern) => (
+            <article key={`timeline-${pattern.id}`} className="grid gap-3 rounded-md border border-brand-sand bg-white/85 p-3 md:grid-cols-5">
+              <MissionMeta label="Publicacao" value={formatShortDate(pattern.publishedAt)} />
+              <MissionMeta label="Janela" value={`${pattern.influenceHours}h`} />
+              <MissionMeta label="Vendas" value={String(pattern.salesInWindow)} />
+              <MissionMeta label="Resultado" value={pattern.revenueInWindow.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} />
+              <MissionMeta label="Aprendizado" value={decisionPatternLabel(pattern)} />
+            </article>
+          ))}
+        </div>
       </Card>
 
       <Card className="border-[#E9CBD1] p-4 sm:p-5">
@@ -3786,6 +3934,328 @@ function DetailBlock({ label, value }: { label: string; value: string | null }) 
     <div className="rounded-md bg-white/80 p-3">
       <p className="text-[10px] font-black uppercase text-brand-clay">{label}</p>
       <p className="mt-1 text-sm leading-6 text-brand-teal/75">{value || "-"}</p>
+    </div>
+  );
+}
+
+const emptyProductDraft = {
+  id: "",
+  nome_oficial: "",
+  produto_base: "",
+  categoria: "",
+  descricao: "",
+  status: "ativo",
+  tipo: "Entrada",
+  preco_oficial: "",
+  duracao: "",
+  unidade_duracao: "",
+  link_oferta: "",
+  percentual_coproducao: "",
+  percentual_hotmart: "",
+  percentual_gateway: "",
+  percentual_imposto: "",
+  observacoes: "",
+  ativo: true,
+};
+
+function productToDraft(product?: NorwynProduct | null) {
+  if (!product) return emptyProductDraft;
+  return {
+    id: product.id,
+    nome_oficial: product.nome_oficial ?? "",
+    produto_base: product.produto_base ?? "",
+    categoria: product.categoria ?? "",
+    descricao: product.descricao ?? "",
+    status: product.status ?? "ativo",
+    tipo: product.tipo ?? "Entrada",
+    preco_oficial: product.preco_oficial != null ? String(product.preco_oficial) : "",
+    duracao: product.duracao != null ? String(product.duracao) : "",
+    unidade_duracao: product.unidade_duracao ?? "",
+    link_oferta: product.link_oferta ?? "",
+    percentual_coproducao: product.percentual_coproducao != null ? String(product.percentual_coproducao) : "",
+    percentual_hotmart: product.percentual_hotmart != null ? String(product.percentual_hotmart) : "",
+    percentual_gateway: product.percentual_gateway != null ? String(product.percentual_gateway) : "",
+    percentual_imposto: product.percentual_imposto != null ? String(product.percentual_imposto) : "",
+    observacoes: product.observacoes ?? "",
+    ativo: product.ativo !== false,
+  };
+}
+
+function numericOrNull(value: string) {
+  const normalized = value.replace(/\./g, "").replace(",", ".").trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function ProductIntelligenceView({
+  products,
+  message,
+  mutateCatalog,
+}: {
+  products: NorwynProduct[];
+  message: string | null;
+  mutateCatalog: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [selectedId, setSelectedId] = useState(products[0]?.id ?? "");
+  const selectedProduct = products.find((product) => product.id === selectedId) ?? products[0] ?? null;
+  const [productDraft, setProductDraft] = useState(productToDraft(selectedProduct));
+  const [saving, setSaving] = useState(false);
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const [aliasDraft, setAliasDraft] = useState({ id: "", alias: "", produto_base: "", origem: "Manual", confianca: "90", principal: false });
+  const [componentDraft, setComponentDraft] = useState({ id: "", componente: "", categoria: "Curso", ordem: "1", duracao: "", unidade_duracao: "", link: "", observacoes: "" });
+  const [batchDraft, setBatchDraft] = useState({ id: "", turma: "", inicio: "", fim: "", status: "planejada", meta_alunos: "", alunos: "", receita_meta: "", receita_real: "", observacoes: "" });
+
+  useEffect(() => {
+    if (!selectedId && products[0]?.id) setSelectedId(products[0].id);
+  }, [products, selectedId]);
+
+  useEffect(() => {
+    setProductDraft(productToDraft(selectedProduct));
+    setAliasDraft({ id: "", alias: "", produto_base: selectedProduct?.produto_base ?? "", origem: "Manual", confianca: "90", principal: false });
+    setComponentDraft({ id: "", componente: "", categoria: "Curso", ordem: String((selectedProduct?.product_components?.length ?? 0) + 1), duracao: "", unidade_duracao: "", link: "", observacoes: "" });
+    setBatchDraft({ id: "", turma: "", inicio: "", fim: "", status: "planejada", meta_alunos: "", alunos: "", receita_meta: "", receita_real: "", observacoes: "" });
+  }, [selectedProduct?.id]);
+
+  const estimatedNetPct =
+    100 -
+    (numericOrNull(productDraft.percentual_coproducao) ?? 0) -
+    (numericOrNull(productDraft.percentual_hotmart) ?? 0) -
+    (numericOrNull(productDraft.percentual_gateway) ?? 0) -
+    (numericOrNull(productDraft.percentual_imposto) ?? 0);
+  const price = numericOrNull(productDraft.preco_oficial);
+  const estimatedNet = price != null ? Math.max(0, estimatedNetPct) * price / 100 : null;
+
+  async function runMutation(payload: Record<string, unknown>, successMessage: string) {
+    setSaving(true);
+    setLocalMessage(null);
+    try {
+      await mutateCatalog(payload);
+      setLocalMessage(successMessage);
+    } catch (error) {
+      setLocalMessage(error instanceof Error ? error.message : "Nao foi possivel salvar.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveProduct() {
+    if (!productDraft.nome_oficial.trim() || !productDraft.produto_base.trim()) {
+      setLocalMessage("Informe nome oficial e produto base.");
+      return;
+    }
+    await runMutation({
+      action: "upsert_product",
+      product: {
+        ...productDraft,
+        preco_oficial: numericOrNull(productDraft.preco_oficial),
+        duracao: numericOrNull(productDraft.duracao),
+        percentual_coproducao: numericOrNull(productDraft.percentual_coproducao),
+        percentual_hotmart: numericOrNull(productDraft.percentual_hotmart),
+        percentual_gateway: numericOrNull(productDraft.percentual_gateway),
+        percentual_imposto: numericOrNull(productDraft.percentual_imposto),
+      },
+    }, "Produto salvo.");
+  }
+
+  async function toggleProduct(product: NorwynProduct, ativo: boolean) {
+    await runMutation({ action: "toggle_product", id: product.id, ativo }, ativo ? "Produto reativado." : "Produto arquivado.");
+  }
+
+  async function saveAlias() {
+    if (!selectedProduct || !aliasDraft.alias.trim()) return;
+    await runMutation({
+      action: "upsert_alias",
+      product_id: selectedProduct.id,
+      alias: { ...aliasDraft, confianca: numericOrNull(aliasDraft.confianca) ?? 80, produto_base: aliasDraft.produto_base || selectedProduct.produto_base },
+    }, "Alias salvo.");
+  }
+
+  async function saveComponent() {
+    if (!selectedProduct || !componentDraft.componente.trim()) return;
+    await runMutation({
+      action: "upsert_component",
+      product_id: selectedProduct.id,
+      component: {
+        ...componentDraft,
+        ordem: numericOrNull(componentDraft.ordem) ?? 1,
+        duracao: numericOrNull(componentDraft.duracao),
+      },
+    }, "Componente salvo.");
+  }
+
+  async function saveBatch() {
+    if (!selectedProduct || !batchDraft.turma.trim()) return;
+    await runMutation({
+      action: "upsert_batch",
+      product_id: selectedProduct.id,
+      batch: {
+        ...batchDraft,
+        meta_alunos: numericOrNull(batchDraft.meta_alunos),
+        alunos: numericOrNull(batchDraft.alunos),
+        receita_meta: numericOrNull(batchDraft.receita_meta),
+        receita_real: numericOrNull(batchDraft.receita_real),
+      },
+    }, "Turma salva.");
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitle icon={<Package className="h-5 w-5" />} title="Product Intelligence" />
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-brand-teal/70">
+              Catalogo editavel de produtos, aliases, componentes e turmas. Esses dados alimentam Evidence Engine, Launch Pattern, Mission Engine e as proximas camadas da Norwyn.
+            </p>
+          </div>
+          <button type="button" onClick={() => { setSelectedId(""); setProductDraft(emptyProductDraft); }} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-teal px-3 text-sm font-bold text-white">
+            <Plus className="h-4 w-4" /> Novo produto
+          </button>
+        </div>
+        {(message || localMessage) ? <p className="mt-3 rounded-md bg-brand-cream px-3 py-2 text-sm font-semibold text-brand-teal">{localMessage ?? message}</p> : null}
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <MissionMeta label="Produtos ativos" value={String(products.filter((product) => product.ativo !== false).length)} />
+          <MissionMeta label="Aliases" value={String(products.reduce((sum, product) => sum + (product.product_aliases?.filter((alias) => alias.ativo !== false).length ?? 0), 0))} />
+          <MissionMeta label="Componentes" value={String(products.reduce((sum, product) => sum + (product.product_components?.filter((component) => component.ativo !== false).length ?? 0), 0))} />
+          <MissionMeta label="Turmas" value={String(products.reduce((sum, product) => sum + (product.product_batches?.filter((batch) => batch.ativo !== false).length ?? 0), 0))} />
+        </div>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+        <Card className="overflow-hidden border-[#E9CBD1]">
+          <div className="border-b border-brand-sand p-4">
+            <p className="text-xs font-black uppercase text-brand-clay">Produtos</p>
+            <h3 className="text-lg font-semibold text-brand-teal">Catalogo</h3>
+          </div>
+          <div className="divide-y divide-brand-sand">
+            {products.map((product) => (
+              <button key={product.id} type="button" onClick={() => setSelectedId(product.id)} className={`block w-full p-4 text-left transition ${selectedProduct?.id === product.id ? "bg-brand-cream/70" : "bg-white/80 hover:bg-brand-cream/35"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-brand-teal">{product.nome_oficial}</p>
+                    <p className="mt-1 text-xs font-bold text-brand-clay">{product.produto_base}</p>
+                    <p className="mt-1 text-xs text-brand-teal/55">{product.tipo ?? "Entrada"} - {product.source ?? "sem origem"}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${product.ativo === false ? "bg-[#FDE7EA] text-[#A33E4B]" : "bg-[#E5F6EA] text-[#2F8D55]"}`}>{product.ativo === false ? "arquivado" : "ativo"}</span>
+                </div>
+              </button>
+            ))}
+            {!products.length ? <div className="p-4"><EmptyState>Nenhum produto cadastrado.</EmptyState></div> : null}
+          </div>
+        </Card>
+
+        <div className="space-y-4">
+          <Card className="border-[#E9CBD1] p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <SectionTitle icon={<Pencil className="h-5 w-5" />} title={productDraft.id ? "Editar produto" : "Novo produto"} />
+              {selectedProduct ? (
+                <button type="button" onClick={() => toggleProduct(selectedProduct, selectedProduct.ativo === false)} className="h-9 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal">
+                  {selectedProduct.ativo === false ? "Reativar" : "Arquivar"}
+                </button>
+              ) : null}
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <Field label="Nome oficial"><input value={productDraft.nome_oficial} onChange={(event) => setProductDraft({ ...productDraft, nome_oficial: event.target.value })} className="form-input" /></Field>
+              <Field label="Produto base"><input value={productDraft.produto_base} onChange={(event) => setProductDraft({ ...productDraft, produto_base: event.target.value })} className="form-input" /></Field>
+              <Field label="Categoria"><input value={productDraft.categoria} onChange={(event) => setProductDraft({ ...productDraft, categoria: event.target.value })} className="form-input" /></Field>
+              <Field label="Tipo">
+                <select value={productDraft.tipo} onChange={(event) => setProductDraft({ ...productDraft, tipo: event.target.value })} className="form-input">
+                  {["Entrada", "Upsell", "Order Bump", "Flagship", "Satelite", "Satélite"].map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </Field>
+              <Field label="Status"><input value={productDraft.status} onChange={(event) => setProductDraft({ ...productDraft, status: event.target.value })} className="form-input" /></Field>
+              <Field label="Preco oficial"><input value={productDraft.preco_oficial} onChange={(event) => setProductDraft({ ...productDraft, preco_oficial: event.target.value })} className="form-input" placeholder="R$ 1.000,00" /></Field>
+              <Field label="Duracao"><input value={productDraft.duracao} onChange={(event) => setProductDraft({ ...productDraft, duracao: event.target.value })} className="form-input" /></Field>
+              <Field label="Unidade"><input value={productDraft.unidade_duracao} onChange={(event) => setProductDraft({ ...productDraft, unidade_duracao: event.target.value })} className="form-input" placeholder="dias, meses, anos" /></Field>
+              <Field label="% coproducao"><input value={productDraft.percentual_coproducao} onChange={(event) => setProductDraft({ ...productDraft, percentual_coproducao: event.target.value })} className="form-input" /></Field>
+              <Field label="% Hotmart"><input value={productDraft.percentual_hotmart} onChange={(event) => setProductDraft({ ...productDraft, percentual_hotmart: event.target.value })} className="form-input" /></Field>
+              <Field label="% gateway"><input value={productDraft.percentual_gateway} onChange={(event) => setProductDraft({ ...productDraft, percentual_gateway: event.target.value })} className="form-input" /></Field>
+              <Field label="% imposto"><input value={productDraft.percentual_imposto} onChange={(event) => setProductDraft({ ...productDraft, percentual_imposto: event.target.value })} className="form-input" /></Field>
+              <Field label="Link da oferta"><input value={productDraft.link_oferta} onChange={(event) => setProductDraft({ ...productDraft, link_oferta: event.target.value })} className="form-input" /></Field>
+              <Field label="Descricao"><textarea value={productDraft.descricao} onChange={(event) => setProductDraft({ ...productDraft, descricao: event.target.value })} className="form-input min-h-20" /></Field>
+              <Field label="Observacoes"><textarea value={productDraft.observacoes} onChange={(event) => setProductDraft({ ...productDraft, observacoes: event.target.value })} className="form-input min-h-20" /></Field>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <MissionMeta label="Receita bruta" value={price != null ? price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "sem preco"} />
+              <MissionMeta label="Liquida estimada" value={estimatedNet != null ? estimatedNet.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "sem estimativa"} />
+              <MissionMeta label="Retencao estimada" value={`${Math.max(0, estimatedNetPct).toFixed(2).replace(".", ",")}%`} />
+            </div>
+            <p className="mt-3 text-xs font-semibold text-brand-clay">Estimativa: nao substitui dados oficiais da Hotmart, DRE ou Financeiro.</p>
+            <button type="button" disabled={saving} onClick={saveProduct} className="mt-4 h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">
+              {saving ? "Salvando..." : "Salvar produto"}
+            </button>
+          </Card>
+
+          {selectedProduct ? (
+            <div className="grid gap-4 lg:grid-cols-3">
+              <CatalogPanel title="Aliases" actionLabel="Salvar alias" onAction={saveAlias}>
+                <Field label="Alias"><input value={aliasDraft.alias} onChange={(event) => setAliasDraft({ ...aliasDraft, alias: event.target.value })} className="form-input" /></Field>
+                <Field label="Origem"><select value={aliasDraft.origem} onChange={(event) => setAliasDraft({ ...aliasDraft, origem: event.target.value })} className="form-input">{["Hotmart", "Manual", "Sistema", "Campanha", "Outro"].map((item) => <option key={item}>{item}</option>)}</select></Field>
+                <Field label="Confianca"><input value={aliasDraft.confianca} onChange={(event) => setAliasDraft({ ...aliasDraft, confianca: event.target.value })} className="form-input" /></Field>
+                <label className="flex items-center gap-2 text-sm font-bold text-brand-teal"><input type="checkbox" checked={aliasDraft.principal} onChange={(event) => setAliasDraft({ ...aliasDraft, principal: event.target.checked })} /> Principal</label>
+                <CatalogList items={(selectedProduct.product_aliases ?? []).map((alias) => ({ id: alias.id, title: alias.alias, detail: `${alias.origem ?? "-"} - ${alias.principal ? "principal" : "alias"} - ${alias.ativo === false ? "arquivado" : "ativo"}` }))} onEdit={(id) => {
+                  const alias = selectedProduct.product_aliases?.find((item) => item.id === id);
+                  if (alias) setAliasDraft({ id: alias.id, alias: alias.alias, produto_base: alias.produto_base ?? selectedProduct.produto_base, origem: alias.origem ?? "Manual", confianca: String(alias.confianca ?? 80), principal: alias.principal === true });
+                }} onToggle={(id) => runMutation({ action: "toggle_alias", id, ativo: selectedProduct.product_aliases?.find((item) => item.id === id)?.ativo === false }, "Alias atualizado.")} />
+              </CatalogPanel>
+
+              <CatalogPanel title="Componentes" actionLabel="Salvar componente" onAction={saveComponent}>
+                <Field label="Componente"><input value={componentDraft.componente} onChange={(event) => setComponentDraft({ ...componentDraft, componente: event.target.value })} className="form-input" /></Field>
+                <Field label="Ordem"><input value={componentDraft.ordem} onChange={(event) => setComponentDraft({ ...componentDraft, ordem: event.target.value })} className="form-input" /></Field>
+                <Field label="Duracao"><input value={componentDraft.duracao} onChange={(event) => setComponentDraft({ ...componentDraft, duracao: event.target.value })} className="form-input" /></Field>
+                <Field label="Unidade"><input value={componentDraft.unidade_duracao} onChange={(event) => setComponentDraft({ ...componentDraft, unidade_duracao: event.target.value })} className="form-input" /></Field>
+                <Field label="Link"><input value={componentDraft.link} onChange={(event) => setComponentDraft({ ...componentDraft, link: event.target.value })} className="form-input" /></Field>
+                <CatalogList items={(selectedProduct.product_components ?? []).map((component) => ({ id: component.id, title: `${component.ordem ?? 1}. ${component.componente}`, detail: `${component.duracao ?? "-"} ${component.unidade_duracao ?? ""} - ${component.ativo === false ? "arquivado" : "ativo"}` }))} onEdit={(id) => {
+                  const component = selectedProduct.product_components?.find((item) => item.id === id);
+                  if (component) setComponentDraft({ id: component.id, componente: component.componente, categoria: component.categoria ?? "Curso", ordem: String(component.ordem ?? 1), duracao: component.duracao != null ? String(component.duracao) : "", unidade_duracao: component.unidade_duracao ?? "", link: component.link ?? "", observacoes: component.observacoes ?? "" });
+                }} onToggle={(id) => runMutation({ action: "toggle_component", id, ativo: selectedProduct.product_components?.find((item) => item.id === id)?.ativo === false }, "Componente atualizado.")} />
+              </CatalogPanel>
+
+              <CatalogPanel title="Turmas" actionLabel="Salvar turma" onAction={saveBatch}>
+                <Field label="Turma"><input value={batchDraft.turma} onChange={(event) => setBatchDraft({ ...batchDraft, turma: event.target.value })} className="form-input" /></Field>
+                <Field label="Inicio"><input type="date" value={batchDraft.inicio} onChange={(event) => setBatchDraft({ ...batchDraft, inicio: event.target.value })} className="form-input" /></Field>
+                <Field label="Fim"><input type="date" value={batchDraft.fim} onChange={(event) => setBatchDraft({ ...batchDraft, fim: event.target.value })} className="form-input" /></Field>
+                <Field label="Status"><input value={batchDraft.status} onChange={(event) => setBatchDraft({ ...batchDraft, status: event.target.value })} className="form-input" /></Field>
+                <Field label="Meta alunos"><input value={batchDraft.meta_alunos} onChange={(event) => setBatchDraft({ ...batchDraft, meta_alunos: event.target.value })} className="form-input" /></Field>
+                <Field label="Receita meta"><input value={batchDraft.receita_meta} onChange={(event) => setBatchDraft({ ...batchDraft, receita_meta: event.target.value })} className="form-input" /></Field>
+                <CatalogList items={(selectedProduct.product_batches ?? []).map((batch) => ({ id: batch.id, title: batch.turma, detail: `${batch.inicio ?? "-"} a ${batch.fim ?? "-"} - ${batch.status ?? "-"}` }))} onEdit={(id) => {
+                  const batch = selectedProduct.product_batches?.find((item) => item.id === id);
+                  if (batch) setBatchDraft({ id: batch.id, turma: batch.turma, inicio: batch.inicio ?? "", fim: batch.fim ?? "", status: batch.status ?? "planejada", meta_alunos: batch.meta_alunos != null ? String(batch.meta_alunos) : "", alunos: batch.alunos != null ? String(batch.alunos) : "", receita_meta: batch.receita_meta != null ? String(batch.receita_meta) : "", receita_real: batch.receita_real != null ? String(batch.receita_real) : "", observacoes: batch.observacoes ?? "" });
+                }} onToggle={(id) => runMutation({ action: "toggle_batch", id, ativo: selectedProduct.product_batches?.find((item) => item.id === id)?.ativo === false }, "Turma atualizada.")} />
+              </CatalogPanel>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CatalogPanel({ title, actionLabel, onAction, children }: { title: string; actionLabel: string; onAction: () => void; children: ReactNode }) {
+  return (
+    <Card className="border-[#E9CBD1] p-4">
+      <h3 className="text-base font-semibold text-brand-teal">{title}</h3>
+      <div className="mt-3 grid gap-3">{children}</div>
+      <button type="button" onClick={onAction} className="mt-3 h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white">{actionLabel}</button>
+    </Card>
+  );
+}
+
+function CatalogList({ items, onEdit, onToggle }: { items: Array<{ id: string; title: string; detail: string }>; onEdit: (id: string) => void; onToggle: (id: string) => void }) {
+  return (
+    <div className="mt-3 space-y-2">
+      {items.map((item) => (
+        <div key={item.id} className="rounded-md border border-brand-sand bg-white/80 p-2">
+          <p className="text-sm font-semibold text-brand-teal">{item.title}</p>
+          <p className="text-xs text-brand-teal/55">{item.detail}</p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={() => onEdit(item.id)} className="h-7 rounded-md border border-brand-sand px-2 text-[11px] font-bold text-brand-teal">Editar</button>
+            <button type="button" onClick={() => onToggle(item.id)} className="h-7 rounded-md border border-brand-sand px-2 text-[11px] font-bold text-brand-teal">Arquivar/Reativar</button>
+          </div>
+        </div>
+      ))}
+      {!items.length ? <EmptyState>Nenhum item cadastrado.</EmptyState> : null}
     </div>
   );
 }

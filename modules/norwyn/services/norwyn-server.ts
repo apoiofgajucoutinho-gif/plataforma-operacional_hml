@@ -44,6 +44,7 @@ function emptyContext(partial?: Partial<NorwynContext>): NorwynContext {
     posts: [],
     interactions: [],
     commercialSales: [],
+    products: [],
     adsRows: [],
     contentEvents: [],
     agendaEvents: [],
@@ -128,6 +129,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     objetivosResult,
     signalsResult,
     contentEventsResult,
+    productsResult,
   ] = await Promise.all([
     postQuery,
     dataClient
@@ -190,6 +192,12 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       .eq("tenant_id", membership.tenant_id)
       .order("published_at", { ascending: false })
       .limit(800),
+    dataClient
+      .from("products")
+      .select("id, tenant_id, nome_oficial, produto_base, categoria, descricao, status, tipo, preco_oficial, duracao, unidade_duracao, link_oferta, percentual_coproducao, percentual_hotmart, percentual_gateway, percentual_imposto, receita_liquida_estimada_pct, observacoes, ativo, source, manually_edited_at, product_aliases(id, alias, produto_base, origem, confianca, principal, ativo, source, manually_edited_at), product_components(id, componente, categoria, ordem, duracao, unidade_duracao, link, observacoes, ativo, source, manually_edited_at), product_batches(id, turma, inicio, fim, status, meta_alunos, alunos, receita_meta, receita_real, observacoes, ativo, source, manually_edited_at)")
+      .eq("tenant_id", membership.tenant_id)
+      .order("produto_base", { ascending: true })
+      .limit(500),
   ]);
 
   const metricsByPost = new Map((followerMetricsResult.data ?? []).map((metric: any) => [metric.post_id, metric]));
@@ -242,6 +250,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     posts,
     interactions: interactionsResult.data ?? [],
     commercialSales: salesResult.data ?? [],
+    products: productsResult.data ?? [],
     adsRows: adsResult.data ?? [],
     contentEvents: contentEventsResult.data ?? [],
     agendaEvents: agendaResult.data ?? [],

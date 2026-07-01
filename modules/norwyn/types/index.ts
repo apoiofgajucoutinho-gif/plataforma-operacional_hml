@@ -62,6 +62,75 @@ export type NorwynContentEvent = {
   updated_at: string;
 };
 
+export type NorwynProductAlias = {
+  id: string;
+  alias: string;
+  produto_base: string | null;
+  origem: string | null;
+  confianca: number | null;
+  principal: boolean | null;
+  ativo: boolean | null;
+  source: string | null;
+  manually_edited_at: string | null;
+};
+
+export type NorwynProductComponent = {
+  id: string;
+  componente: string;
+  categoria: string | null;
+  ordem: number | null;
+  duracao: number | null;
+  unidade_duracao: string | null;
+  link: string | null;
+  observacoes: string | null;
+  ativo: boolean | null;
+  source: string | null;
+  manually_edited_at: string | null;
+};
+
+export type NorwynProductBatch = {
+  id: string;
+  turma: string;
+  inicio: string | null;
+  fim: string | null;
+  status: string | null;
+  meta_alunos: number | null;
+  alunos: number | null;
+  receita_meta: number | null;
+  receita_real: number | null;
+  observacoes: string | null;
+  ativo: boolean | null;
+  source: string | null;
+  manually_edited_at: string | null;
+};
+
+export type NorwynProduct = {
+  id: string;
+  tenant_id: string;
+  nome_oficial: string;
+  produto_base: string;
+  categoria: string | null;
+  descricao: string | null;
+  status: string | null;
+  tipo: string | null;
+  preco_oficial: number | null;
+  duracao: number | null;
+  unidade_duracao: string | null;
+  link_oferta: string | null;
+  percentual_coproducao: number | null;
+  percentual_hotmart: number | null;
+  percentual_gateway: number | null;
+  percentual_imposto: number | null;
+  receita_liquida_estimada_pct: number | null;
+  observacoes: string | null;
+  ativo: boolean | null;
+  source: string | null;
+  manually_edited_at: string | null;
+  product_aliases?: NorwynProductAlias[];
+  product_components?: NorwynProductComponent[];
+  product_batches?: NorwynProductBatch[];
+};
+
 export type NorwynEvidenceCard = {
   id: string;
   title: string;
@@ -99,8 +168,12 @@ export type NorwynLaunchPattern = {
   format: string;
   publishedAt: string;
   influenceHours: number;
+  normalizedProductId?: string | null;
+  productBaseName?: string | null;
   productName: string | null;
   associatedProducts: string[];
+  themeTags?: string[];
+  funnelStage?: string | null;
   transactionIds: string[];
   transactionRevenue: Array<{ id: string; value: number }>;
   productMatchScore: number;
@@ -221,6 +294,7 @@ export type NorwynContext = {
   posts: InstagramPostMetric[];
   interactions: InstagramInteraction[];
   commercialSales: NorwynCommercialSale[];
+  products: NorwynProduct[];
   adsRows: NorwynAdsRow[];
   contentEvents: NorwynContentEvent[];
   agendaEvents: StrategyAgendaEvent[];

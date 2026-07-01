@@ -7,12 +7,14 @@ import type {
   NorwynEvidenceInsight,
   NorwynEvidenceRecommendation,
   NorwynLaunchPattern,
+  NorwynProduct,
   NorwynSignal,
 } from "@/modules/norwyn/types";
 
 type EvidenceEngineInput = {
   contentEvents: NorwynContentEvent[];
   commercialSales: NorwynCommercialSale[];
+  products: NorwynProduct[];
   signals: NorwynSignal[];
   adsRows: NorwynAdsRow[];
   interactions: InstagramInteraction[];
@@ -98,9 +100,34 @@ function uniqueProducts(sales: NorwynCommercialSale[]) {
   return [...products.values()];
 }
 
-function inferProductAliases(product: string) {
+function productTerms(product: NorwynProduct) {
+  return [
+    product.nome_oficial,
+    product.produto_base,
+    product.categoria,
+    ...(product.product_aliases ?? []).filter((alias) => alias.ativo !== false).map((alias) => alias.alias),
+    ...(product.product_components ?? []).filter((component) => component.ativo !== false).map((component) => component.componente),
+  ]
+    .map(normalizeText)
+    .filter((term) => term.length >= 3);
+}
+
+function resolveProductByName(value: string | null | undefined, products: NorwynProduct[]) {
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  return (
+    products.find((product) => productTerms(product).some((term) => normalized.includes(term) || term.includes(normalized))) ??
+    null
+  );
+}
+
+function inferProductAliases(product: string, products: NorwynProduct[] = []) {
   const normalized = normalizeText(product);
   const aliases = new Set<string>([normalized]);
+  const catalogProduct = resolveProductByName(product, products);
+  if (catalogProduct) {
+    productTerms(catalogProduct).forEach((term) => aliases.add(term));
+  }
   if (normalized.includes("aasi")) aliases.add("aasi");
   if (normalized.includes("ajuste")) aliases.add("ajustes finos");
   if (normalized.includes("rampa")) aliases.add("perda em rampa");
@@ -119,12 +146,12 @@ function contentText(event: NorwynContentEvent) {
   ].join(" "));
 }
 
-function productMatchScore(event: NorwynContentEvent, sale: NorwynCommercialSale) {
+function productMatchScore(event: NorwynContentEvent, sale: NorwynCommercialSale, products: NorwynProduct[] = []) {
   const product = sale.produto_nome ?? "";
   const text = contentText(event);
   if (!product || !text) return 20;
 
-  const aliases = inferProductAliases(product);
+  const aliases = inferProductAliases(product, products);
   const productTagHit = (event.product_tags ?? []).some((tag) => aliases.includes(normalizeText(tag)));
   const directHit = aliases.some((alias) => alias.length >= 3 && text.includes(alias));
 
@@ -153,7 +180,19 @@ function performanceNumber(event: NorwynContentEvent, key: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[]): NorwynLaunchPattern | null {
+function patternTheme(event: NorwynContentEvent) {
+  const tags = event.theme_tags ?? [];
+  if (tags.length) return tags[0];
+  const text = contentText(event);
+  if (text.includes("caso") || text.includes("clin")) return "Caso clinico";
+  if (text.includes("depoimento") || text.includes("prova")) return "Prova social";
+  if (text.includes("duvida") || text.includes("pergunta") || text.includes("faq")) return "FAQ / duvidas";
+  if (text.includes("aula") || text.includes("tecnico") || text.includes("aprend")) return "Conteudo tecnico";
+  if (text.includes("acesso") || text.includes("compra") || text.includes("inscricao")) return "Acesso / compra";
+  return "Tema operacional";
+}
+
+function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[], products: NorwynProduct[] = []): NorwynLaunchPattern | null {
   const publishedAt = toDate(event.published_at);
   if (!publishedAt) return null;
 
@@ -168,9 +207,9 @@ function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[]):
 
   const totalRevenue = salesInWindow.reduce((sum, item) => sum + revenue(item.sale.valor_bruto), 0);
   const bestSale = salesInWindow
-    .map((item) => ({ ...item, score: productMatchScore(event, item.sale) }))
+    .map((item) => ({ ...item, score: productMatchScore(event, item.sale, products) }))
     .sort((a, b) => b.score - a.score)[0];
-  const avgProductMatch = salesInWindow.reduce((sum, item) => sum + productMatchScore(event, item.sale), 0) / salesInWindow.length;
+  const avgProductMatch = salesInWindow.reduce((sum, item) => sum + productMatchScore(event, item.sale, products), 0) / salesInWindow.length;
   const proximityScore =
     salesInWindow.reduce((sum, item) => {
       const elapsed = Math.max(0, item.date.getTime() - publishedAt.getTime());
@@ -184,7 +223,12 @@ function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[]):
   const level = influenceLevel(score);
   const format = formatOf(event);
   const productName = bestSale?.sale.produto_nome ?? null;
-  const associatedProducts = uniqueProducts(salesInWindow.map((item) => item.sale)).slice(0, 5);
+  const normalizedProduct = resolveProductByName(productName, products);
+  const productBaseName = normalizedProduct?.produto_base ?? productName;
+  const associatedProducts = uniqueProducts(salesInWindow.map((item) => item.sale))
+    .map((product) => resolveProductByName(product, products)?.produto_base ?? product)
+    .filter((product, index, list) => list.findIndex((item) => normalizeText(item) === normalizeText(product)) === index)
+    .slice(0, 5);
   const permalink = metadataText(event, ["permalink", "post_url", "url"]);
   const imageUrl = metadataText(event, ["image_url", "thumbnail_url", "media_url", "picture"]);
 
@@ -237,8 +281,12 @@ function buildPattern(event: NorwynContentEvent, sales: NorwynCommercialSale[]):
     format,
     publishedAt: event.published_at,
     influenceHours: event.influence_hours,
+    normalizedProductId: normalizedProduct?.id ?? null,
+    productBaseName,
     productName,
     associatedProducts,
+    themeTags: event.theme_tags?.length ? event.theme_tags : [patternTheme(event)],
+    funnelStage: event.funnel_stage,
     transactionIds: salesInWindow.map((item) => saleKey(item.sale)).filter(Boolean),
     transactionRevenue: salesInWindow
       .map((item) => ({ id: saleKey(item.sale), value: revenue(item.sale.valor_bruto) }))
@@ -292,7 +340,7 @@ function buildInsights(patterns: NorwynLaunchPattern[], recommendations: NorwynE
   const topPattern = patterns[0];
   const highPatterns = patterns.filter((pattern) => pattern.influenceScore >= 65);
   const format = topBy(highPatterns, (pattern) => pattern.format, (pattern) => pattern.influenceScore) ?? topPattern?.format ?? null;
-  const product = topBy(patterns, (pattern) => pattern.productName, (pattern) => pattern.revenueInWindow) ?? topPattern?.productName ?? null;
+  const product = topBy(patterns, (pattern) => pattern.productBaseName ?? pattern.productName, (pattern) => pattern.revenueInWindow) ?? topPattern?.productBaseName ?? topPattern?.productName ?? null;
   const insights: NorwynEvidenceInsight[] = [];
 
   if (topPattern) {
@@ -302,7 +350,7 @@ function buildInsights(patterns: NorwynLaunchPattern[], recommendations: NorwynE
       interpretation: `${topPattern.contentTitle} concentrou ${topPattern.salesInWindow} venda(s) e ${currencyFormatter.format(topPattern.revenueInWindow)} na janela analisada. Use como referencia, nao como atribuicao direta.`,
       confidence: topPattern.influenceScore,
       sourceCount: topPattern.evidenceCards.length,
-      action: `Criar novo briefing em formato ${topPattern.format} com CTA explicito para ${topPattern.productName ?? "produto prioritario"}.`,
+      action: `Criar novo briefing em formato ${topPattern.format} com CTA explicito para ${topPattern.productBaseName ?? topPattern.productName ?? "produto prioritario"}.`,
       relatedRecommendationId: recommendations[0]?.id ?? null,
       evidenceCards: topPattern.evidenceCards,
     });
@@ -323,7 +371,7 @@ function buildInsights(patterns: NorwynLaunchPattern[], recommendations: NorwynE
   }
 
   if (product) {
-    const productPatterns = patterns.filter((pattern) => pattern.productName === product || pattern.associatedProducts.includes(product));
+    const productPatterns = patterns.filter((pattern) => pattern.productBaseName === product || pattern.productName === product || pattern.associatedProducts.includes(product));
     insights.push({
       id: "product-demand",
       title: `Produto com maior sinal comercial: ${product}`,
@@ -353,7 +401,7 @@ function buildRecommendations(patterns: NorwynLaunchPattern[], input: EvidenceEn
   const topPatterns = [...patterns].sort((a, b) => b.influenceScore - a.influenceScore).slice(0, 4);
   const recommendations = topPatterns.map((pattern) => ({
     id: `pattern-${pattern.id}`,
-    title: `${angleForPattern(pattern)}: repetir padrao com ${pattern.productName ?? "produto prioritario"}`,
+    title: `${angleForPattern(pattern)}: repetir padrao com ${pattern.productBaseName ?? pattern.productName ?? "produto prioritario"}`,
     objective: "Transformar um padrao observado historicamente em briefing operacional para nova peca.",
     relatedMission: input.activeMissionName ?? null,
     expectedImpact: "Aumentar clareza comercial e testar novamente um formato associado a picos de venda.",
@@ -362,7 +410,7 @@ function buildRecommendations(patterns: NorwynLaunchPattern[], input: EvidenceEn
     nextStep: `Gerar briefing em formato ${pattern.format} com CTA claro e evidencia historica.`,
     kpis: ["vendas confirmadas", "receita bruta", "comentarios", "salvos", "compartilhamentos"],
     evidenceCards: pattern.evidenceCards,
-    productName: pattern.productName,
+    productName: pattern.productBaseName ?? pattern.productName,
     suggestedFormat: pattern.format,
   }));
 
@@ -441,7 +489,7 @@ export function buildEvidenceEngine(input: EvidenceEngineInput): EvidenceEngineR
     return group === "confirmed" || ["approved", "complete", "confirmed"].includes(status);
   }));
   const patterns = input.contentEvents
-    .map((event) => buildPattern(event, confirmedSales))
+    .map((event) => buildPattern(event, confirmedSales, input.products))
     .filter((pattern): pattern is NorwynLaunchPattern => Boolean(pattern))
     .sort((a, b) => b.influenceScore - a.influenceScore);
 
@@ -469,7 +517,7 @@ export function buildEvidenceEngine(input: EvidenceEngineInput): EvidenceEngineR
       const date = toDate(sale.data_aprovacao ?? sale.data_compra);
       return date ? weekdays[date.getDay()] : null;
     }, (sale) => revenue(sale.valor_bruto)),
-    topProduct: topBy(patterns, (pattern) => pattern.productName, (pattern) => pattern.revenueInWindow),
+    topProduct: topBy(patterns, (pattern) => pattern.productBaseName ?? pattern.productName, (pattern) => pattern.revenueInWindow),
     totalWindowSales: patterns.reduce((sum, pattern) => sum + pattern.salesInWindow, 0),
     totalWindowRevenue: patterns.reduce((sum, pattern) => sum + pattern.revenueInWindow, 0),
     uniqueSales: uniqueSalesInPatterns.length,
