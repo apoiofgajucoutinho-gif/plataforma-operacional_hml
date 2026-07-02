@@ -23,6 +23,7 @@ import {
   Target,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { FinancialConfig } from "@/lib/financial-config";
 import { StrategyPlanner } from "@/modules/norwyn/components/StrategyPlanner";
 import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/modules/norwyn/services/evidence-engine";
 import type { InstagramPostMetric } from "@/modules/instagram/types";
@@ -4116,6 +4117,7 @@ const emptyProductDraft = {
 
 function productToDraft(product?: NorwynProduct | null) {
   if (!product) return emptyProductDraft;
+  const coauthorPercent = productMetadataNumber(product.metadata, "percentual_coautoria");
   const partnershipType = productMetadataString(product.metadata, "partnership_type")
     ?? (product.percentual_coproducao != null && product.percentual_coproducao > 0 ? "Coproducao" : "Proprio");
   return {
@@ -4134,11 +4136,11 @@ function productToDraft(product?: NorwynProduct | null) {
     duracao: product.duracao != null ? String(product.duracao) : "",
     unidade_duracao: product.unidade_duracao ?? "",
     link_oferta: product.link_oferta ?? "",
-    percentual_coproducao: product.percentual_coproducao != null ? String(product.percentual_coproducao) : "",
-    percentual_coautoria: productMetadataNumber(product.metadata, "percentual_coautoria") != null ? String(productMetadataNumber(product.metadata, "percentual_coautoria")) : "",
-    percentual_hotmart: product.percentual_hotmart != null ? String(product.percentual_hotmart) : "",
-    percentual_gateway: product.percentual_gateway != null ? String(product.percentual_gateway) : "",
-    percentual_imposto: product.percentual_imposto != null ? String(product.percentual_imposto) : "",
+    percentual_coproducao: FinancialConfig.formatPercentInput(product.percentual_coproducao, "partnership"),
+    percentual_coautoria: FinancialConfig.formatPercentInput(coauthorPercent, "partnership"),
+    percentual_hotmart: FinancialConfig.formatPercentInput(product.percentual_hotmart, "fee"),
+    percentual_gateway: FinancialConfig.formatPercentInput(product.percentual_gateway, "fee"),
+    percentual_imposto: FinancialConfig.formatPercentInput(product.percentual_imposto, "tax"),
     partner_name: productMetadataString(product.metadata, "partner_name") ?? "",
     observacoes: product.observacoes ?? "",
     ativo: product.ativo !== false,
@@ -4146,10 +4148,7 @@ function productToDraft(product?: NorwynProduct | null) {
 }
 
 function numericOrNull(value: string) {
-  const normalized = value.replace(/\./g, "").replace(",", ".").trim();
-  if (!normalized) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
+  return FinancialConfig.parseNumber(value);
 }
 
 const legacyProductTypes = ["Entrada", "Upsell", "Order Bump", "Flagship", "Satelite", "Satélite"];
@@ -4182,21 +4181,22 @@ const emptyBusinessProfileDraft = {
 
 function businessProfileToDraft(profile?: NorwynBusinessProfile | null) {
   if (!profile) return emptyBusinessProfileDraft;
+  const normalizedProfile = FinancialConfig.normalizeBusinessProfile(profile);
   return {
-    id: profile.id,
-    company_name: profile.company_name ?? "",
-    cnpj: profile.cnpj ?? "",
-    tax_regime: profile.tax_regime ?? "Simples Nacional",
-    default_coproduction_percent: profile.default_coproduction_percent != null ? String(profile.default_coproduction_percent) : "",
-    hotmart_percent_fee: profile.hotmart_percent_fee != null ? String(profile.hotmart_percent_fee) : "",
-    hotmart_fixed_fee: profile.hotmart_fixed_fee != null ? String(profile.hotmart_fixed_fee) : "",
-    hotmart_withdraw_fee: profile.hotmart_withdraw_fee != null ? String(profile.hotmart_withdraw_fee) : "",
-    gateway_percent_fee: profile.gateway_percent_fee != null ? String(profile.gateway_percent_fee) : "",
-    observations: profile.observations ?? "",
-    starts_at: profile.starts_at ?? "2026-01-01",
-    ends_at: profile.ends_at ?? "",
-    status: profile.status ?? "current",
-    source_key: profile.source_key ?? "",
+    id: normalizedProfile.id,
+    company_name: normalizedProfile.company_name ?? "",
+    cnpj: normalizedProfile.cnpj ?? "",
+    tax_regime: normalizedProfile.tax_regime ?? "Simples Nacional",
+    default_coproduction_percent: FinancialConfig.formatPercentInput(normalizedProfile.default_coproduction_percent, "partnership"),
+    hotmart_percent_fee: FinancialConfig.formatPercentInput(normalizedProfile.hotmart_percent_fee, "fee"),
+    hotmart_fixed_fee: FinancialConfig.formatMoneyInput(normalizedProfile.hotmart_fixed_fee),
+    hotmart_withdraw_fee: FinancialConfig.formatMoneyInput(normalizedProfile.hotmart_withdraw_fee),
+    gateway_percent_fee: FinancialConfig.formatPercentInput(normalizedProfile.gateway_percent_fee, "fee"),
+    observations: normalizedProfile.observations ?? "",
+    starts_at: normalizedProfile.starts_at ?? "2026-01-01",
+    ends_at: normalizedProfile.ends_at ?? "",
+    status: normalizedProfile.status ?? "current",
+    source_key: normalizedProfile.source_key ?? "",
   };
 }
 
@@ -4221,7 +4221,7 @@ function taxRuleToDraft(rule?: NorwynBusinessTaxRule | null, profileId?: string)
     business_profile_id: rule.business_profile_id,
     category: rule.category ?? "",
     cnae: rule.cnae ?? "",
-    tax_percent: rule.tax_percent != null ? String(rule.tax_percent) : "",
+    tax_percent: FinancialConfig.formatPercentInput(rule.tax_percent, "tax"),
     description: rule.description ?? "",
     starts_at: rule.starts_at ?? "2026-01-01",
     ends_at: rule.ends_at ?? "",
@@ -4255,7 +4255,7 @@ function productMetadataNumber(metadata: Record<string, unknown> | null | undefi
   const value = metadata?.[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
-    const parsed = Number(value.replace(",", "."));
+    const parsed = FinancialConfig.parseNumber(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
@@ -4284,20 +4284,19 @@ function productPartnershipType(product: NorwynProduct | null | undefined) {
 function productPartnershipPercent(product: NorwynProduct | null | undefined) {
   if (!product) return null;
   const type = productPartnershipType(product);
-  const coproduction = product.percentual_coproducao;
-  const coauthor = productMetadataNumber(product.metadata, "percentual_coautoria");
+  const coproduction = FinancialConfig.normalizePercent(product.percentual_coproducao, "partnership");
+  const coauthor = FinancialConfig.normalizePercent(productMetadataNumber(product.metadata, "percentual_coautoria"), "partnership");
+  const total = (coproduction ?? 0) + (coauthor ?? 0);
   if (type === "proprio") return 0;
-  if (type === "coproducao") return coproduction;
-  if (type === "coautoria") return coauthor;
-  return coproduction ?? coauthor;
+  return total > 0 ? total : null;
 }
 
 function productPartnershipMissingReason(product: NorwynProduct | null | undefined) {
   if (!product) return null;
   const type = productPartnershipType(product);
   if (type === "proprio") return null;
-  if (type === "coproducao" && product.percentual_coproducao == null) return "sem coproducao";
-  if (type === "coautoria" && productMetadataNumber(product.metadata, "percentual_coautoria") == null) return "sem coautoria";
+  if (type === "coproducao" && FinancialConfig.normalizePercent(product.percentual_coproducao, "partnership") == null) return "sem coproducao";
+  if (type === "coautoria" && FinancialConfig.normalizePercent(productMetadataNumber(product.metadata, "percentual_coautoria"), "partnership") == null) return "sem coautoria";
   if (["licenciamento", "afiliado", "outro"].includes(type) && productPartnershipPercent(product) == null) return "sem percentual de parceria";
   return null;
 }
@@ -4475,6 +4474,7 @@ function buildFinancialPeriodEstimate({
   commercialSales: NorwynCommercialSale[];
   partial: boolean;
 }) {
+  const normalizedProfile = FinancialConfig.normalizeBusinessProfile(profile);
   const confirmedSales = commercialSales.filter((sale) => {
     if (sale.grupo_comercial !== "confirmed") return false;
     const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
@@ -4482,7 +4482,7 @@ function buildFinancialPeriodEstimate({
   });
   const gross = confirmedSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
   const hasSales = confirmedSales.length > 0;
-  const hasProfile = Boolean(profile);
+  const hasProfile = Boolean(normalizedProfile);
   let missingProduct = 0;
   let missingFiscalCategory = 0;
   let missingCoproduction = 0;
@@ -4544,20 +4544,20 @@ function buildFinancialPeriodEstimate({
     configuredGross += saleGross;
     configuredSalesCount += 1;
     coproduction += saleGross * ((productPartnershipPercent(product) ?? 0) / 100);
-    const taxPercent = rule?.tax_percent ?? 0;
-    const current = byCategory.get(category) ?? { gross: 0, tax: 0, taxPercent: rule?.tax_percent ?? null, count: 0 };
+    const taxPercent = FinancialConfig.normalizePercent(rule?.tax_percent, "tax") ?? 0;
+    const current = byCategory.get(category) ?? { gross: 0, tax: 0, taxPercent: FinancialConfig.normalizePercent(rule?.tax_percent, "tax"), count: 0 };
     current.gross += saleGross;
     current.tax += saleGross * (taxPercent / 100);
     current.count += 1;
-    if (rule?.tax_percent != null) current.taxPercent = rule.tax_percent;
+    if (rule?.tax_percent != null) current.taxPercent = taxPercent;
     byCategory.set(category, current);
   }
 
   const incomplete = hasSales && pendingProducts.size > 0;
-  const hotmartPercentFee = hasProfile ? configuredGross * ((profile?.hotmart_percent_fee ?? 0) / 100) : null;
-  const hotmartFixedFee = hasProfile ? configuredSalesCount * (profile?.hotmart_fixed_fee ?? 0) : null;
-  const gatewayFee = hasProfile ? configuredGross * ((profile?.gateway_percent_fee ?? 0) / 100) : null;
-  const withdrawFee = hasProfile && configuredGross > 0 ? profile?.hotmart_withdraw_fee ?? 0 : hasProfile ? 0 : null;
+  const hotmartPercentFee = hasProfile ? configuredGross * ((normalizedProfile?.hotmart_percent_fee ?? 0) / 100) : null;
+  const hotmartFixedFee = hasProfile ? configuredSalesCount * (normalizedProfile?.hotmart_fixed_fee ?? 0) : null;
+  const gatewayFee = hasProfile ? configuredGross * ((normalizedProfile?.gateway_percent_fee ?? 0) / 100) : null;
+  const withdrawFee = hasProfile && configuredGross > 0 ? normalizedProfile?.hotmart_withdraw_fee ?? 0 : hasProfile ? 0 : null;
   const tax = hasProfile ? [...byCategory.values()].reduce((sum, item) => sum + item.tax, 0) : null;
   const estimatedNet = hasProfile && configuredGross > 0
     ? configuredGross - (hotmartPercentFee ?? 0) - (hotmartFixedFee ?? 0) - (gatewayFee ?? 0) - coproduction - (tax ?? 0) - (withdrawFee ?? 0)
@@ -4680,6 +4680,7 @@ function ProductIntelligenceView({
   const [batchDraft, setBatchDraft] = useState({ id: "", turma: "", inicio: "", fim: "", status: "planejada", meta_alunos: "", alunos: "", receita_meta: "", receita_real: "", observacoes: "" });
   const fiscalCategories = useMemo(() => [...new Set(taxRules.map((rule) => rule.category).filter(Boolean))], [taxRules]);
   const forecast = useMemo(() => buildTaxForecast({ profile: businessProfile, taxRules, products, commercialSales }), [businessProfile, taxRules, products, commercialSales]);
+  const normalizedBusinessProfile = useMemo(() => FinancialConfig.normalizeBusinessProfile(businessProfile), [businessProfile]);
 
   useEffect(() => {
     const productId = new URLSearchParams(window.location.search).get("productId");
@@ -4699,14 +4700,14 @@ function ProductIntelligenceView({
 
   const price = numericOrNull(productDraft.preco_oficial);
   const selectedTaxRule = activeTaxRuleFor(productDraft.fiscal_category, new Date().toISOString(), taxRules);
-  const productHotmartPercent = price != null ? price * ((businessProfile?.hotmart_percent_fee ?? 0) / 100) : null;
-  const productGateway = price != null ? price * ((businessProfile?.gateway_percent_fee ?? 0) / 100) : null;
-  const draftPartnershipPercent = productDraft.partnership_type === "Proprio"
-    ? 0
-    : numericOrNull(productDraft.partnership_type === "Coautoria" ? productDraft.percentual_coautoria : productDraft.percentual_coproducao);
+  const productHotmartPercent = price != null ? price * ((normalizedBusinessProfile?.hotmart_percent_fee ?? 0) / 100) : null;
+  const productGateway = price != null ? price * ((normalizedBusinessProfile?.gateway_percent_fee ?? 0) / 100) : null;
+  const draftCoproductionPercent = FinancialConfig.normalizePercent(productDraft.percentual_coproducao, "partnership") ?? 0;
+  const draftCoauthorPercent = FinancialConfig.normalizePercent(productDraft.percentual_coautoria, "partnership") ?? 0;
+  const draftPartnershipPercent = productDraft.partnership_type === "Proprio" ? 0 : draftCoproductionPercent + draftCoauthorPercent;
   const productCoproduction = price != null && draftPartnershipPercent != null ? price * (draftPartnershipPercent / 100) : null;
-  const productTax = price != null ? price * ((selectedTaxRule?.tax_percent ?? 0) / 100) : null;
-  const productFixed = price != null ? businessProfile?.hotmart_fixed_fee ?? 0 : null;
+  const productTax = price != null ? price * ((FinancialConfig.normalizePercent(selectedTaxRule?.tax_percent, "tax") ?? 0) / 100) : null;
+  const productFixed = price != null ? normalizedBusinessProfile?.hotmart_fixed_fee ?? 0 : null;
   const productEstimatedNet = price != null
     ? Math.max(0, price - (productHotmartPercent ?? 0) - (productGateway ?? 0) - (productCoproduction ?? 0) - (productTax ?? 0) - (productFixed ?? 0))
     : null;
@@ -4751,11 +4752,11 @@ function ProductIntelligenceView({
       action: "upsert_profile",
       profile: {
         ...profileDraft,
-        default_coproduction_percent: numericOrNull(profileDraft.default_coproduction_percent),
-        hotmart_percent_fee: numericOrNull(profileDraft.hotmart_percent_fee),
-        hotmart_fixed_fee: numericOrNull(profileDraft.hotmart_fixed_fee),
-        hotmart_withdraw_fee: numericOrNull(profileDraft.hotmart_withdraw_fee),
-        gateway_percent_fee: numericOrNull(profileDraft.gateway_percent_fee),
+        default_coproduction_percent: FinancialConfig.normalizePercent(profileDraft.default_coproduction_percent, "partnership"),
+        hotmart_percent_fee: FinancialConfig.normalizePercent(profileDraft.hotmart_percent_fee, "fee"),
+        hotmart_fixed_fee: FinancialConfig.normalizeMoney(profileDraft.hotmart_fixed_fee),
+        hotmart_withdraw_fee: FinancialConfig.normalizeMoney(profileDraft.hotmart_withdraw_fee),
+        gateway_percent_fee: FinancialConfig.normalizePercent(profileDraft.gateway_percent_fee, "fee"),
       },
     }, "Business Profile salvo.");
   }
@@ -4774,7 +4775,7 @@ function ProductIntelligenceView({
       taxRule: {
         ...taxRuleDraft,
         business_profile_id: businessProfile?.id ?? taxRuleDraft.business_profile_id,
-        tax_percent: numericOrNull(taxRuleDraft.tax_percent),
+        tax_percent: FinancialConfig.normalizePercent(taxRuleDraft.tax_percent, "tax"),
       },
     }, "Regra tributaria salva.");
     setTaxRuleDraft(taxRuleToDraft(null, businessProfile?.id));
@@ -4807,13 +4808,13 @@ function ProductIntelligenceView({
         ativo: productDraft.ativo,
         preco_oficial: numericOrNull(productDraft.preco_oficial),
         duracao: numericOrNull(productDraft.duracao),
-        percentual_coproducao: numericOrNull(productDraft.percentual_coproducao),
+        percentual_coproducao: FinancialConfig.normalizePercent(productDraft.percentual_coproducao, "partnership"),
         metadata: {
           ...(selectedProduct?.metadata ?? {}),
           product_type: productDraft.tipo,
           hotmart_product_id: productDraft.hotmart_product_id.trim() || null,
           partnership_type: productDraft.partnership_type,
-          percentual_coautoria: numericOrNull(productDraft.percentual_coautoria),
+          percentual_coautoria: FinancialConfig.normalizePercent(productDraft.percentual_coautoria, "partnership"),
           partner_name: productDraft.partner_name.trim() || null,
         },
       },
@@ -5026,7 +5027,7 @@ function ProductIntelligenceView({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-brand-teal">{rule.category}</p>
-                  <p className="mt-1 text-xs font-bold text-brand-clay">{rule.cnae || "sem CNAE"} - {percent(rule.tax_percent)}</p>
+                  <p className="mt-1 text-xs font-bold text-brand-clay">{rule.cnae || "sem CNAE"} - {percent(FinancialConfig.normalizePercent(rule.tax_percent, "tax"))}</p>
                   <p className="mt-1 text-xs text-brand-teal/55">{rule.starts_at || "-"} a {rule.ends_at || "vigente"} - {rule.status}</p>
                 </div>
                 <span className="rounded-full bg-brand-cream px-2 py-1 text-[10px] font-black uppercase text-brand-clay">{rule.source ?? "manual"}</span>

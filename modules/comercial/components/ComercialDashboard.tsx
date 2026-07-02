@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
+import { FinancialConfig } from "@/lib/financial-config";
 import type {
   ComercialAluno,
   ComercialBusinessProfile,
@@ -821,7 +822,7 @@ function productMetadataNumber(metadata: Record<string, unknown> | null | undefi
   const value = metadata?.[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
-    const parsed = Number(value.replace(",", "."));
+    const parsed = FinancialConfig.parseNumber(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
@@ -843,20 +844,19 @@ function productPartnershipType(product: ComercialNorwynProduct | null | undefin
 function productPartnershipPercent(product: ComercialNorwynProduct | null | undefined) {
   if (!product) return null;
   const type = productPartnershipType(product);
-  const coproduction = product.percentual_coproducao;
-  const coauthor = productMetadataNumber(product.metadata, "percentual_coautoria");
+  const coproduction = FinancialConfig.normalizePercent(product.percentual_coproducao, "partnership");
+  const coauthor = FinancialConfig.normalizePercent(productMetadataNumber(product.metadata, "percentual_coautoria"), "partnership");
+  const total = (coproduction ?? 0) + (coauthor ?? 0);
   if (type === "proprio") return 0;
-  if (type === "coproducao") return coproduction;
-  if (type === "coautoria") return coauthor;
-  return coproduction ?? coauthor;
+  return total > 0 ? total : null;
 }
 
 function productPartnershipMissingReason(product: ComercialNorwynProduct | null | undefined) {
   if (!product) return null;
   const type = productPartnershipType(product);
   if (type === "proprio") return null;
-  if (type === "coproducao" && product.percentual_coproducao == null) return "sem coproducao";
-  if (type === "coautoria" && productMetadataNumber(product.metadata, "percentual_coautoria") == null) return "sem coautoria";
+  if (type === "coproducao" && FinancialConfig.normalizePercent(product.percentual_coproducao, "partnership") == null) return "sem coproducao";
+  if (type === "coautoria" && FinancialConfig.normalizePercent(productMetadataNumber(product.metadata, "percentual_coautoria"), "partnership") == null) return "sem coautoria";
   if (["licenciamento", "afiliado", "outro"].includes(type) && productPartnershipPercent(product) == null) return "sem percentual de parceria";
   return null;
 }
@@ -954,6 +954,7 @@ function buildEstimatedFinancials({
   profile: ComercialBusinessProfile | null;
   taxRules: ComercialBusinessTaxRule[];
 }) {
+  const normalizedProfile = FinancialConfig.normalizeBusinessProfile(profile);
   const confirmed = rows.filter(isConfirmed);
   const gross = grossTotal(confirmed);
   let configuredGross = 0;
@@ -987,7 +988,7 @@ function buildEstimatedFinancials({
     const rule = activeTaxRuleFor(product?.fiscal_category, sale.data_aprovacao ?? sale.data_compra, taxRules);
 
     const reasons: string[] = [];
-    if (!profile) reasons.push("sem Business Profile");
+    if (!normalizedProfile) reasons.push("sem Business Profile");
     if (!product) reasons.push("sem alias/produto base");
     if (product && !product.fiscal_category) reasons.push("sem categoria fiscal");
     const partnershipMissingReason = productPartnershipMissingReason(product);
@@ -1003,18 +1004,20 @@ function buildEstimatedFinancials({
     configuredSales += 1;
     coproduction += sale.valor_bruto * ((productPartnershipPercent(product) ?? 0) / 100);
     const appliedRule = rule!;
-    const saleTax = sale.valor_bruto * ((appliedRule.tax_percent ?? 0) / 100);
+    const taxPercent = FinancialConfig.normalizePercent(appliedRule.tax_percent, "tax") ?? 0;
+    const saleTax = sale.valor_bruto * (taxPercent / 100);
     tax += saleTax;
     const key = appliedRule.category;
-    const current = taxBuckets.get(key) ?? { category: key, gross: 0, tax: 0, percent: appliedRule.tax_percent ?? 0 };
+    const current = taxBuckets.get(key) ?? { category: key, gross: 0, tax: 0, percent: taxPercent };
     current.gross += sale.valor_bruto;
     current.tax += saleTax;
+    current.percent = taxPercent;
     taxBuckets.set(key, current);
   });
 
-  const hotmartPercentFee = configuredGross * ((profile?.hotmart_percent_fee ?? 0) / 100);
-  const gatewayFee = configuredGross * ((profile?.gateway_percent_fee ?? 0) / 100);
-  const fixedFee = configuredSales * (profile?.hotmart_fixed_fee ?? 0);
+  const hotmartPercentFee = configuredGross * ((normalizedProfile?.hotmart_percent_fee ?? 0) / 100);
+  const gatewayFee = configuredGross * ((normalizedProfile?.gateway_percent_fee ?? 0) / 100);
+  const fixedFee = configuredSales * (normalizedProfile?.hotmart_fixed_fee ?? 0);
   const pendingGross = Math.max(0, gross - configuredGross);
   const coveragePercent = gross ? (configuredGross / gross) * 100 : null;
   const estimatedNet = configuredSales ? configuredGross - hotmartPercentFee - fixedFee - gatewayFee - coproduction - tax : null;

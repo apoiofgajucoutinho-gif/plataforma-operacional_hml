@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
+import { FinancialConfig } from "@/lib/financial-config";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -102,11 +103,11 @@ export async function POST(request: Request) {
         company_name: companyName,
         cnpj: profile.cnpj,
         tax_regime: profile.tax_regime,
-        default_coproduction_percent: profile.default_coproduction_percent,
-        hotmart_percent_fee: profile.hotmart_percent_fee,
-        hotmart_fixed_fee: profile.hotmart_fixed_fee,
-        hotmart_withdraw_fee: profile.hotmart_withdraw_fee,
-        gateway_percent_fee: profile.gateway_percent_fee,
+        default_coproduction_percent: FinancialConfig.normalizePercent(profile.default_coproduction_percent, "partnership"),
+        hotmart_percent_fee: FinancialConfig.normalizePercent(profile.hotmart_percent_fee, "fee"),
+        hotmart_fixed_fee: FinancialConfig.normalizeMoney(profile.hotmart_fixed_fee),
+        hotmart_withdraw_fee: FinancialConfig.normalizeMoney(profile.hotmart_withdraw_fee),
+        gateway_percent_fee: FinancialConfig.normalizePercent(profile.gateway_percent_fee, "fee"),
         observations: profile.observations,
         starts_at: profile.starts_at,
         ends_at: profile.ends_at,
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
         business_profile_id: rule.business_profile_id,
         category,
         cnae: rule.cnae,
-        tax_percent: rule.tax_percent,
+        tax_percent: FinancialConfig.normalizePercent(rule.tax_percent, "tax"),
         description: rule.description,
         starts_at: rule.starts_at,
         ends_at: rule.ends_at,

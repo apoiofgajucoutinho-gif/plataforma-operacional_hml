@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
+import { FinancialConfig } from "@/lib/financial-config";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -84,6 +85,13 @@ export async function POST(request: Request) {
       const produtoBase = String(product.produto_base ?? "").trim();
       if (!nomeOficial || !produtoBase) return NextResponse.json({ error: "Nome oficial e produto base sao obrigatorios." }, { status: 400 });
 
+      const metadata = product.metadata && typeof product.metadata === "object"
+        ? {
+            ...product.metadata,
+            percentual_coautoria: FinancialConfig.normalizePercent(product.metadata.percentual_coautoria, "partnership"),
+          }
+        : {};
+
       const payload = compactPayload({
         id: product.id || undefined,
         tenant_id: auth.tenantId,
@@ -99,12 +107,12 @@ export async function POST(request: Request) {
         duracao: product.duracao,
         unidade_duracao: product.unidade_duracao,
         link_oferta: product.link_oferta,
-        percentual_coproducao: product.percentual_coproducao,
-        percentual_hotmart: product.percentual_hotmart,
-        percentual_gateway: product.percentual_gateway,
-        percentual_imposto: product.percentual_imposto,
+        percentual_coproducao: FinancialConfig.normalizePercent(product.percentual_coproducao, "partnership"),
+        percentual_hotmart: FinancialConfig.normalizePercent(product.percentual_hotmart, "fee"),
+        percentual_gateway: FinancialConfig.normalizePercent(product.percentual_gateway, "fee"),
+        percentual_imposto: FinancialConfig.normalizePercent(product.percentual_imposto, "tax"),
         observacoes: product.observacoes,
-        metadata: product.metadata ?? {},
+        metadata,
         ativo: product.ativo !== false,
         ...manualStamp(auth.userId),
       });
