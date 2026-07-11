@@ -259,6 +259,7 @@ export type StrategyAtividadeTask = {
   status: string | null;
   prioridade: string | null;
   prazo: string | null;
+  campaign_id?: string | null;
 };
 
 export type StrategyOcorrencia = {
@@ -328,6 +329,67 @@ export type NorwynSignal = {
   updated_at: string;
 };
 
+export type NorwynCampaign = {
+  id: string;
+  tenant_id: string;
+  name: string;
+  type: string;
+  objective_id: string | null;
+  mission_external_key: string | null;
+  product_id: string | null;
+  status: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  target_sales: number | null;
+  target_revenue: number | null;
+  plan_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NorwynCampaignMaterial = {
+  id: string;
+  tenant_id: string;
+  campaign_id: string;
+  material_type: string;
+  title: string;
+  status: string;
+  channel: string | null;
+  current_version_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NorwynCampaignMaterialVersion = {
+  id: string;
+  tenant_id: string;
+  campaign_id: string;
+  material_id: string;
+  version_number: number;
+  title: string;
+  content: string;
+  change_note: string | null;
+  source: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type NorwynCampaignApproval = {
+  id: string;
+  tenant_id: string;
+  campaign_id: string;
+  material_id: string;
+  version_id: string;
+  approver_id: string | null;
+  approver_name: string | null;
+  status: string;
+  decided_at: string | null;
+  observation: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type NorwynContext = {
   role?: string | null;
   tenant: { id: string; nome: string } | null;
@@ -347,4 +409,8 @@ export type NorwynContext = {
   ocorrencias: StrategyOcorrencia[];
   objetivos: StrategyObjetivo[];
   signals: NorwynSignal[];
+  campaigns: NorwynCampaign[];
+  campaignMaterials: NorwynCampaignMaterial[];
+  campaignMaterialVersions: NorwynCampaignMaterialVersion[];
+  campaignApprovals: NorwynCampaignApproval[];
 };

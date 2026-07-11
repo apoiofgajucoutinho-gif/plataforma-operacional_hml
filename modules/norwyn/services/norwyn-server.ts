@@ -54,6 +54,10 @@ function emptyContext(partial?: Partial<NorwynContext>): NorwynContext {
     ocorrencias: [],
     objetivos: [],
     signals: [],
+    campaigns: [],
+    campaignMaterials: [],
+    campaignMaterialVersions: [],
+    campaignApprovals: [],
     ...partial,
   };
 }
@@ -134,6 +138,10 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     productsResult,
     businessProfileResult,
     taxRulesResult,
+    campaignsResult,
+    campaignMaterialsResult,
+    campaignMaterialVersionsResult,
+    campaignApprovalsResult,
   ] = await Promise.all([
     postQuery,
     dataClient
@@ -217,6 +225,30 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       .order("category", { ascending: true })
       .order("starts_at", { ascending: false })
       .limit(100),
+    dataClient
+      .from("campaigns")
+      .select("id, tenant_id, name, type, objective_id, mission_external_key, product_id, status, starts_at, ends_at, target_sales, target_revenue, plan_json, created_at, updated_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("updated_at", { ascending: false })
+      .limit(100),
+    dataClient
+      .from("campaign_materials")
+      .select("id, tenant_id, campaign_id, material_type, title, status, channel, current_version_id, metadata, created_at, updated_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("updated_at", { ascending: false })
+      .limit(300),
+    dataClient
+      .from("campaign_material_versions")
+      .select("id, tenant_id, campaign_id, material_id, version_number, title, content, change_note, source, metadata, created_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("created_at", { ascending: false })
+      .limit(500),
+    dataClient
+      .from("campaign_approvals")
+      .select("id, tenant_id, campaign_id, material_id, version_id, approver_id, approver_name, status, decided_at, observation, created_at, updated_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("created_at", { ascending: false })
+      .limit(300),
   ]);
 
   const metricsByPost = new Map((followerMetricsResult.data ?? []).map((metric: any) => [metric.post_id, metric]));
@@ -246,6 +278,8 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     ...(adsResult.data ?? []).map((row: any) => row.data_referencia),
     ...(signalsResult.data ?? []).map((signal: any) => signal.updated_at),
     ...(contentEventsResult.data ?? []).map((event: any) => event.updated_at ?? event.published_at),
+    ...(campaignsResult.data ?? []).map((campaign: any) => campaign.updated_at),
+    ...(campaignMaterialsResult.data ?? []).map((material: any) => material.updated_at),
   ]
     .filter(Boolean)
     .sort()
@@ -279,5 +313,9 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     ocorrencias: ocorrenciasResult.data ?? [],
     objetivos,
     signals: signalsResult.data ?? [],
+    campaigns: campaignsResult.data ?? [],
+    campaignMaterials: campaignMaterialsResult.data ?? [],
+    campaignMaterialVersions: campaignMaterialVersionsResult.data ?? [],
+    campaignApprovals: campaignApprovalsResult.data ?? [],
   };
 }

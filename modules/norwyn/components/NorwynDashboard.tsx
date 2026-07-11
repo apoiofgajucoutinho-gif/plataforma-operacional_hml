@@ -18,6 +18,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Send,
   Repeat,
   Sparkles,
   Target,
@@ -27,9 +28,9 @@ import { FinancialConfig } from "@/lib/financial-config";
 import { StrategyPlanner } from "@/modules/norwyn/components/StrategyPlanner";
 import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/modules/norwyn/services/evidence-engine";
 import type { InstagramPostMetric } from "@/modules/instagram/types";
-import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCommercialSale, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus } from "@/modules/norwyn/types";
+import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCampaign, NorwynCampaignApproval, NorwynCampaignMaterial, NorwynCampaignMaterialVersion, NorwynCommercialSale, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus, StrategyAtividadeTask } from "@/modules/norwyn/types";
 
-type NorwynTab = "home" | "business" | "mission" | "products" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
+type NorwynTab = "home" | "business" | "mission" | "products" | "campaigns" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
 type MissionPriority = "Principal" | "Estrategica" | "Continua";
 type MissionStatus = "Planejada" | "Ativa" | "Pausada" | "Encerrada" | "Arquivada";
 type BusinessObjectiveHorizon = "Trimestral" | "Semestral" | "Anual" | "Continuo";
@@ -1478,12 +1479,17 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [shadowActions, setShadowActions] = useState<ShadowAction[]>([]);
   const [knowledgeEvents, setKnowledgeEvents] = useState<KnowledgeEvent[]>([]);
   const [signals, setSignals] = useState<NorwynSignal[]>(context.signals ?? []);
+  const [campaigns, setCampaigns] = useState<NorwynCampaign[]>(context.campaigns ?? []);
+  const [campaignMaterials, setCampaignMaterials] = useState<NorwynCampaignMaterial[]>(context.campaignMaterials ?? []);
+  const [campaignMaterialVersions, setCampaignMaterialVersions] = useState<NorwynCampaignMaterialVersion[]>(context.campaignMaterialVersions ?? []);
+  const [campaignApprovals, setCampaignApprovals] = useState<NorwynCampaignApproval[]>(context.campaignApprovals ?? []);
+  const [campaignMessage, setCampaignMessage] = useState<string | null>(null);
   const [engineMessage, setEngineMessage] = useState<string>("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab") as NorwynTab | null;
-    if (tab && ["home", "business", "mission", "products", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"].includes(tab)) {
+    if (tab && ["home", "business", "mission", "products", "campaigns", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"].includes(tab)) {
       setActiveTab(tab);
     }
   }, []);
@@ -1561,6 +1567,13 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   useEffect(() => {
     setSignals(context.signals ?? []);
   }, [context.signals]);
+
+  useEffect(() => {
+    setCampaigns(context.campaigns ?? []);
+    setCampaignMaterials(context.campaignMaterials ?? []);
+    setCampaignMaterialVersions(context.campaignMaterialVersions ?? []);
+    setCampaignApprovals(context.campaignApprovals ?? []);
+  }, [context.campaigns, context.campaignMaterials, context.campaignMaterialVersions, context.campaignApprovals]);
 
   function persist(next: NorwynMission[]) {
     setMissions(next);
@@ -1666,6 +1679,22 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     setBusinessProfile(json.businessProfile ?? null);
     if (Array.isArray(json.taxRules)) setTaxRules(json.taxRules);
     setBusinessProfileMessage(json.message ?? "Business Profile atualizado.");
+  }
+
+  async function mutateCampaigns(payload: Record<string, unknown>) {
+    setCampaignMessage(null);
+    const response = await fetch("/api/norwyn/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json.error ?? "Nao foi possivel salvar a campanha.");
+    if (Array.isArray(json.campaigns)) setCampaigns(json.campaigns);
+    if (Array.isArray(json.campaignMaterials)) setCampaignMaterials(json.campaignMaterials);
+    if (Array.isArray(json.campaignMaterialVersions)) setCampaignMaterialVersions(json.campaignMaterialVersions);
+    if (Array.isArray(json.campaignApprovals)) setCampaignApprovals(json.campaignApprovals);
+    setCampaignMessage(json.message ?? "Campanhas atualizadas.");
   }
 
   function addKnowledgeEvent(event: Omit<KnowledgeEvent, "id" | "createdAt" | "updatedAt">) {
@@ -1972,6 +2001,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         <TabButton active={activeTab === "products"} onClick={() => setActiveTab("products")}>
           <Package className="h-4 w-4" /> Produtos
         </TabButton>
+        <TabButton active={activeTab === "campaigns"} onClick={() => setActiveTab("campaigns")}>
+          <Send className="h-4 w-4" /> Campanhas
+        </TabButton>
         <TabButton active={activeTab === "intelligence"} onClick={() => setActiveTab("intelligence")}>
           <Layers3 className="h-4 w-4" /> Intelligence
         </TabButton>
@@ -2080,6 +2112,23 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
           mutateCatalog={mutateProductCatalog}
           mutateBusinessProfile={mutateBusinessProfile}
           commercialSales={context.commercialSales}
+        />
+      ) : null}
+
+      {activeTab === "campaigns" ? (
+        <CampaignsView
+          campaigns={campaigns}
+          materials={campaignMaterials}
+          versions={campaignMaterialVersions}
+          approvals={campaignApprovals}
+          atividades={context.atividades}
+          products={products}
+          businessObjectives={businessObjectives}
+          missions={missions}
+          briefings={briefings}
+          drafts={drafts}
+          message={campaignMessage}
+          mutateCampaigns={mutateCampaigns}
         />
       ) : null}
 
@@ -2315,6 +2364,539 @@ function ExecutiveHomeView({
             <p className="text-xs leading-5 text-brand-teal/60">Use Agenda, Atividades e Ocorrencias como sensores. A decisao consolidada fica nesta home.</p>
           </div>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+type CampaignDraft = {
+  id: string;
+  name: string;
+  type: string;
+  objective_id: string;
+  mission_external_key: string;
+  product_id: string;
+  status: string;
+  starts_at: string;
+  ends_at: string;
+  target_sales: string;
+  target_revenue: string;
+  contexto: string;
+  publico: string;
+  oferta: string;
+  objecao: string;
+  mensagem: string;
+  canais: string;
+  fases: string;
+  riscos: string;
+  metas: string;
+};
+
+function campaignToDraft(campaign?: NorwynCampaign | null): CampaignDraft {
+  const plan = (campaign?.plan_json ?? {}) as Record<string, unknown>;
+  const listValue = (value: unknown) => Array.isArray(value) ? value.join("\n") : String(value ?? "");
+  return {
+    id: campaign?.id ?? "",
+    name: campaign?.name ?? "",
+    type: campaign?.type ?? "Campanha",
+    objective_id: campaign?.objective_id ?? "",
+    mission_external_key: campaign?.mission_external_key ?? "",
+    product_id: campaign?.product_id ?? "",
+    status: campaign?.status ?? "draft",
+    starts_at: campaign?.starts_at ?? "",
+    ends_at: campaign?.ends_at ?? "",
+    target_sales: campaign?.target_sales != null ? String(campaign.target_sales) : "",
+    target_revenue: campaign?.target_revenue != null ? String(campaign.target_revenue) : "",
+    contexto: String(plan.contexto ?? ""),
+    publico: String(plan.publico ?? ""),
+    oferta: String(plan.oferta ?? ""),
+    objecao: String(plan.objecao ?? ""),
+    mensagem: String(plan.mensagem ?? ""),
+    canais: listValue(plan.canais),
+    fases: listValue(plan.fases),
+    riscos: listValue(plan.riscos),
+    metas: String(plan.metas ?? ""),
+  };
+}
+
+function buildCampaignPlan(draft: CampaignDraft) {
+  const split = (value: string) => value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+  return {
+    contexto: draft.contexto,
+    publico: draft.publico,
+    oferta: draft.oferta,
+    objecao: draft.objecao,
+    mensagem: draft.mensagem,
+    canais: split(draft.canais),
+    fases: split(draft.fases),
+    riscos: split(draft.riscos),
+    metas: draft.metas,
+  };
+}
+
+function campaignPlanText(plan: Record<string, unknown>, key: string) {
+  const value = plan[key];
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value ?? "-");
+}
+
+function briefingToCampaignContent(briefing: NorwynBriefing) {
+  return [
+    `Objetivo: ${briefing.objective}`,
+    `Publico: ${briefing.audience}`,
+    `Contexto: ${briefing.context}`,
+    `Mensagem central: ${briefing.centralMessage}`,
+    `Produto: ${briefing.product}`,
+    `Objecao: ${briefing.objection}`,
+    `CTA: ${briefing.cta}`,
+    `Evidencias: ${briefing.evidence.join(" | ")}`,
+  ].filter(Boolean).join("\n\n");
+}
+
+function CampaignsView({
+  campaigns,
+  materials,
+  versions,
+  approvals,
+  atividades,
+  products,
+  businessObjectives,
+  missions,
+  briefings,
+  drafts,
+  message,
+  mutateCampaigns,
+}: {
+  campaigns: NorwynCampaign[];
+  materials: NorwynCampaignMaterial[];
+  versions: NorwynCampaignMaterialVersion[];
+  approvals: NorwynCampaignApproval[];
+  atividades: StrategyAtividadeTask[];
+  products: NorwynProduct[];
+  businessObjectives: BusinessObjective[];
+  missions: NorwynMission[];
+  briefings: NorwynBriefing[];
+  drafts: NorwynDraft[];
+  message: string | null;
+  mutateCampaigns: (payload: Record<string, unknown>) => Promise<void>;
+}) {
+  const [selectedId, setSelectedId] = useState(campaigns[0]?.id ?? "");
+  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedId) ?? campaigns[0] ?? null;
+  const [draft, setDraft] = useState<CampaignDraft>(campaignToDraft(selectedCampaign));
+  const [materialDraft, setMaterialDraft] = useState({ material_type: "briefing", title: "", channel: "", content: "", change_note: "Primeira versao do material." });
+  const [versionDraft, setVersionDraft] = useState({ material_id: "", title: "", content: "", change_note: "" });
+  const [approvalDraft, setApprovalDraft] = useState({ material_id: "", version_id: "", approver_name: "Juliana Coutinho", status: "requested", observation: "" });
+  const [localBriefingId, setLocalBriefingId] = useState("");
+  const [localDraftId, setLocalDraftId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(campaignToDraft(selectedCampaign));
+  }, [selectedCampaign?.id]);
+
+  useEffect(() => {
+    if (!selectedId && campaigns[0]?.id) setSelectedId(campaigns[0].id);
+  }, [campaigns, selectedId]);
+
+  const campaignMaterials = materials.filter((material) => material.campaign_id === selectedCampaign?.id);
+  const campaignVersions = versions.filter((version) => version.campaign_id === selectedCampaign?.id);
+  const campaignApprovals = approvals.filter((approval) => approval.campaign_id === selectedCampaign?.id);
+  const campaignTasks = atividades.filter((task) => task.campaign_id === selectedCampaign?.id);
+  const selectedPlan = (selectedCampaign?.plan_json ?? {}) as Record<string, unknown>;
+
+  async function runMutation(payload: Record<string, unknown>) {
+    setSaving(true);
+    setLocalError(null);
+    try {
+      await mutateCampaigns(payload);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Nao foi possivel salvar.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCampaign() {
+    await runMutation({
+      action: "upsert_campaign",
+      campaign: {
+        id: draft.id || undefined,
+        name: draft.name,
+        type: draft.type,
+        objective_id: draft.objective_id || null,
+        mission_external_key: draft.mission_external_key || null,
+        product_id: draft.product_id || null,
+        status: draft.status,
+        starts_at: draft.starts_at || null,
+        ends_at: draft.ends_at || null,
+        target_sales: draft.target_sales ? Number(draft.target_sales) : null,
+        target_revenue: draft.target_revenue ? Number(String(draft.target_revenue).replace(/\./g, "").replace(",", ".")) : null,
+        plan_json: buildCampaignPlan(draft),
+      },
+    });
+  }
+
+  async function createMaterialWithVersion() {
+    if (!selectedCampaign) return;
+    await runMutation({
+      action: "create_material_with_version",
+      campaign_id: selectedCampaign.id,
+      material: {
+        campaign_id: selectedCampaign.id,
+        material_type: materialDraft.material_type,
+        title: materialDraft.title,
+        channel: materialDraft.channel,
+        status: "draft",
+        metadata: { source: "manual" },
+      },
+      version: {
+        title: materialDraft.title,
+        content: materialDraft.content,
+        change_note: materialDraft.change_note,
+        source: "manual",
+      },
+    });
+    setMaterialDraft({ material_type: "briefing", title: "", channel: "", content: "", change_note: "Primeira versao do material." });
+  }
+
+  async function copyLocalBriefing() {
+    if (!selectedCampaign || !localBriefingId) return;
+    const local = briefings.find((briefing) => briefing.id === localBriefingId);
+    if (!local) return;
+    await runMutation({
+      action: "create_material_with_version",
+      campaign_id: selectedCampaign.id,
+      material: {
+        campaign_id: selectedCampaign.id,
+        material_type: local.type,
+        title: local.title,
+        channel: local.format,
+        status: "draft",
+        metadata: { local_briefing_id: local.id, source: "localStorage" },
+      },
+      version: {
+        title: `${local.title} - copia local`,
+        content: briefingToCampaignContent(local),
+        change_note: "Copiado do Briefing Center local para campanha persistida.",
+        source: "localStorage",
+      },
+    });
+    setLocalBriefingId("");
+  }
+
+  async function copyLocalDraft() {
+    if (!selectedCampaign || !localDraftId) return;
+    const local = drafts.find((item) => item.id === localDraftId);
+    if (!local) return;
+    await runMutation({
+      action: "create_material_with_version",
+      campaign_id: selectedCampaign.id,
+      material: {
+        campaign_id: selectedCampaign.id,
+        material_type: local.type,
+        title: local.title,
+        channel: local.type,
+        status: "draft",
+        metadata: { local_draft_id: local.id, local_briefing_id: local.briefingId, source: "localStorage" },
+      },
+      version: {
+        title: `${local.title} - copia local`,
+        content: local.content.join("\n\n"),
+        change_note: "Copiado do Studio Draft local para campanha persistida.",
+        source: "localStorage",
+      },
+    });
+    setLocalDraftId("");
+  }
+
+  async function createVersion() {
+    if (!selectedCampaign || !versionDraft.material_id) return;
+    await runMutation({
+      action: "create_version",
+      campaign_id: selectedCampaign.id,
+      material_id: versionDraft.material_id,
+      version: {
+        campaign_id: selectedCampaign.id,
+        material_id: versionDraft.material_id,
+        title: versionDraft.title,
+        content: versionDraft.content,
+        change_note: versionDraft.change_note,
+        source: "manual",
+      },
+    });
+    setVersionDraft({ material_id: versionDraft.material_id, title: "", content: "", change_note: "" });
+  }
+
+  async function createApproval() {
+    if (!selectedCampaign || !approvalDraft.material_id || !approvalDraft.version_id) return;
+    await runMutation({
+      action: "create_approval",
+      campaign_id: selectedCampaign.id,
+      approval: {
+        campaign_id: selectedCampaign.id,
+        material_id: approvalDraft.material_id,
+        version_id: approvalDraft.version_id,
+        approver_name: approvalDraft.approver_name,
+        status: approvalDraft.status,
+        observation: approvalDraft.observation,
+      },
+    });
+    setApprovalDraft({ ...approvalDraft, observation: "" });
+  }
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[0.75fr_1.25fr]">
+      <div className="space-y-4">
+        <Card className="border-[#E9CBD1] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <SectionTitle icon={<Send className="h-5 w-5" />} title="Campanhas" />
+            <button type="button" onClick={() => { setSelectedId(""); setDraft(campaignToDraft(null)); }} className="h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white">
+              Nova
+            </button>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-brand-teal/60">
+            Persistencia minima para plano, materiais, versoes e aprovacoes. Briefings e drafts locais continuam preservados.
+          </p>
+          <div className="mt-4 space-y-2">
+            {campaigns.map((campaign) => (
+              <button
+                key={campaign.id}
+                type="button"
+                onClick={() => setSelectedId(campaign.id)}
+                className={`w-full rounded-md border p-3 text-left ${selectedCampaign?.id === campaign.id ? "border-brand-clay bg-brand-cream" : "border-brand-sand bg-white/80"}`}
+              >
+                <p className="text-sm font-semibold text-brand-teal">{campaign.name}</p>
+                <p className="mt-1 text-xs text-brand-teal/60">{campaign.status} - {campaign.type}</p>
+              </button>
+            ))}
+            {!campaigns.length ? <EmptyState>Nenhuma campanha persistida ainda.</EmptyState> : null}
+          </div>
+        </Card>
+
+        <Card className="border-[#E9CBD1] p-4">
+          <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Campanha" />
+          <div className="mt-4 grid gap-3">
+            <Field label="Nome"><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Tipo"><input value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <Field label="Status">
+                <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                  {["draft", "active", "paused", "completed", "archived"].map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label="Objetivo">
+              <select value={draft.objective_id} onChange={(event) => setDraft({ ...draft, objective_id: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                <option value="">Sem objetivo vinculado</option>
+                {businessObjectives.map((objective) => <option key={objective.id} value={objective.id}>{objective.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Missao">
+              <select value={draft.mission_external_key} onChange={(event) => setDraft({ ...draft, mission_external_key: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                <option value="">Sem missao vinculada</option>
+                {missions.map((mission) => <option key={mission.id} value={mission.id}>{mission.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Produto">
+              <select value={draft.product_id} onChange={(event) => setDraft({ ...draft, product_id: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                <option value="">Sem produto vinculado</option>
+                {products.map((product) => <option key={product.id} value={product.id}>{product.nome_oficial}</option>)}
+              </select>
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Inicio"><input type="date" value={draft.starts_at} onChange={(event) => setDraft({ ...draft, starts_at: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <Field label="Fim"><input type="date" value={draft.ends_at} onChange={(event) => setDraft({ ...draft, ends_at: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <Field label="Meta vendas"><input value={draft.target_sales} onChange={(event) => setDraft({ ...draft, target_sales: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <Field label="Meta receita"><input value={draft.target_revenue} onChange={(event) => setDraft({ ...draft, target_revenue: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            </div>
+            <Field label="Contexto"><textarea value={draft.contexto} onChange={(event) => setDraft({ ...draft, contexto: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Publico"><textarea value={draft.publico} onChange={(event) => setDraft({ ...draft, publico: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Oferta"><textarea value={draft.oferta} onChange={(event) => setDraft({ ...draft, oferta: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Objecao principal"><textarea value={draft.objecao} onChange={(event) => setDraft({ ...draft, objecao: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Mensagem"><textarea value={draft.mensagem} onChange={(event) => setDraft({ ...draft, mensagem: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Canais"><input value={draft.canais} onChange={(event) => setDraft({ ...draft, canais: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Fases"><textarea value={draft.fases} onChange={(event) => setDraft({ ...draft, fases: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Riscos"><textarea value={draft.riscos} onChange={(event) => setDraft({ ...draft, riscos: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <Field label="Metas"><textarea value={draft.metas} onChange={(event) => setDraft({ ...draft, metas: event.target.value })} rows={2} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+            <button type="button" disabled={saving} onClick={saveCampaign} className="h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">
+              {saving ? "Salvando..." : "Salvar campanha"}
+            </button>
+            {message ? <p className="rounded-md bg-[#F1FBF4] p-3 text-sm font-semibold text-brand-teal">{message}</p> : null}
+            {localError ? <p className="rounded-md bg-[#FFF1F1] p-3 text-sm font-semibold text-[#9B2C2C]">{localError}</p> : null}
+          </div>
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <Card className="border-[#E9CBD1] p-4">
+          <SectionTitle icon={<Target className="h-5 w-5" />} title="Resumo e plano" />
+          {selectedCampaign ? (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <MissionMeta label="Status" value={selectedCampaign.status} />
+                <MissionMeta label="Periodo" value={`${selectedCampaign.starts_at ?? "-"} a ${selectedCampaign.ends_at ?? "-"}`} />
+                <MissionMeta label="Meta vendas" value={selectedCampaign.target_sales != null ? String(selectedCampaign.target_sales) : "-"} />
+                <MissionMeta label="Meta receita" value={selectedCampaign.target_revenue != null ? Number(selectedCampaign.target_revenue).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "-"} />
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {["contexto", "publico", "oferta", "objecao", "mensagem", "canais", "fases", "riscos", "metas"].map((key) => (
+                  <div key={key} className="rounded-md border border-brand-sand bg-white/80 p-3">
+                    <p className="text-[10px] font-black uppercase text-brand-clay">{key}</p>
+                    <p className="mt-1 text-sm leading-5 text-brand-teal/75">{campaignPlanText(selectedPlan, key)}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <EmptyState>Selecione ou crie uma campanha.</EmptyState>
+          )}
+        </Card>
+
+        <Card className="border-[#E9CBD1] p-4">
+          <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Materiais e versoes" />
+          {!selectedCampaign ? <EmptyState>Crie uma campanha antes de salvar materiais.</EmptyState> : (
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              <div className="space-y-3">
+                <Field label="Tipo">
+                  <select value={materialDraft.material_type} onChange={(event) => setMaterialDraft({ ...materialDraft, material_type: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                    {["briefing", "roteiro", "carrossel", "Reel", "Stories", "WhatsApp", "e-mail", "suporte", "landing page", "anuncio"].map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </Field>
+                <Field label="Titulo"><input value={materialDraft.title} onChange={(event) => setMaterialDraft({ ...materialDraft, title: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+                <Field label="Canal"><input value={materialDraft.channel} onChange={(event) => setMaterialDraft({ ...materialDraft, channel: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+                <Field label="Conteudo da primeira versao"><textarea value={materialDraft.content} onChange={(event) => setMaterialDraft({ ...materialDraft, content: event.target.value })} rows={5} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+                <button type="button" disabled={saving} onClick={createMaterialWithVersion} className="h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">Salvar material</button>
+              </div>
+              <div className="space-y-3">
+                <Field label="Copiar briefing local">
+                  <select value={localBriefingId} onChange={(event) => setLocalBriefingId(event.target.value)} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                    <option value="">Selecione</option>
+                    {briefings.map((briefing) => <option key={briefing.id} value={briefing.id}>{briefing.title}</option>)}
+                  </select>
+                </Field>
+                <button type="button" disabled={saving || !localBriefingId} onClick={copyLocalBriefing} className="h-9 rounded-md border border-brand-sand px-4 text-sm font-bold text-brand-teal disabled:opacity-50">Copiar briefing</button>
+                <Field label="Copiar draft local">
+                  <select value={localDraftId} onChange={(event) => setLocalDraftId(event.target.value)} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                    <option value="">Selecione</option>
+                    {drafts.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                  </select>
+                </Field>
+                <button type="button" disabled={saving || !localDraftId} onClick={copyLocalDraft} className="h-9 rounded-md border border-brand-sand px-4 text-sm font-bold text-brand-teal disabled:opacity-50">Copiar draft</button>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-5 space-y-3">
+            {campaignMaterials.map((material) => {
+              const materialVersions = campaignVersions.filter((version) => version.material_id === material.id).sort((a, b) => Number(b.version_number) - Number(a.version_number));
+              return (
+                <article key={material.id} className="rounded-md border border-brand-sand bg-white/85 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-black uppercase text-brand-clay">{material.material_type} - {material.status}</p>
+                      <h3 className="mt-1 text-sm font-semibold text-brand-teal">{material.title}</h3>
+                      <p className="mt-1 text-xs text-brand-teal/55">Canal: {material.channel ?? "-"}</p>
+                    </div>
+                    <button type="button" onClick={() => {
+                      setVersionDraft({ ...versionDraft, material_id: material.id, title: `${material.title} - nova versao` });
+                      setApprovalDraft({ ...approvalDraft, material_id: material.id, version_id: material.current_version_id ?? materialVersions[0]?.id ?? "" });
+                    }} className="h-8 rounded-md border border-brand-sand px-3 text-xs font-bold text-brand-teal">
+                      Selecionar
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {materialVersions.map((version) => (
+                      <div key={version.id} className="rounded-md bg-brand-cream/50 p-2 text-xs text-brand-teal/70">
+                        <strong>v{version.version_number} - {version.title}</strong>
+                        <p className="mt-1 line-clamp-3 whitespace-pre-line">{version.content}</p>
+                      </div>
+                    ))}
+                    {!materialVersions.length ? <EmptyState>Material sem versao registrada.</EmptyState> : null}
+                  </div>
+                </article>
+              );
+            })}
+            {!campaignMaterials.length ? <EmptyState>Nenhum material vinculado a esta campanha.</EmptyState> : null}
+          </div>
+        </Card>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card className="border-[#E9CBD1] p-4">
+            <SectionTitle icon={<Plus className="h-5 w-5" />} title="Nova versao" />
+            <div className="mt-4 grid gap-3">
+              <Field label="Material">
+                <select value={versionDraft.material_id} onChange={(event) => setVersionDraft({ ...versionDraft, material_id: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                  <option value="">Selecione</option>
+                  {campaignMaterials.map((material) => <option key={material.id} value={material.id}>{material.title}</option>)}
+                </select>
+              </Field>
+              <Field label="Titulo"><input value={versionDraft.title} onChange={(event) => setVersionDraft({ ...versionDraft, title: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <Field label="Conteudo"><textarea value={versionDraft.content} onChange={(event) => setVersionDraft({ ...versionDraft, content: event.target.value })} rows={5} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <Field label="Nota de alteracao"><input value={versionDraft.change_note} onChange={(event) => setVersionDraft({ ...versionDraft, change_note: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <button type="button" disabled={saving || !versionDraft.material_id} onClick={createVersion} className="h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">Salvar nova versao</button>
+            </div>
+          </Card>
+
+          <Card className="border-[#E9CBD1] p-4">
+            <SectionTitle icon={<CheckCircle2 className="h-5 w-5" />} title="Aprovacao" />
+            <div className="mt-4 grid gap-3">
+              <Field label="Material">
+                <select value={approvalDraft.material_id} onChange={(event) => {
+                  const material = campaignMaterials.find((item) => item.id === event.target.value);
+                  setApprovalDraft({ ...approvalDraft, material_id: event.target.value, version_id: material?.current_version_id ?? "" });
+                }} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                  <option value="">Selecione</option>
+                  {campaignMaterials.map((material) => <option key={material.id} value={material.id}>{material.title}</option>)}
+                </select>
+              </Field>
+              <Field label="Versao">
+                <select value={approvalDraft.version_id} onChange={(event) => setApprovalDraft({ ...approvalDraft, version_id: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                  <option value="">Selecione</option>
+                  {campaignVersions.filter((version) => !approvalDraft.material_id || version.material_id === approvalDraft.material_id).map((version) => (
+                    <option key={version.id} value={version.id}>v{version.version_number} - {version.title}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Aprovador"><input value={approvalDraft.approver_name} onChange={(event) => setApprovalDraft({ ...approvalDraft, approver_name: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <Field label="Status">
+                <select value={approvalDraft.status} onChange={(event) => setApprovalDraft({ ...approvalDraft, status: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
+                  {["requested", "approved", "changes_requested", "rejected"].map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </Field>
+              <Field label="Observacao"><textarea value={approvalDraft.observation} onChange={(event) => setApprovalDraft({ ...approvalDraft, observation: event.target.value })} rows={3} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
+              <button type="button" disabled={saving || !approvalDraft.version_id} onClick={createApproval} className="h-9 rounded-md bg-brand-teal px-4 text-sm font-bold text-white disabled:opacity-60">Registrar aprovacao</button>
+            </div>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card className="border-[#E9CBD1] p-4">
+            <SectionTitle icon={<CheckCircle2 className="h-5 w-5" />} title="Aprovacoes registradas" />
+            <div className="mt-4 space-y-2">
+              {campaignApprovals.map((approval) => (
+                <div key={approval.id} className="rounded-md border border-brand-sand bg-white/85 p-3 text-sm text-brand-teal/70">
+                  <p className="font-semibold text-brand-teal">{approval.status} - {approval.approver_name ?? "Sem aprovador"}</p>
+                  <p className="mt-1 text-xs">{approval.observation || "Sem observacao."}</p>
+                </div>
+              ))}
+              {!campaignApprovals.length ? <EmptyState>Nenhuma aprovacao registrada.</EmptyState> : null}
+            </div>
+          </Card>
+
+          <Card className="border-[#E9CBD1] p-4">
+            <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Tarefas vinculadas" />
+            <div className="mt-4 space-y-2">
+              {campaignTasks.map((task) => (
+                <div key={task.id} className="rounded-md border border-brand-sand bg-white/85 p-3 text-sm text-brand-teal/70">
+                  <p className="font-semibold text-brand-teal">{task.titulo}</p>
+                  <p className="mt-1 text-xs">{task.status} - {task.time_responsavel ?? "Sem responsavel"} - {task.prazo ?? "sem prazo"}</p>
+                </div>
+              ))}
+              {!campaignTasks.length ? <EmptyState>Nenhuma tarefa vinculada via Atividades ainda.</EmptyState> : null}
+            </div>
+          </Card>
+        </div>
       </div>
     </div>
   );
