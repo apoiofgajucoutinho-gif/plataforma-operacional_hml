@@ -58,6 +58,8 @@ function emptyContext(partial?: Partial<NorwynContext>): NorwynContext {
     campaignMaterials: [],
     campaignMaterialVersions: [],
     campaignApprovals: [],
+    marketingQAReviews: [],
+    marketingQAReviewItems: [],
     ...partial,
   };
 }
@@ -142,6 +144,8 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     campaignMaterialsResult,
     campaignMaterialVersionsResult,
     campaignApprovalsResult,
+    marketingQAReviewsResult,
+    marketingQAReviewItemsResult,
   ] = await Promise.all([
     postQuery,
     dataClient
@@ -249,6 +253,18 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       .eq("tenant_id", membership.tenant_id)
       .order("created_at", { ascending: false })
       .limit(300),
+    dataClient
+      .from("marketing_qa_reviews")
+      .select("id, tenant_id, campaign_id, material_id, material_version_id, reviewer_type, provider, model, status, overall_score, summary, blocking_reasons, warnings, suggested_content, input_size, duration_ms, success, error_message, usage_json, metadata, created_by, created_at, completed_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("created_at", { ascending: false })
+      .limit(300),
+    dataClient
+      .from("marketing_qa_review_items")
+      .select("id, tenant_id, review_id, category, severity, status, title, description, evidence, suggested_fix, field_reference, resolution_note, resolved_by, resolved_at, metadata, created_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("created_at", { ascending: false })
+      .limit(1000),
   ]);
 
   const metricsByPost = new Map((followerMetricsResult.data ?? []).map((metric: any) => [metric.post_id, metric]));
@@ -317,5 +333,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     campaignMaterials: campaignMaterialsResult.data ?? [],
     campaignMaterialVersions: campaignMaterialVersionsResult.data ?? [],
     campaignApprovals: campaignApprovalsResult.data ?? [],
+    marketingQAReviews: marketingQAReviewsResult.data ?? [],
+    marketingQAReviewItems: marketingQAReviewItemsResult.data ?? [],
   };
 }

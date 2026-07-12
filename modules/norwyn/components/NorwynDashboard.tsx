@@ -28,7 +28,7 @@ import { FinancialConfig } from "@/lib/financial-config";
 import { StrategyPlanner } from "@/modules/norwyn/components/StrategyPlanner";
 import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/modules/norwyn/services/evidence-engine";
 import type { InstagramPostMetric } from "@/modules/instagram/types";
-import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCampaign, NorwynCampaignApproval, NorwynCampaignMaterial, NorwynCampaignMaterialVersion, NorwynCommercialSale, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus, StrategyAtividadeTask } from "@/modules/norwyn/types";
+import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCampaign, NorwynCampaignApproval, NorwynCampaignMaterial, NorwynCampaignMaterialVersion, NorwynCommercialSale, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynMarketingQAReview, NorwynMarketingQAReviewItem, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus, StrategyAtividadeTask } from "@/modules/norwyn/types";
 
 type NorwynTab = "home" | "business" | "mission" | "products" | "campaigns" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
 type MissionPriority = "Principal" | "Estrategica" | "Continua";
@@ -1483,6 +1483,8 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [campaignMaterials, setCampaignMaterials] = useState<NorwynCampaignMaterial[]>(context.campaignMaterials ?? []);
   const [campaignMaterialVersions, setCampaignMaterialVersions] = useState<NorwynCampaignMaterialVersion[]>(context.campaignMaterialVersions ?? []);
   const [campaignApprovals, setCampaignApprovals] = useState<NorwynCampaignApproval[]>(context.campaignApprovals ?? []);
+  const [marketingQAReviews, setMarketingQAReviews] = useState<NorwynMarketingQAReview[]>(context.marketingQAReviews ?? []);
+  const [marketingQAReviewItems, setMarketingQAReviewItems] = useState<NorwynMarketingQAReviewItem[]>(context.marketingQAReviewItems ?? []);
   const [campaignMessage, setCampaignMessage] = useState<string | null>(null);
   const [engineMessage, setEngineMessage] = useState<string>("");
 
@@ -1573,7 +1575,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     setCampaignMaterials(context.campaignMaterials ?? []);
     setCampaignMaterialVersions(context.campaignMaterialVersions ?? []);
     setCampaignApprovals(context.campaignApprovals ?? []);
-  }, [context.campaigns, context.campaignMaterials, context.campaignMaterialVersions, context.campaignApprovals]);
+    setMarketingQAReviews(context.marketingQAReviews ?? []);
+    setMarketingQAReviewItems(context.marketingQAReviewItems ?? []);
+  }, [context.campaigns, context.campaignMaterials, context.campaignMaterialVersions, context.campaignApprovals, context.marketingQAReviews, context.marketingQAReviewItems]);
 
   function persist(next: NorwynMission[]) {
     setMissions(next);
@@ -1694,7 +1698,23 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     if (Array.isArray(json.campaignMaterials)) setCampaignMaterials(json.campaignMaterials);
     if (Array.isArray(json.campaignMaterialVersions)) setCampaignMaterialVersions(json.campaignMaterialVersions);
     if (Array.isArray(json.campaignApprovals)) setCampaignApprovals(json.campaignApprovals);
+    if (Array.isArray(json.marketingQAReviews)) setMarketingQAReviews(json.marketingQAReviews);
+    if (Array.isArray(json.marketingQAReviewItems)) setMarketingQAReviewItems(json.marketingQAReviewItems);
     setCampaignMessage(json.message ?? "Campanhas atualizadas.");
+  }
+
+  async function mutateMarketingQA(payload: Record<string, unknown>) {
+    setCampaignMessage(null);
+    const response = await fetch("/api/norwyn/marketing-qa", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json.error ?? "Nao foi possivel executar o Marketing QA.");
+    if (Array.isArray(json.marketingQAReviews)) setMarketingQAReviews(json.marketingQAReviews);
+    if (Array.isArray(json.marketingQAReviewItems)) setMarketingQAReviewItems(json.marketingQAReviewItems);
+    setCampaignMessage(json.message ?? "Marketing QA atualizado.");
   }
 
   function addKnowledgeEvent(event: Omit<KnowledgeEvent, "id" | "createdAt" | "updatedAt">) {
@@ -2121,6 +2141,8 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
           materials={campaignMaterials}
           versions={campaignMaterialVersions}
           approvals={campaignApprovals}
+          qaReviews={marketingQAReviews}
+          qaItems={marketingQAReviewItems}
           atividades={context.atividades}
           products={products}
           businessObjectives={businessObjectives}
@@ -2128,7 +2150,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
           briefings={briefings}
           drafts={drafts}
           message={campaignMessage}
+          role={context.role ?? null}
           mutateCampaigns={mutateCampaigns}
+          mutateMarketingQA={mutateMarketingQA}
         />
       ) : null}
 
@@ -2458,6 +2482,8 @@ function CampaignsView({
   materials,
   versions,
   approvals,
+  qaReviews,
+  qaItems,
   atividades,
   products,
   businessObjectives,
@@ -2465,12 +2491,16 @@ function CampaignsView({
   briefings,
   drafts,
   message,
+  role,
   mutateCampaigns,
+  mutateMarketingQA,
 }: {
   campaigns: NorwynCampaign[];
   materials: NorwynCampaignMaterial[];
   versions: NorwynCampaignMaterialVersion[];
   approvals: NorwynCampaignApproval[];
+  qaReviews: NorwynMarketingQAReview[];
+  qaItems: NorwynMarketingQAReviewItem[];
   atividades: StrategyAtividadeTask[];
   products: NorwynProduct[];
   businessObjectives: BusinessObjective[];
@@ -2478,7 +2508,9 @@ function CampaignsView({
   briefings: NorwynBriefing[];
   drafts: NorwynDraft[];
   message: string | null;
+  role: string | null;
   mutateCampaigns: (payload: Record<string, unknown>) => Promise<void>;
+  mutateMarketingQA: (payload: Record<string, unknown>) => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState(campaigns[0]?.id ?? "");
   const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedId) ?? campaigns[0] ?? null;
@@ -2489,6 +2521,7 @@ function CampaignsView({
   const [localBriefingId, setLocalBriefingId] = useState("");
   const [localDraftId, setLocalDraftId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [qaSavingVersionId, setQaSavingVersionId] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2504,6 +2537,7 @@ function CampaignsView({
   const campaignApprovals = approvals.filter((approval) => approval.campaign_id === selectedCampaign?.id);
   const campaignTasks = atividades.filter((task) => task.campaign_id === selectedCampaign?.id);
   const selectedPlan = (selectedCampaign?.plan_json ?? {}) as Record<string, unknown>;
+  const isAdmin = role === "ADMIN";
 
   async function runMutation(payload: Record<string, unknown>) {
     setSaving(true);
@@ -2643,6 +2677,76 @@ function CampaignsView({
       },
     });
     setApprovalDraft({ ...approvalDraft, observation: "" });
+  }
+
+  async function runMarketingQA(version: NorwynCampaignMaterialVersion) {
+    setQaSavingVersionId(version.id);
+    setLocalError(null);
+    try {
+      await mutateMarketingQA({ action: "review", material_version_id: version.id });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Nao foi possivel executar o Marketing QA.");
+    } finally {
+      setQaSavingVersionId(null);
+    }
+  }
+
+  async function createCorrectedVersion(review: NorwynMarketingQAReview, version: NorwynCampaignMaterialVersion) {
+    if (!review.suggested_content || !selectedCampaign) return;
+    await runMutation({
+      action: "create_version",
+      campaign_id: selectedCampaign.id,
+      material_id: version.material_id,
+      version: {
+        campaign_id: selectedCampaign.id,
+        material_id: version.material_id,
+        title: `${version.title} - revisao Marketing QA`,
+        content: review.suggested_content,
+        change_note: `Versao criada a partir do Marketing QA ${review.id}.`,
+        source: "marketing_qa",
+        metadata: { marketing_qa_review_id: review.id },
+      },
+    });
+  }
+
+  async function ignoreQAItem(item: NorwynMarketingQAReviewItem) {
+    const note = window.prompt("Informe a justificativa para ignorar este item do QA:");
+    if (!note?.trim()) return;
+    setSaving(true);
+    setLocalError(null);
+    try {
+      await mutateMarketingQA({ action: "resolve_item", item_id: item.id, resolution_note: note.trim() });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Nao foi possivel marcar a excecao.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function latestReviewForVersion(versionId: string) {
+    return qaReviews
+      .filter((review) => review.material_version_id === versionId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null;
+  }
+
+  function reviewItems(reviewId: string) {
+    return qaItems.filter((item) => item.review_id === reviewId).sort((a, b) => {
+      const order = { critical: 0, warning: 1, info: 2 } as Record<string, number>;
+      return (order[a.severity] ?? 3) - (order[b.severity] ?? 3);
+    });
+  }
+
+  function qaStatusLabel(status: string) {
+    const labels: Record<string, string> = {
+      approved: "aprovado pelo QA",
+      approved_with_warnings: "aprovado com alertas",
+      changes_required: "ajustes necessarios",
+      blocked: "bloqueado pelo QA",
+      failed: "falha registrada",
+      processing: "em processamento",
+      pending: "pendente",
+    };
+    return labels[status] ?? status;
   }
 
   return (
@@ -2808,8 +2912,110 @@ function CampaignsView({
                   <div className="mt-3 grid gap-2">
                     {materialVersions.map((version) => (
                       <div key={version.id} className="rounded-md bg-brand-cream/50 p-2 text-xs text-brand-teal/70">
-                        <strong>v{version.version_number} - {version.title}</strong>
-                        <p className="mt-1 line-clamp-3 whitespace-pre-line">{version.content}</p>
+                        {(() => {
+                          const latestReview = latestReviewForVersion(version.id);
+                          const items = latestReview ? reviewItems(latestReview.id) : [];
+                          const criticals = items.filter((item) => item.severity === "critical" && item.status === "failed").length;
+                          const warnings = items.filter((item) => item.severity === "warning" && item.status === "failed").length;
+                          return (
+                            <>
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <strong>v{version.version_number} - {version.title}</strong>
+                                  <p className="mt-1 line-clamp-3 whitespace-pre-line">{version.content}</p>
+                                </div>
+                                {isAdmin ? (
+                                  <button
+                                    type="button"
+                                    disabled={qaSavingVersionId === version.id}
+                                    onClick={() => runMarketingQA(version)}
+                                    className="inline-flex h-8 items-center gap-2 rounded-md border border-brand-sand bg-white px-3 text-[11px] font-black text-brand-teal disabled:opacity-50"
+                                  >
+                                    <Bot className="h-3.5 w-3.5" />
+                                    {qaSavingVersionId === version.id ? "Revisando..." : "Revisar com Marketing QA"}
+                                  </button>
+                                ) : null}
+                              </div>
+
+                              {latestReview ? (
+                                <div className="mt-3 rounded-md border border-brand-sand bg-white/90 p-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                      <p className="text-[10px] font-black uppercase text-brand-clay">Marketing QA</p>
+                                      <p className="mt-1 font-semibold text-brand-teal">
+                                        {qaStatusLabel(latestReview.status)} {latestReview.overall_score != null ? `- ${latestReview.overall_score}/100` : ""}
+                                      </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <span className="rounded-full bg-[#FFF1F1] px-2 py-1 text-[10px] font-black text-[#9B2C2C]">{criticals} criticos</span>
+                                      <span className="rounded-full bg-[#FFF7E6] px-2 py-1 text-[10px] font-black text-[#9A5A00]">{warnings} alertas</span>
+                                      <span className="rounded-full bg-brand-cream px-2 py-1 text-[10px] font-black text-brand-teal">{latestReview.provider}</span>
+                                    </div>
+                                  </div>
+                                  <p className="mt-2 text-xs leading-5 text-brand-teal/70">{latestReview.summary ?? "Sem resumo registrado."}</p>
+                                  {latestReview.error_message ? <p className="mt-2 rounded-md bg-[#FFF1F1] p-2 text-xs font-semibold text-[#9B2C2C]">{latestReview.error_message}</p> : null}
+
+                                  <div className="mt-3 grid gap-2">
+                                    {items.slice(0, 8).map((item) => (
+                                      <div key={item.id} className="rounded-md border border-brand-sand/80 bg-white p-2">
+                                        <div className="flex flex-wrap items-start justify-between gap-2">
+                                          <div>
+                                            <p className="text-[10px] font-black uppercase text-brand-clay">{item.category} - {item.severity} - {item.status}</p>
+                                            <p className="mt-1 font-semibold text-brand-teal">{item.title}</p>
+                                          </div>
+                                          {isAdmin && item.status === "failed" ? (
+                                            <button type="button" onClick={() => ignoreQAItem(item)} className="rounded-md border border-brand-sand px-2 py-1 text-[10px] font-black text-brand-teal">
+                                              Ignorar com justificativa
+                                            </button>
+                                          ) : null}
+                                        </div>
+                                        {item.description ? <p className="mt-1 leading-5">{item.description}</p> : null}
+                                        {item.evidence ? <p className="mt-1 rounded bg-brand-cream/60 p-2 font-mono text-[10px] text-brand-teal/65">{item.evidence}</p> : null}
+                                        {item.suggested_fix ? <p className="mt-1 text-brand-teal/80"><strong>Sugestao:</strong> {item.suggested_fix}</p> : null}
+                                        {item.resolution_note ? <p className="mt-1 text-brand-teal/60"><strong>Excecao:</strong> {item.resolution_note}</p> : null}
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {latestReview.suggested_content ? (
+                                    <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                                      <div className="rounded-md border border-brand-sand bg-brand-cream/40 p-2">
+                                        <p className="text-[10px] font-black uppercase text-brand-clay">Original</p>
+                                        <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-brand-teal/70">{version.content}</pre>
+                                      </div>
+                                      <div className="rounded-md border border-brand-sand bg-[#F1FBF4] p-2">
+                                        <p className="text-[10px] font-black uppercase text-brand-clay">Versao sugerida</p>
+                                        <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-brand-teal/70">{latestReview.suggested_content}</pre>
+                                      </div>
+                                    </div>
+                                  ) : null}
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {latestReview.suggested_content && latestReview.suggested_content.trim() !== version.content.trim() ? (
+                                      <button type="button" disabled={saving} onClick={() => createCorrectedVersion(latestReview, version)} className="h-8 rounded-md bg-brand-teal px-3 text-[11px] font-black text-white disabled:opacity-50">
+                                        Criar versao corrigida
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      onClick={() => setApprovalDraft({ ...approvalDraft, material_id: version.material_id, version_id: version.id, status: "requested" })}
+                                      className="h-8 rounded-md border border-brand-sand px-3 text-[11px] font-black text-brand-teal"
+                                    >
+                                      Solicitar aprovacao humana
+                                    </button>
+                                    {latestReview.status === "blocked" ? (
+                                      <span className="rounded-md bg-[#FFF1F1] px-3 py-2 text-[11px] font-black text-[#9B2C2C]">
+                                        Bloqueado para aprovacao sem excecao Admin.
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-[11px] text-brand-teal/55">Sem revisao Marketing QA registrada para esta versao.</p>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     ))}
                     {!materialVersions.length ? <EmptyState>Material sem versao registrada.</EmptyState> : null}

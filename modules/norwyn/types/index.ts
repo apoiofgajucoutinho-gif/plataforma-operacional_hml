@@ -390,6 +390,60 @@ export type NorwynCampaignApproval = {
   updated_at: string;
 };
 
+export type NorwynMarketingQAReviewStatus =
+  | "pending"
+  | "processing"
+  | "approved"
+  | "approved_with_warnings"
+  | "changes_required"
+  | "blocked"
+  | "failed";
+
+export type NorwynMarketingQAReview = {
+  id: string;
+  tenant_id: string;
+  campaign_id: string;
+  material_id: string;
+  material_version_id: string;
+  reviewer_type: "ai" | "human" | "hybrid";
+  provider: string;
+  model: string | null;
+  status: NorwynMarketingQAReviewStatus;
+  overall_score: number | null;
+  summary: string | null;
+  blocking_reasons: string[];
+  warnings: string[];
+  suggested_content: string | null;
+  input_size: number;
+  duration_ms: number | null;
+  success: boolean;
+  error_message: string | null;
+  usage_json: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  completed_at: string | null;
+};
+
+export type NorwynMarketingQAReviewItem = {
+  id: string;
+  tenant_id: string;
+  review_id: string;
+  category: string;
+  severity: "info" | "warning" | "critical";
+  status: "passed" | "failed" | "not_applicable";
+  title: string;
+  description: string | null;
+  evidence: string | null;
+  suggested_fix: string | null;
+  field_reference: string | null;
+  resolution_note: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 export type NorwynContext = {
   role?: string | null;
   tenant: { id: string; nome: string } | null;
@@ -413,4 +467,6 @@ export type NorwynContext = {
   campaignMaterials: NorwynCampaignMaterial[];
   campaignMaterialVersions: NorwynCampaignMaterialVersion[];
   campaignApprovals: NorwynCampaignApproval[];
+  marketingQAReviews: NorwynMarketingQAReview[];
+  marketingQAReviewItems: NorwynMarketingQAReviewItem[];
 };

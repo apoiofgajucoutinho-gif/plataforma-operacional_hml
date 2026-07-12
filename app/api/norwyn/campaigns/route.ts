@@ -42,7 +42,7 @@ async function getAuthContext() {
     if (!permission?.can_write) return { error: "Sem permissao para editar campanhas Norwyn.", status: 403 as const };
   }
 
-  return { dataClient, tenantId: membership.tenant_id as string, userId: currentUser.id as string };
+  return { dataClient, tenantId: membership.tenant_id as string, userId: currentUser.id as string, role: membership.role as string };
 }
 
 function compactPayload<T extends Record<string, unknown>>(payload: T) {
@@ -52,7 +52,7 @@ function compactPayload<T extends Record<string, unknown>>(payload: T) {
 }
 
 async function loadCampaignBundle(dataClient: SupabaseAny, tenantId: string) {
-  const [campaigns, materials, versions, approvals] = await Promise.all([
+  const [campaigns, materials, versions, approvals, qaReviews, qaItems] = await Promise.all([
     dataClient
       .from("campaigns")
       .select("id, tenant_id, name, type, objective_id, mission_external_key, product_id, status, starts_at, ends_at, target_sales, target_revenue, plan_json, created_at, updated_at")
@@ -73,9 +73,19 @@ async function loadCampaignBundle(dataClient: SupabaseAny, tenantId: string) {
       .select("id, tenant_id, campaign_id, material_id, version_id, approver_id, approver_name, status, decided_at, observation, created_at, updated_at")
       .eq("tenant_id", tenantId)
       .order("created_at", { ascending: false }),
+    dataClient
+      .from("marketing_qa_reviews")
+      .select("id, tenant_id, campaign_id, material_id, material_version_id, reviewer_type, provider, model, status, overall_score, summary, blocking_reasons, warnings, suggested_content, input_size, duration_ms, success, error_message, usage_json, metadata, created_by, created_at, completed_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false }),
+    dataClient
+      .from("marketing_qa_review_items")
+      .select("id, tenant_id, review_id, category, severity, status, title, description, evidence, suggested_fix, field_reference, resolution_note, resolved_by, resolved_at, metadata, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false }),
   ]);
 
-  const firstError = campaigns.error ?? materials.error ?? versions.error ?? approvals.error;
+  const firstError = campaigns.error ?? materials.error ?? versions.error ?? approvals.error ?? qaReviews.error ?? qaItems.error;
   if (firstError) throw new Error(firstError.message);
 
   return {
@@ -83,6 +93,8 @@ async function loadCampaignBundle(dataClient: SupabaseAny, tenantId: string) {
     campaignMaterials: materials.data ?? [],
     campaignMaterialVersions: versions.data ?? [],
     campaignApprovals: approvals.data ?? [],
+    marketingQAReviews: qaReviews.data ?? [],
+    marketingQAReviewItems: qaItems.data ?? [],
   };
 }
 
@@ -227,6 +239,26 @@ export async function POST(request: Request) {
       const materialId = String(approval.material_id ?? body.material_id ?? "").trim();
       const versionId = String(approval.version_id ?? body.version_id ?? "").trim();
       if (!campaignId || !materialId || !versionId) return NextResponse.json({ error: "Campanha, material e versao sao obrigatorios." }, { status: 400 });
+      const status = String(approval.status || "requested");
+      const observation = String(approval.observation ?? "");
+
+      if (["approved", "ready", "pronto"].includes(status)) {
+        const { data: latestBlockedReview, error: blockedError } = await auth.dataClient
+          .from("marketing_qa_reviews")
+          .select("id, status")
+          .eq("tenant_id", auth.tenantId)
+          .eq("material_version_id", versionId)
+          .eq("status", "blocked")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (blockedError) throw new Error(blockedError.message);
+        if (latestBlockedReview?.length && (auth.role !== "ADMIN" || observation.trim().length < 12)) {
+          return NextResponse.json(
+            { error: "Esta versao possui bloqueio critico do Marketing QA. Apenas ADMIN pode aprovar com justificativa explicita." },
+            { status: 409 },
+          );
+        }
+      }
 
       const payload = compactPayload({
         tenant_id: auth.tenantId,
@@ -234,9 +266,9 @@ export async function POST(request: Request) {
         material_id: materialId,
         version_id: versionId,
         approver_name: approval.approver_name,
-        status: approval.status || "requested",
-        decided_at: approval.decided_at || (approval.status && approval.status !== "requested" ? new Date().toISOString() : null),
-        observation: approval.observation,
+        status,
+        decided_at: approval.decided_at || (status !== "requested" ? new Date().toISOString() : null),
+        observation,
         created_by: auth.userId,
       });
       const { error } = await auth.dataClient.from("campaign_approvals").insert(payload);
