@@ -1,4 +1,5 @@
 import type { InstagramInteraction, InstagramPostMetric } from "@/modules/instagram/types";
+import type { ContentCaptureStatus } from "./content-capture-status";
 
 export type NorwynCommercialSale = {
   id: string;
@@ -450,16 +451,7 @@ export type NorwynContentCapture = {
   title: string;
   capture_type: "video" | "audio";
   drive_url: string;
-  status:
-    | "aguardando"
-    | "acessando_arquivo"
-    | "enviando_para_transcricao"
-    | "transcrevendo"
-    | "analisando"
-    | "processando"
-    | "concluido"
-    | "concluido_parcialmente"
-    | "erro";
+  status: ContentCaptureStatus;
   product_id: string | null;
   mission_id: string | null;
   campaign_id: string | null;

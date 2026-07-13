@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { runContentCapture } from "@/modules/norwyn/services/content-capture";
 import { transcribeDriveMedia, type ContentTranscriptionResult } from "@/modules/norwyn/services/content-transcription";
+import { CONTENT_CAPTURE_STATUS, isContentCaptureProcessingStatus } from "@/modules/norwyn/types/content-capture-status";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -81,7 +82,15 @@ function validReferenceUrl(value: string) {
 }
 
 function isProcessingStatus(value: unknown) {
-  return ["acessando_arquivo", "enviando_para_transcricao", "transcrevendo", "analisando", "processando"].includes(cleanString(value));
+  return isContentCaptureProcessingStatus(cleanString(value));
+}
+
+function contentCaptureDbError(error: { message?: string } | null | undefined) {
+  if (error?.message?.includes("content_capture_status_check")) {
+    return "Nao foi possivel iniciar o processamento. A captura anterior foi preservada. Tente novamente apos atualizar a pagina.";
+  }
+
+  return error?.message ?? "Nao foi possivel salvar o Content Capture.";
 }
 
 async function loadContext(dataClient: SupabaseAny, tenantId: string) {
@@ -160,7 +169,7 @@ function resultToUpdatePayload(
       : previousVersions;
 
   return {
-    status: options.statusOverride ?? (result.success ? "concluido" : "erro"),
+    status: options.statusOverride ?? (result.success ? CONTENT_CAPTURE_STATUS.COMPLETED : CONTENT_CAPTURE_STATUS.ERROR),
     summary: result.summary,
     transcript: options.transcriptOverride ?? result.transcript,
     transcript_source: options.transcriptSource ?? result.transcript_source,
@@ -247,7 +256,7 @@ async function persistKnowledge(dataClient: SupabaseAny, tenantId: string, captu
     p_metadata: {
       capture_id: captureId,
       capture_type: captureType,
-      status: result.success ? "concluido" : "erro",
+      status: result.success ? CONTENT_CAPTURE_STATUS.COMPLETED : CONTENT_CAPTURE_STATUS.ERROR,
       decision: result.knowledge_generated?.decision ?? null,
       pain_points: result.knowledge_generated?.pain_points_human ?? result.pain_points,
       objections: result.knowledge_generated?.objections_human ?? result.objections,
@@ -312,7 +321,7 @@ export async function POST(request: Request) {
     await auth.dataClient
       .from("content_capture")
       .update({
-        status: manualTranscript ? "analisando" : "acessando_arquivo",
+        status: manualTranscript ? CONTENT_CAPTURE_STATUS.ANALYZING : CONTENT_CAPTURE_STATUS.ACCESSING_FILE,
         processing_started_at: new Date().toISOString(),
         error_message: null,
       })
@@ -323,7 +332,7 @@ export async function POST(request: Request) {
     const missionName = cleanString(existing.metadata?.mission_name);
     const transcription = manualTranscript ? null : await transcribeDriveMedia(existing.drive_url);
     const analysisText = manualTranscript || transcription?.full_text || existing.transcript || existing.description;
-    await auth.dataClient.from("content_capture").update({ status: "analisando" }).eq("tenant_id", auth.tenantId).eq("id", captureId);
+    await auth.dataClient.from("content_capture").update({ status: CONTENT_CAPTURE_STATUS.ANALYZING }).eq("tenant_id", auth.tenantId).eq("id", captureId);
     const result = await runContentCapture({
       title: existing.title,
       captureType: existing.capture_type === "audio" ? "audio" : "video",
@@ -339,7 +348,7 @@ export async function POST(request: Request) {
 
     const partialError = transcription && !transcription.success ? transcription.error_message : null;
     const updatePayload = resultToUpdatePayload(result, missionName, existing, {
-      statusOverride: partialError ? "concluido_parcialmente" : result.success ? "concluido" : "erro",
+      statusOverride: partialError ? CONTENT_CAPTURE_STATUS.PARTIAL : result.success ? CONTENT_CAPTURE_STATUS.COMPLETED : CONTENT_CAPTURE_STATUS.ERROR,
       transcriptOverride: analysisText || result.transcript,
       transcriptSource: manualTranscript ? "manual_edit" : transcription?.transcript_source ?? existing.transcript_source ?? result.transcript_source,
       transcriptStatus: manualTranscript ? "completed" : transcription?.transcript_status ?? existing.transcript_status ?? result.transcript_status,
@@ -348,7 +357,7 @@ export async function POST(request: Request) {
       errorMessage: partialError ?? result.error_message,
     });
     const { error: updateError } = await auth.dataClient.from("content_capture").update(updatePayload).eq("tenant_id", auth.tenantId).eq("id", captureId);
-    if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+    if (updateError) return NextResponse.json({ error: contentCaptureDbError(updateError) }, { status: 500 });
 
     await persistKnowledge(auth.dataClient, auth.tenantId, captureId, updatePayload.primary_product_id ?? existing.product_id, existing.mission_id, existing.title, existing.drive_url, existing.capture_type, result);
 
@@ -386,7 +395,7 @@ export async function POST(request: Request) {
       title,
       capture_type: captureType,
       drive_url: driveUrl,
-      status: "acessando_arquivo",
+      status: CONTENT_CAPTURE_STATUS.ACCESSING_FILE,
       product_id: productId,
       primary_product_id: productId,
       mission_id: missionId,
@@ -407,13 +416,13 @@ export async function POST(request: Request) {
     .single();
 
   if (insertError || !capture?.id) {
-    return NextResponse.json({ error: insertError?.message ?? "Nao foi possivel registrar o Content Capture." }, { status: 500 });
+    return NextResponse.json({ error: contentCaptureDbError(insertError) }, { status: 500 });
   }
 
   const context = await loadContext(auth.dataClient, auth.tenantId);
   const transcription = await transcribeDriveMedia(driveUrl);
   const analysisText = transcription.success ? transcription.full_text : description;
-  await auth.dataClient.from("content_capture").update({ status: "analisando" }).eq("tenant_id", auth.tenantId).eq("id", capture.id);
+  await auth.dataClient.from("content_capture").update({ status: CONTENT_CAPTURE_STATUS.ANALYZING }).eq("tenant_id", auth.tenantId).eq("id", capture.id);
   const result = await runContentCapture({
     title,
     captureType,
@@ -429,7 +438,7 @@ export async function POST(request: Request) {
 
   const partialError = transcription.success ? null : transcription.error_message;
   const updatePayload = resultToUpdatePayload(result, missionName, undefined, {
-    statusOverride: partialError ? "concluido_parcialmente" : result.success ? "concluido" : "erro",
+    statusOverride: partialError ? CONTENT_CAPTURE_STATUS.PARTIAL : result.success ? CONTENT_CAPTURE_STATUS.COMPLETED : CONTENT_CAPTURE_STATUS.ERROR,
     transcriptOverride: transcription.success ? transcription.full_text : result.transcript,
     transcriptSource: transcription.success ? transcription.transcript_source : result.transcript_source,
     transcriptStatus: transcription.success ? transcription.transcript_status : transcription.transcript_status,
@@ -444,7 +453,7 @@ export async function POST(request: Request) {
     .eq("id", capture.id);
 
   if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
+    return NextResponse.json({ error: contentCaptureDbError(updateError) }, { status: 500 });
   }
 
   const knowledgeProductId =
