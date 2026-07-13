@@ -314,6 +314,39 @@ function formatUpdatedAt(value: string | null) {
   return `Base atualizada em ${date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}, ${date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+function detectCaptureSourceLabel(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "Fonte nao informada";
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^www\./, "");
+    if (host.includes("drive.google.com") || host.includes("docs.google.com")) return "Google Drive";
+    if (host === "youtu.be" || host.includes("youtube.com")) return "YouTube";
+  } catch {
+    return "Fonte nao suportada";
+  }
+  return "Fonte nao suportada";
+}
+
+function isCaptureInProgress(status: unknown) {
+  return ["aguardando", "acessando_arquivo", "transcrevendo", "analisando", "processando"].includes(String(status ?? ""));
+}
+
+function captureStatusLabel(status: unknown) {
+  const value = String(status ?? "");
+  const labels: Record<string, string> = {
+    aguardando: "Na fila",
+    acessando_arquivo: "Acessando arquivo",
+    transcrevendo: "Transcrevendo",
+    analisando: "Analisando",
+    concluido: "Concluido",
+    concluido_parcialmente: "Concluido parcialmente",
+    erro: "Erro",
+    processando: "Processando",
+  };
+  return labels[value] ?? (value || "Sem status");
+}
+
 function formatSignalDate(value: string | null) {
   if (!value) return "-";
   const date = new Date(value);
@@ -1731,8 +1764,34 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     const json = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(json.error ?? "Nao foi possivel processar o conteudo.");
     if (Array.isArray(json.contentCaptures)) setContentCaptures(json.contentCaptures);
+    if (json.startProcessing && json.captureId) {
+      void fetch("/api/norwyn/content-capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "process", capture_id: json.captureId }),
+      })
+        .then(async (processResponse) => {
+          const processJson = await processResponse.json().catch(() => ({}));
+          if (Array.isArray(processJson.contentCaptures)) setContentCaptures(processJson.contentCaptures);
+        })
+        .catch(() => null);
+    }
     return json.message ?? "Content Capture processado.";
   }
+
+  async function refreshContentCaptures() {
+    const response = await fetch("/api/norwyn/content-capture", { method: "GET" });
+    const json = await response.json().catch(() => ({}));
+    if (response.ok && Array.isArray(json.contentCaptures)) setContentCaptures(json.contentCaptures);
+  }
+
+  useEffect(() => {
+    if (!contentCaptures.some((capture) => isCaptureInProgress(capture.status))) return;
+    const timer = window.setInterval(() => {
+      void refreshContentCaptures();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [contentCaptures]);
 
   function captureKnowledgeArray(capture: NorwynContentCapture, key: string) {
     const value = capture.knowledge_generated?.[key];
@@ -4249,6 +4308,7 @@ function ContentCaptureView({
   const [showTranscript, setShowTranscript] = useState(false);
   const [editingTranscript, setEditingTranscript] = useState(false);
   const [manualTranscript, setManualTranscript] = useState("");
+  const sourceLabel = detectCaptureSourceLabel(form.drive_url);
   const draftOptions: Array<{ label: string; type: BriefingType }> = [
     { label: "Reel", type: "Reels" },
     { label: "Carrossel", type: "Carrossel" },
@@ -4339,7 +4399,7 @@ function ContentCaptureView({
           <div>
             <SectionTitle icon={<Video className="h-5 w-5" />} title="Content Capture" />
             <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
-              A especialista ensina, a Norwyn organiza. Links publicos do Google Drive sao transcritos no backend quando o arquivo esta acessivel. Nada e publicado automaticamente.
+              A especialista ensina, a Norwyn organiza. Links publicos do Google Drive e YouTube sao processados no backend. A tela acompanha o status sem travar e nada e publicado automaticamente.
             </p>
           </div>
           <span className="rounded-full bg-[#FFF3C7] px-3 py-1 text-xs font-black uppercase text-brand-clay">
@@ -4429,16 +4489,19 @@ function ContentCaptureView({
               </select>
             </label>
             <label className="grid gap-1 text-sm font-bold text-brand-teal">
-              Link Google Drive
+              URL da fonte
               <div className="relative">
                 <Link2 className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-brand-teal/45" />
                 <input
                   className="form-input pl-9"
                   value={form.drive_url}
                   onChange={(event) => setForm({ ...form, drive_url: event.target.value })}
-                  placeholder="https://drive.google.com/..."
+                  placeholder="Google Drive ou YouTube publico"
                 />
               </div>
+              <span className="rounded-md bg-[#F4F1EA] px-3 py-2 text-xs font-bold text-brand-teal/70">
+                Fonte detectada: {sourceLabel}. YouTube precisa estar publico. Drive precisa estar como "Qualquer pessoa com o link - Visualizador". Arquivos grandes ainda exigem worker externo.
+              </span>
             </label>
             <label className="grid gap-1 text-sm font-bold text-brand-teal">
               Descricao opcional
@@ -4455,7 +4518,7 @@ function ContentCaptureView({
               disabled={processing}
               className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-teal px-4 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Sparkles className="h-4 w-4" /> {processing ? "Processando..." : "Processar Conteudo"}
+              <Sparkles className="h-4 w-4" /> {processing ? "Salvando..." : "Processar Conteudo"}
             </button>
             {message ? <p className="rounded-md bg-[#F4F1EA] p-3 text-sm font-semibold text-brand-teal">{message}</p> : null}
           </div>
@@ -4475,9 +4538,15 @@ function ContentCaptureView({
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-black text-brand-teal">{capture.title}</p>
-                  <span className="rounded-full bg-[#F4F1EA] px-2 py-1 text-[11px] font-black uppercase text-brand-clay">{capture.status}</span>
+                  <span className={`rounded-full px-2 py-1 text-[11px] font-black uppercase ${
+                    isCaptureInProgress(capture.status) ? "bg-[#FFF3C7] text-brand-clay" : "bg-[#F4F1EA] text-brand-clay"
+                  }`}>
+                    {captureStatusLabel(capture.status)}
+                  </span>
                 </div>
-                <p className="mt-1 text-xs font-semibold text-brand-teal/55">{capture.capture_type === "audio" ? "Audio" : "Video"} - {formatUpdatedAt(capture.updated_at)}</p>
+                <p className="mt-1 text-xs font-semibold text-brand-teal/55">
+                  {capture.capture_type === "audio" ? "Audio" : "Video"} - {detectCaptureSourceLabel(capture.drive_url)} - {formatUpdatedAt(capture.updated_at)}
+                </p>
                 <p className="mt-2 line-clamp-2 text-sm leading-6 text-brand-teal/65">{capture.summary ?? capture.description ?? "Aguardando processamento."}</p>
               </button>
             )) : <EmptyState>Nenhuma captura registrada ainda.</EmptyState>}
@@ -4535,11 +4604,17 @@ function ContentCaptureView({
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2 text-xs font-black uppercase">
-            <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Status: {selectedCapture.status}</span>
+            <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Status: {captureStatusLabel(selectedCapture.status)}</span>
+            <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Fonte detectada: {detectCaptureSourceLabel(selectedCapture.drive_url)}</span>
             <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Transcricao: {selectedCapture.transcript_status ?? "sem status"}</span>
             <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Fonte: {selectedCapture.transcript_source ?? "nao definida"}</span>
             {selectedCapture.file_name ? <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Arquivo: {selectedCapture.file_name}</span> : null}
           </div>
+          {isCaptureInProgress(selectedCapture.status) ? (
+            <p className="mt-3 rounded-md bg-[#FFF3C7] p-3 text-sm font-bold text-brand-clay">
+              Processamento em andamento: {captureStatusLabel(selectedCapture.status)}. Esta tela atualiza automaticamente a cada poucos segundos.
+            </p>
+          ) : null}
 
           <CaptureDecisionBlock capture={selectedCapture} />
 
@@ -4564,7 +4639,9 @@ function ContentCaptureView({
                       ? "Transcricao editada manualmente pela equipe."
                       : selectedCapture.transcript_source === "gemini_files_api"
                         ? "Transcricao automatica gerada a partir do arquivo do Google Drive."
-                        : "Use a edicao manual se o Google Drive bloquear o arquivo."}
+                        : selectedCapture.transcript_source === "youtube_url"
+                          ? "Transcricao automatica gerada a partir de um video publico do YouTube."
+                          : "Use a edicao manual se a fonte bloquear o arquivo."}
                   </p>
                 </div>
                 {selectedCapture.error_message ? (

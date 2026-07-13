@@ -506,6 +506,92 @@ export async function pullGoogleCalendarEventsToAgenda(params: {
   };
 }
 
+export async function pullAllGoogleCalendarConnectionsToAgenda() {
+  if (!isGoogleCalendarConfigured()) {
+    return {
+      ok: false,
+      error: "Google Calendar OAuth ainda nao configurado.",
+      tenants: 0,
+      imported: 0,
+      updated: 0,
+      cancelled: 0,
+      skipped: 0,
+      errors: [] as Array<{ tenantId: string; error: string }>,
+    };
+  }
+
+  const dataClient = createAdminClient();
+
+  if (!dataClient) {
+    return {
+      ok: false,
+      error: "SUPABASE_SERVICE_ROLE_KEY nao configurada para sincronizacao automatica.",
+      tenants: 0,
+      imported: 0,
+      updated: 0,
+      cancelled: 0,
+      skipped: 0,
+      errors: [] as Array<{ tenantId: string; error: string }>,
+    };
+  }
+
+  const { data: connections, error } = await dataClient
+    .from("google_calendar_connections")
+    .select("tenant_id")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    return {
+      ok: false,
+      error: error.message,
+      tenants: 0,
+      imported: 0,
+      updated: 0,
+      cancelled: 0,
+      skipped: 0,
+      errors: [] as Array<{ tenantId: string; error: string }>,
+    };
+  }
+
+  const tenantIds = Array.from(
+    new Set((connections ?? []).map((connection: { tenant_id: string }) => connection.tenant_id)),
+  );
+
+  const summary = {
+    ok: true,
+    error: null as string | null,
+    tenants: tenantIds.length,
+    imported: 0,
+    updated: 0,
+    cancelled: 0,
+    skipped: 0,
+    errors: [] as Array<{ tenantId: string; error: string }>,
+  };
+
+  for (const tenantId of tenantIds) {
+    try {
+      const result = await pullGoogleCalendarEventsToAgenda({ tenantId });
+
+      if (!result.ok) {
+        summary.errors.push({ tenantId, error: result.error ?? "Erro desconhecido." });
+        continue;
+      }
+
+      summary.imported += result.imported ?? 0;
+      summary.updated += result.updated ?? 0;
+      summary.cancelled += result.cancelled ?? 0;
+      summary.skipped += result.skipped ?? 0;
+    } catch (error) {
+      summary.errors.push({
+        tenantId,
+        error: error instanceof Error ? error.message : "Erro desconhecido.",
+      });
+    }
+  }
+
+  return summary;
+}
+
 async function upsertGoogleEventIntoAgenda({
   dataClient,
   tenantId,

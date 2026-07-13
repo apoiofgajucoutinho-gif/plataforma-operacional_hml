@@ -24,7 +24,18 @@ export type ContentTranscriptionResult = {
   error_message: string | null;
 };
 
+export type ContentSourceType = "google_drive" | "youtube" | "unsupported";
+
+export type ContentSourceDetection = {
+  type: ContentSourceType;
+  label: "Google Drive" | "YouTube" | "Nao suportada";
+  id: string | null;
+  normalizedUrl: string;
+  limitation: string | null;
+};
+
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const FUTURE_TARGET_BYTES = 1024 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set([
   "video/mp4",
   "video/quicktime",
@@ -49,6 +60,23 @@ function modelName() {
   return process.env.GEMINI_MODEL || "gemini-2.5-flash";
 }
 
+export function extractYouTubeVideoId(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, "");
+    if (host === "youtu.be") return url.pathname.split("/").filter(Boolean)[0] ?? null;
+    if (!["youtube.com", "m.youtube.com", "music.youtube.com"].includes(host)) return null;
+    const watchId = url.searchParams.get("v");
+    if (watchId) return watchId;
+    const shorts = url.pathname.match(/\/shorts\/([^/?]+)/);
+    if (shorts?.[1]) return shorts[1];
+    const embed = url.pathname.match(/\/embed\/([^/?]+)/);
+    return embed?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function extractGoogleDriveFileId(value: string) {
   try {
     const url = new URL(value);
@@ -62,6 +90,39 @@ export function extractGoogleDriveFileId(value: string) {
   } catch {
     return null;
   }
+}
+
+export function detectContentSource(value: string): ContentSourceDetection {
+  const normalizedUrl = text(value);
+  const youtubeId = extractYouTubeVideoId(normalizedUrl);
+  if (youtubeId) {
+    return {
+      type: "youtube",
+      label: "YouTube",
+      id: youtubeId,
+      normalizedUrl,
+      limitation: "Nesta versao, links do YouTube precisam estar publicos. Videos privados ou nao listados nao sao suportados pela entrada direta da Gemini.",
+    };
+  }
+
+  const driveId = extractGoogleDriveFileId(normalizedUrl);
+  if (driveId) {
+    return {
+      type: "google_drive",
+      label: "Google Drive",
+      id: driveId,
+      normalizedUrl,
+      limitation: "Nesta versao HML, o processamento direto na Vercel fica limitado a 50 MB. Arquivos maiores exigem worker externo para download/upload seguro.",
+    };
+  }
+
+  return {
+    type: "unsupported",
+    label: "Nao suportada",
+    id: null,
+    normalizedUrl,
+    limitation: "Fonte nao suportada. Use um link publico do Google Drive ou YouTube.",
+  };
 }
 
 function extensionFromName(fileName: string | null) {
@@ -84,7 +145,7 @@ function validateMedia(fileName: string | null, mimeType: string | null, size: n
   const allowedMime = normalizedMime ? ALLOWED_MIME_TYPES.has(normalizedMime) : false;
   const allowedExt = ext ? ALLOWED_EXTENSIONS.has(ext) : false;
   if (size > MAX_FILE_BYTES) {
-    throw new Error("Arquivo acima do limite do MVP: envie videos ou audios de ate 50 MB e, idealmente, ate 5 minutos.");
+    throw new Error("Arquivo acima do limite operacional direto da Vercel neste MVP: use videos ou audios de ate 50 MB. Para 200 MB, 1 GB ou videos longos, sera necessario worker externo assincrono.");
   }
   if (!allowedMime && !allowedExt) {
     throw new Error("Formato nao suportado neste MVP. Use MP4, MOV, MP3, M4A ou WAV.");
@@ -110,7 +171,7 @@ async function downloadDriveFile(driveUrl: string) {
       if (contentType.includes("text/html")) throw new Error(DRIVE_ACCESS_MESSAGE);
       const contentLength = Number(response.headers.get("content-length") ?? 0);
       if (contentLength && contentLength > MAX_FILE_BYTES) {
-        throw new Error("Arquivo acima do limite do MVP: envie videos ou audios de ate 50 MB e, idealmente, ate 5 minutos.");
+        throw new Error("Arquivo acima do limite operacional direto da Vercel neste MVP: use videos ou audios de ate 50 MB. Para 200 MB, 1 GB ou videos longos, sera necessario worker externo assincrono.");
       }
       const arrayBuffer = await response.arrayBuffer();
       if (!arrayBuffer.byteLength) throw new Error("O arquivo do Drive retornou vazio.");
@@ -198,7 +259,12 @@ function parseJsonObject(raw: string) {
   return JSON.parse(cleaned);
 }
 
-async function requestTranscription(apiKey: string, geminiFile: { uri: string; mimeType?: string; mime_type?: string }, mimeType: string) {
+async function requestTranscription(
+  apiKey: string,
+  media: { uri: string; mimeType?: string; mime_type?: string },
+  mimeType: string,
+  sourceHint: "gemini_files_api" | "youtube_url",
+) {
   const model = modelName();
   const prompt = `Transcreva integralmente este arquivo em portugues brasileiro.
 
@@ -229,8 +295,8 @@ Formato:
             { text: prompt },
             {
               file_data: {
-                mime_type: geminiFile.mimeType ?? geminiFile.mime_type ?? mimeType,
-                file_uri: geminiFile.uri,
+                mime_type: media.mimeType ?? media.mime_type ?? mimeType,
+                file_uri: media.uri,
               },
             },
           ],
@@ -260,10 +326,92 @@ Formato:
   return {
     model,
     usage: json.usageMetadata ?? {},
+    source_hint: sourceHint,
     language: text(parsed.language) || "pt-BR",
     full_text: text(parsed.full_text),
     segments,
   };
+}
+
+async function transcribeYouTubeMedia(youtubeUrl: string): Promise<ContentTranscriptionResult> {
+  const startedAt = Date.now();
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = modelName();
+  const videoId = extractYouTubeVideoId(youtubeUrl);
+  if (!apiKey) {
+    return {
+      success: false,
+      language: "pt-BR",
+      full_text: "",
+      segments: [],
+      file_id: videoId,
+      file_name: null,
+      file_type: "youtube",
+      file_size: null,
+      duration_seconds: null,
+      transcript_source: "not_configured",
+      transcript_status: "missing",
+      provider: "gemini",
+      model,
+      duration_ms: Date.now() - startedAt,
+      processing_metadata: { reason: "GEMINI_API_KEY ausente", source_type: "youtube" },
+      error_message: "GEMINI_API_KEY nao configurada.",
+    };
+  }
+
+  try {
+    const transcription = await requestTranscription(apiKey, { uri: youtubeUrl, mimeType: "video/mp4" }, "video/mp4", "youtube_url");
+    const fullText = text(transcription.full_text);
+    if (!fullText) throw new Error("Transcricao retornou vazia.");
+
+    return {
+      success: true,
+      language: transcription.language,
+      full_text: fullText,
+      segments: transcription.segments,
+      file_id: videoId,
+      file_name: videoId ? `youtube-${videoId}` : null,
+      file_type: "youtube",
+      file_size: null,
+      duration_seconds: null,
+      transcript_source: "youtube_url",
+      transcript_status: "completed",
+      provider: "gemini",
+      model: transcription.model,
+      duration_ms: Date.now() - startedAt,
+      processing_metadata: {
+        source_type: "youtube",
+        youtube_id: videoId,
+        access: "public_url_required",
+        usage: transcription.usage,
+      },
+      error_message: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha ao transcrever YouTube.";
+    return {
+      success: false,
+      language: "pt-BR",
+      full_text: "",
+      segments: [],
+      file_id: videoId,
+      file_name: videoId ? `youtube-${videoId}` : null,
+      file_type: "youtube",
+      file_size: null,
+      duration_seconds: null,
+      transcript_source: "youtube_url",
+      transcript_status: "failed",
+      provider: "gemini",
+      model,
+      duration_ms: Date.now() - startedAt,
+      processing_metadata: {
+        source_type: "youtube",
+        youtube_id: videoId,
+        access: "public_url_required",
+      },
+      error_message: `${message} Verifique se o video esta publico e acessivel pela Gemini.`,
+    };
+  }
 }
 
 export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTranscriptionResult> {
@@ -298,7 +446,12 @@ export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTra
     const uploaded = await finalizeGeminiUpload(uploadUrl, file.bytes, file.mimeType);
     uploadedFileName = uploaded.name;
     const activeFile = await waitForGeminiFile(apiKey, uploaded.name);
-    const transcription = await requestTranscription(apiKey, { ...uploaded, ...activeFile }, file.mimeType);
+    const transcription = await requestTranscription(
+      apiKey,
+      { ...uploaded, ...activeFile },
+      file.mimeType,
+      "gemini_files_api",
+    );
     const fullText = text(transcription.full_text);
     if (!fullText) throw new Error("Transcricao retornou vazia.");
 
@@ -319,9 +472,11 @@ export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTra
       duration_ms: Date.now() - startedAt,
       processing_metadata: {
         max_file_mb: 50,
+        future_target_mb: Math.round(FUTURE_TARGET_BYTES / 1024 / 1024),
         recommended_max_minutes: 5,
         usage: transcription.usage,
         drive_access: "public_link",
+        source_type: "google_drive",
       },
       error_message: null,
     };
@@ -343,10 +498,34 @@ export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTra
       provider: "gemini",
       model,
       duration_ms: Date.now() - startedAt,
-      processing_metadata: { max_file_mb: 50, recommended_max_minutes: 5 },
+      processing_metadata: { max_file_mb: 50, future_target_mb: Math.round(FUTURE_TARGET_BYTES / 1024 / 1024), recommended_max_minutes: 5, source_type: "google_drive" },
       error_message: message,
     };
   } finally {
     await deleteGeminiFile(apiKey, uploadedFileName);
   }
+}
+
+export async function transcribeMediaFromUrl(sourceUrl: string): Promise<ContentTranscriptionResult> {
+  const source = detectContentSource(sourceUrl);
+  if (source.type === "youtube") return transcribeYouTubeMedia(source.normalizedUrl);
+  if (source.type === "google_drive") return transcribeDriveMedia(source.normalizedUrl);
+  return {
+    success: false,
+    language: "pt-BR",
+    full_text: "",
+    segments: [],
+    file_id: null,
+    file_name: null,
+    file_type: null,
+    file_size: null,
+    duration_seconds: null,
+    transcript_source: "unsupported",
+    transcript_status: "unsupported",
+    provider: "gemini",
+    model: modelName(),
+    duration_ms: 0,
+    processing_metadata: { source_type: "unsupported" },
+    error_message: source.limitation ?? "Fonte nao suportada.",
+  };
 }

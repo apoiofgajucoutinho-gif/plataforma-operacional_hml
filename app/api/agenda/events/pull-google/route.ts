@@ -1,8 +1,34 @@
 import { NextResponse } from "next/server";
+import { env } from "@/lib/env";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { pullGoogleCalendarEventsToAgenda } from "@/modules/agenda/services/agenda-server";
+import {
+  pullAllGoogleCalendarConnectionsToAgenda,
+  pullGoogleCalendarEventsToAgenda,
+} from "@/modules/agenda/services/agenda-server";
+
+function isAuthorizedAutomatedSync(request: Request) {
+  const cronHeader = request.headers.get("x-vercel-cron");
+  const authorization = request.headers.get("authorization");
+  const token = authorization?.replace(/^Bearer\s+/i, "").trim();
+
+  return Boolean(cronHeader || (env.n8nIngestToken && token === env.n8nIngestToken));
+}
+
+export async function GET(request: Request) {
+  if (!isAuthorizedAutomatedSync(request)) {
+    return NextResponse.json({ error: "Sincronizacao automatica nao autorizada." }, { status: 401 });
+  }
+
+  const result = await pullAllGoogleCalendarConnectionsToAgenda();
+
+  if (!result.ok) {
+    return NextResponse.json(result, { status: 400 });
+  }
+
+  return NextResponse.json(result);
+}
 
 export async function POST() {
   try {

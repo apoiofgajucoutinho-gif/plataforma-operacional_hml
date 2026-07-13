@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/agenda/events/pull-google",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}

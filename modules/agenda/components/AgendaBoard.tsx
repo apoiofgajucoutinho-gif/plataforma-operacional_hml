@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   BarChart3,
@@ -43,6 +43,8 @@ const eventStatuses: Array<{ value: AgendaEventStatus; label: string }> = [
   { value: "concluido", label: "Concluido" },
   { value: "cancelado", label: "Cancelado" },
 ];
+
+const GOOGLE_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 const typeStyles: Record<AgendaEventType, string> = {
   paciente: "agenda-type-badge agenda-type-paciente",
@@ -226,6 +228,7 @@ export function AgendaBoard({
   const [isSaving, setIsSaving] = useState(false);
   const [isPullingGoogle, setIsPullingGoogle] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [lastGoogleSyncAt, setLastGoogleSyncAt] = useState<string | null>(null);
   const defaultStart = useMemo(() => toDateInputValue(defaultBusinessStart()), []);
   const defaultEnd = useMemo(() => endAfterStart(defaultStart), [defaultStart]);
   const [formStart, setFormStart] = useState(defaultStart);
@@ -319,14 +322,20 @@ export function AgendaBoard({
     }
   }
 
-  async function handlePullGoogleEvents() {
+  const pullGoogleEvents = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!isTenantReady) {
-      setMessage("Vincule seu usuario a um tenant antes de sincronizar.");
+      if (!silent) {
+        setMessage("Vincule seu usuario a um tenant antes de sincronizar.");
+      }
       return;
     }
 
+    if (isPullingGoogle) return;
+
     setIsPullingGoogle(true);
-    setMessage(null);
+    if (!silent) {
+      setMessage(null);
+    }
 
     try {
       const response = await fetch("/api/agenda/events/pull-google", {
@@ -350,26 +359,45 @@ export function AgendaBoard({
           result.events?.forEach((event) => merged.set(event.id, event));
           return sortEvents(Array.from(merged.values()));
         });
-
-        const firstSyncedEvent = sortEvents(result.events)[0];
-        if (firstSyncedEvent) {
-          setSelectedMonth(toMonthInputValue(new Date(firstSyncedEvent.inicio)));
-          setTimelineFilter("month");
-        }
       }
 
+      setLastGoogleSyncAt(new Date().toISOString());
       const imported = result.imported ?? 0;
       const updated = result.updated ?? 0;
       const cancelled = result.cancelled ?? 0;
-      setMessage(
-        `Google Agenda sincronizado: ${imported} importados, ${updated} atualizados, ${cancelled} cancelados. Exibindo o mes do evento sincronizado.`,
-      );
+      if (!silent) {
+        setMessage(
+          `Google Agenda sincronizado: ${imported} importados, ${updated} atualizados, ${cancelled} cancelados. Mes e filtros preservados.`,
+        );
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Erro ao sincronizar Google Agenda.");
+      if (!silent) {
+        setMessage(error instanceof Error ? error.message : "Erro ao sincronizar Google Agenda.");
+      }
     } finally {
       setIsPullingGoogle(false);
     }
-  }
+  }, [isPullingGoogle, isTenantReady]);
+
+  useEffect(() => {
+    if (!isTenantReady) return;
+
+    const syncWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void pullGoogleEvents({ silent: true });
+    };
+
+    const initialSync = window.setTimeout(syncWhenVisible, 1500);
+    const interval = window.setInterval(syncWhenVisible, GOOGLE_AUTO_SYNC_INTERVAL_MS);
+
+    document.addEventListener("visibilitychange", syncWhenVisible);
+
+    return () => {
+      window.clearTimeout(initialSync);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
+  }, [isTenantReady, pullGoogleEvents]);
 
   async function handleDeleteEvent(event: AgendaEvent) {
     if (!isTenantReady) {
@@ -711,13 +739,18 @@ export function AgendaBoard({
                   type="button"
                   variant="secondary"
                   className="h-10 px-3 text-sm"
-                  onClick={handlePullGoogleEvents}
+                  onClick={() => pullGoogleEvents()}
                   disabled={isPullingGoogle || !isTenantReady}
                   title="Importar eventos criados diretamente no Google Calendar"
                 >
                   <RefreshCw className={`h-4 w-4 ${isPullingGoogle ? "animate-spin" : ""}`} />
                   {isPullingGoogle ? "Sincronizando..." : "Sincronizar Google"}
                 </Button>
+                {lastGoogleSyncAt ? (
+                  <span className="text-xs font-semibold text-brand-teal/50">
+                    Auto: {formatBaseDateTime(lastGoogleSyncAt)}
+                  </span>
+                ) : null}
                 <span className="mx-1 hidden h-7 w-px bg-brand-sand/70 sm:block" />
                 <FilterButton
                   isActive={timelineFilter === "today"}
