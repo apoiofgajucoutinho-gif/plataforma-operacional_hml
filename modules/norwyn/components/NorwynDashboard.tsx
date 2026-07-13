@@ -15,6 +15,8 @@ import {
   Flag,
   Home,
   Layers3,
+  Link2,
+  Mic,
   Package,
   Pencil,
   Plus,
@@ -22,15 +24,16 @@ import {
   Repeat,
   Sparkles,
   Target,
+  Video,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { FinancialConfig } from "@/lib/financial-config";
 import { StrategyPlanner } from "@/modules/norwyn/components/StrategyPlanner";
 import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/modules/norwyn/services/evidence-engine";
 import type { InstagramPostMetric } from "@/modules/instagram/types";
-import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCampaign, NorwynCampaignApproval, NorwynCampaignMaterial, NorwynCampaignMaterialVersion, NorwynCommercialSale, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynMarketingQAReview, NorwynMarketingQAReviewItem, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus, StrategyAtividadeTask } from "@/modules/norwyn/types";
+import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCampaign, NorwynCampaignApproval, NorwynCampaignMaterial, NorwynCampaignMaterialVersion, NorwynCommercialSale, NorwynContentCapture, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynMarketingQAReview, NorwynMarketingQAReviewItem, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus, StrategyAtividadeTask } from "@/modules/norwyn/types";
 
-type NorwynTab = "home" | "business" | "mission" | "products" | "campaigns" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
+type NorwynTab = "home" | "business" | "mission" | "products" | "campaigns" | "capture" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
 type MissionPriority = "Principal" | "Estrategica" | "Continua";
 type MissionStatus = "Planejada" | "Ativa" | "Pausada" | "Encerrada" | "Arquivada";
 type BusinessObjectiveHorizon = "Trimestral" | "Semestral" | "Anual" | "Continuo";
@@ -1485,13 +1488,14 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [campaignApprovals, setCampaignApprovals] = useState<NorwynCampaignApproval[]>(context.campaignApprovals ?? []);
   const [marketingQAReviews, setMarketingQAReviews] = useState<NorwynMarketingQAReview[]>(context.marketingQAReviews ?? []);
   const [marketingQAReviewItems, setMarketingQAReviewItems] = useState<NorwynMarketingQAReviewItem[]>(context.marketingQAReviewItems ?? []);
+  const [contentCaptures, setContentCaptures] = useState<NorwynContentCapture[]>(context.contentCaptures ?? []);
   const [campaignMessage, setCampaignMessage] = useState<string | null>(null);
   const [engineMessage, setEngineMessage] = useState<string>("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab") as NorwynTab | null;
-    if (tab && ["home", "business", "mission", "products", "campaigns", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"].includes(tab)) {
+    if (tab && ["home", "business", "mission", "products", "campaigns", "capture", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"].includes(tab)) {
       setActiveTab(tab);
     }
   }, []);
@@ -1577,7 +1581,8 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     setCampaignApprovals(context.campaignApprovals ?? []);
     setMarketingQAReviews(context.marketingQAReviews ?? []);
     setMarketingQAReviewItems(context.marketingQAReviewItems ?? []);
-  }, [context.campaigns, context.campaignMaterials, context.campaignMaterialVersions, context.campaignApprovals, context.marketingQAReviews, context.marketingQAReviewItems]);
+    setContentCaptures(context.contentCaptures ?? []);
+  }, [context.campaigns, context.campaignMaterials, context.campaignMaterialVersions, context.campaignApprovals, context.marketingQAReviews, context.marketingQAReviewItems, context.contentCaptures]);
 
   function persist(next: NorwynMission[]) {
     setMissions(next);
@@ -1715,6 +1720,188 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     if (Array.isArray(json.marketingQAReviews)) setMarketingQAReviews(json.marketingQAReviews);
     if (Array.isArray(json.marketingQAReviewItems)) setMarketingQAReviewItems(json.marketingQAReviewItems);
     setCampaignMessage(json.message ?? "Marketing QA atualizado.");
+  }
+
+  async function mutateContentCapture(payload: Record<string, unknown>) {
+    const response = await fetch("/api/norwyn/content-capture", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json.error ?? "Nao foi possivel processar o conteudo.");
+    if (Array.isArray(json.contentCaptures)) setContentCaptures(json.contentCaptures);
+    return json.message ?? "Content Capture processado.";
+  }
+
+  function captureKnowledgeArray(capture: NorwynContentCapture, key: string) {
+    const value = capture.knowledge_generated?.[key];
+    return Array.isArray(value) ? value : [];
+  }
+
+  function captureDecision(capture: NorwynContentCapture) {
+    const value = capture.knowledge_generated?.decision;
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  }
+
+  function captureMainText(capture: NorwynContentCapture, fallback = "a validar") {
+    return capture.summary || capture.description || capture.transcript || fallback;
+  }
+
+  function buildCaptureDraftContent(capture: NorwynContentCapture, draftType: BriefingType) {
+    const decision = captureDecision(capture);
+    const quotes = captureKnowledgeArray(capture, "strong_quotes");
+    const ctas = captureKnowledgeArray(capture, "cta_suggestions");
+    const pains = captureKnowledgeArray(capture, "pain_points_human");
+    const objections = captureKnowledgeArray(capture, "objections_human");
+    const product =
+      String(decision.recommended_product_base ?? "") ||
+      String(capture.products_detected?.[0]?.produto_base ?? capture.products_detected?.[0]?.nome ?? "Produto a confirmar");
+    const bestCta = String((ctas[0] as any)?.cta ?? capture.cta?.[0] ?? "Salvar ou responder com a principal duvida.");
+    const hook = String((quotes[0] as any)?.quote ?? decision.main_theme ?? capture.title);
+    const base = [
+      `Origem: Content Capture "${capture.title}".`,
+      `Content Capture ID: ${capture.id}.`,
+      `Produto principal: ${product}.`,
+      `Missao relacionada: ${String(decision.related_mission ?? "a definir")}.`,
+      `Resumo: ${captureMainText(capture)}.`,
+      `Dores humanas: ${pains.map((item: any) => item.audience_language ?? item.technical).filter(Boolean).slice(0, 3).join(" | ") || "a validar"}.`,
+      `Objecoes: ${objections.map((item: any) => item.objection).filter(Boolean).slice(0, 3).join(" | ") || "a validar"}.`,
+      `Observacao: rascunho criado a partir de conhecimento capturado. Revisar no Marketing QA antes de usar.`,
+    ];
+
+    if (draftType === "Reels") {
+      return [
+        ...base,
+        "Formato: Reel.",
+        "Objetivo: transformar a fala em conteudo educativo curto.",
+        "Duracao sugerida: 45 segundos.",
+        `Gancho falado: ${hook}.`,
+        "Blocos:",
+        "0-5s | Falado: apresentar a tensao principal | Tela: pergunta curta | Visual: rosto da especialista.",
+        "5-20s | Falado: explicar o erro comum | Tela: ponto de decisao | Visual: corte com exemplo simples.",
+        "20-38s | Falado: orientar a decisao clinica sem prometer resultado | Tela: passo pratico | Visual: demonstracao verbal.",
+        `38-45s | Falado: ${bestCta} | Tela: CTA | Visual: encerramento direto.`,
+        `Legenda: ${capture.summary ?? capture.title}`,
+        `Titulo de capa: ${String(decision.main_theme ?? capture.title).slice(0, 48)}`,
+      ];
+    }
+
+    if (draftType === "Carrossel") {
+      return [
+        ...base,
+        "Formato: Carrossel.",
+        `Titulo: ${String(decision.main_theme ?? capture.title)}`,
+        "Promessa: organizar a decisao de forma visual e segura.",
+        "Slides:",
+        "1 | Gancho | O ajuste automatico nao encerra a decisao.",
+        "2 | Dor | O que costuma ficar confuso na pratica.",
+        "3 | Contexto | Quando olhar com mais cuidado.",
+        "4 | Sinal clinico | O que observar sem inventar resultado.",
+        "5 | Caminho | Como raciocinar antes de mexer.",
+        "6 | Erro comum | O que evitar.",
+        "7 | Aplicacao | Como levar para o proximo atendimento.",
+        `8 | CTA | ${bestCta}`,
+        "Direcao visual: linguagem limpa, passos curtos, destaque para decisoes.",
+      ];
+    }
+
+    if (draftType === "Stories") {
+      return [
+        ...base,
+        "Formato: Stories.",
+        "Sequencia:",
+        "1 | Abertura | Voce ja passou por isso no retorno?",
+        `2 | Dor | ${String((pains[0] as any)?.audience_language ?? "Ajustou, mas ainda ficou inseguro.")}`,
+        "3 | Contexto | Nem todo caso termina no automatico.",
+        "4 | Interacao | Caixa de pergunta: qual ajuste mais te trava hoje?",
+        "5 | Explicacao | Mostrar o raciocinio em uma frase.",
+        `6 | CTA | ${bestCta}`,
+      ];
+    }
+
+    if (draftType === "E-mail") {
+      return [
+        ...base,
+        "Formato: E-mail.",
+        `Assunto: ${String(decision.main_theme ?? capture.title)}`,
+        "Preheader: uma forma pratica de revisar a decisao antes do proximo atendimento.",
+        "Objetivo: educar e preparar para aprofundamento.",
+        `Corpo: ${capture.summary ?? "Abrir com a dor, explicar o raciocinio e fechar com proximo passo."}`,
+        `CTA: ${bestCta}`,
+        "Versao curta: usar como follow-up depois de uma interacao.",
+      ];
+    }
+
+    if (draftType === "WhatsApp / Suporte") {
+      return [
+        ...base,
+        "Formato: WhatsApp.",
+        "Contexto de uso: responder interesse ou duvida ja manifestada.",
+        `Preview inicial: ${String(decision.main_theme ?? capture.title)}`,
+        `Mensagem: ${capture.summary ?? "Vi sua duvida e faz sentido olhar esse ponto com calma antes de decidir."}`,
+        `CTA: ${bestCta}`,
+        "Observacao de frequencia: enviar apenas quando houver contexto ou resposta previa.",
+        "Segmento indicado: leads ou alunos com duvida sobre o tema.",
+      ];
+    }
+
+    if (draftType === "FAQ / Resposta publica") {
+      return [
+        ...base,
+        "Formato: FAQ.",
+        `Pergunta: ${String((objections[0] as any)?.how_it_appears ?? decision.main_theme ?? capture.title)}`,
+        `Resposta curta: ${String((objections[0] as any)?.possible_response ?? "Depende do contexto clinico e do objetivo do ajuste.")}`,
+        `Resposta completa: ${capture.summary ?? "Explicar sem prometer resultado e indicar criterios de decisao."}`,
+        `Produto relacionado: ${product}`,
+        "Risco de interpretacao: nao tratar inferencia como regra clinica universal.",
+        `Fonte/evidencia: Content Capture ${capture.id}.`,
+      ];
+    }
+
+    return [
+      ...base,
+      "Formato: Sequencia comercial.",
+      "Regua:",
+      "1 | Momento: apos manifestacao de interesse | Condicao: ainda nao comprou e nao pediu interrupcao | Objetivo: responder duvida principal.",
+      `Mensagem: ${capture.summary ?? capture.title}`,
+      `CTA: ${bestCta}`,
+      "Parar se: comprou, disse que nao tem interesse, pediu para nao contatar.",
+      "2 | Momento: apos nova pergunta | Condicao: houve resposta | Objetivo: aprofundar com orientacao especifica.",
+      "Nunca enviar repetidamente sem contexto ou opt-out.",
+    ];
+  }
+
+  function createDraftFromCapture(capture: NorwynContentCapture, draftType: BriefingType) {
+    const now = new Date().toISOString();
+    const content = buildCaptureDraftContent(capture, draftType);
+    const draft: NorwynDraft = {
+      id: makeId("draft-capture"),
+      briefingId: "",
+      title: `${draftType} - ${capture.title}`,
+      type: draftType,
+      missionId: capture.mission_id ?? "",
+      status: "rascunho automatico",
+      owner: "Norwyn",
+      generationMode: "template",
+      content,
+      execution: "nao executado",
+      result: "inconclusivo",
+      comment: "",
+      learning: "",
+      engineKey: `content-capture:${capture.id}:${draftType}`,
+      generatedBy: "template",
+      createdAt: now,
+      updatedAt: now,
+    };
+    persistDrafts([draft, ...drafts]);
+    addKnowledgeEvent({
+      type: "draft_generated",
+      title: draft.title,
+      status: "rascunho criado",
+      evidence: [`Capture: ${capture.title}`, `Tipo: ${draftType}`],
+    });
+    setActiveTab("studio");
   }
 
   function addKnowledgeEvent(event: Omit<KnowledgeEvent, "id" | "createdAt" | "updatedAt">) {
@@ -2024,6 +2211,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         <TabButton active={activeTab === "campaigns"} onClick={() => setActiveTab("campaigns")}>
           <Send className="h-4 w-4" /> Campanhas
         </TabButton>
+        <TabButton active={activeTab === "capture"} onClick={() => setActiveTab("capture")}>
+          <Video className="h-4 w-4" /> Content Capture
+        </TabButton>
         <TabButton active={activeTab === "intelligence"} onClick={() => setActiveTab("intelligence")}>
           <Layers3 className="h-4 w-4" /> Intelligence
         </TabButton>
@@ -2153,6 +2343,18 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
           role={context.role ?? null}
           mutateCampaigns={mutateCampaigns}
           mutateMarketingQA={mutateMarketingQA}
+        />
+      ) : null}
+
+      {activeTab === "capture" ? (
+        <ContentCaptureView
+          captures={contentCaptures}
+          products={products}
+          campaigns={campaigns}
+          missions={missions}
+          objectives={businessObjectives}
+          processCapture={mutateContentCapture}
+          createDraft={createDraftFromCapture}
         />
       ) : null}
 
@@ -4009,6 +4211,657 @@ function BriefingCenterView({
           }) : <EmptyState>Nenhum briefing salvo ainda.</EmptyState>}
         </div>
       </Card>
+    </div>
+  );
+}
+
+function ContentCaptureView({
+  captures,
+  products,
+  campaigns,
+  missions,
+  objectives,
+  processCapture,
+  createDraft,
+}: {
+  captures: NorwynContentCapture[];
+  products: NorwynProduct[];
+  campaigns: NorwynCampaign[];
+  missions: NorwynMission[];
+  objectives: BusinessObjective[];
+  processCapture: (payload: Record<string, unknown>) => Promise<string>;
+  createDraft: (capture: NorwynContentCapture, draftType: BriefingType) => void;
+}) {
+  const [form, setForm] = useState({
+    title: "",
+    capture_type: "video" as "video" | "audio",
+    product_id: "",
+    mission_id: "",
+    campaign_id: "",
+    objective_id: "",
+    drive_url: "",
+    description: "",
+  });
+  const [processing, setProcessing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(captures[0]?.id ?? null);
+  const selectedCapture = captures.find((capture) => capture.id === selectedCaptureId) ?? captures[0] ?? null;
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [editingTranscript, setEditingTranscript] = useState(false);
+  const [manualTranscript, setManualTranscript] = useState("");
+  const draftOptions: Array<{ label: string; type: BriefingType }> = [
+    { label: "Reel", type: "Reels" },
+    { label: "Carrossel", type: "Carrossel" },
+    { label: "Stories", type: "Stories" },
+    { label: "Email", type: "E-mail" },
+    { label: "WhatsApp", type: "WhatsApp / Suporte" },
+    { label: "FAQ", type: "FAQ / Resposta publica" },
+    { label: "Sequencia Comercial", type: "Mensagem de recuperacao" },
+  ];
+
+  useEffect(() => {
+    if (!selectedCaptureId && captures[0]?.id) setSelectedCaptureId(captures[0].id);
+  }, [captures, selectedCaptureId]);
+
+  useEffect(() => {
+    setManualTranscript(selectedCapture?.transcript ?? "");
+    setEditingTranscript(false);
+  }, [selectedCapture?.id, selectedCapture?.transcript]);
+
+  async function submitCapture() {
+    if (processing) return;
+    setMessage(null);
+    setProcessing(true);
+    try {
+      const mission = missions.find((item) => item.id === form.mission_id);
+      const resultMessage = await processCapture({
+        ...form,
+        mission_name: mission?.name ?? "",
+      });
+      setMessage(resultMessage);
+      setForm((current) => ({
+        ...current,
+        title: "",
+        drive_url: "",
+        description: "",
+      }));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel processar o conteudo.");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function reprocessCapture(capture: NorwynContentCapture, transcript?: string) {
+    if (processing) return;
+    setMessage(null);
+    setProcessing(true);
+    try {
+      const resultMessage = await processCapture({
+        action: "reprocess",
+        capture_id: capture.id,
+        ...(transcript?.trim() ? { manual_transcript: transcript.trim() } : {}),
+      });
+      setMessage(resultMessage);
+      setEditingTranscript(false);
+      setShowTranscript(true);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel reprocessar a captura.");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function copyTranscript(capture: NorwynContentCapture) {
+    const value = capture.transcript ?? "";
+    if (!value) {
+      setMessage("Nao ha transcricao para copiar.");
+      return;
+    }
+    await navigator.clipboard.writeText(value);
+    setMessage("Transcricao copiada.");
+  }
+
+  async function selectPrimaryProduct(capture: NorwynContentCapture, productId: string | null) {
+    setMessage(null);
+    try {
+      const resultMessage = await processCapture({ action: "select_product", capture_id: capture.id, product_id: productId });
+      setMessage(resultMessage);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar o produto principal.");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <SectionTitle icon={<Video className="h-5 w-5" />} title="Content Capture" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
+              A especialista ensina, a Norwyn organiza. Links publicos do Google Drive sao transcritos no backend quando o arquivo esta acessivel. Nada e publicado automaticamente.
+            </p>
+          </div>
+          <span className="rounded-full bg-[#FFF3C7] px-3 py-1 text-xs font-black uppercase text-brand-clay">
+            Beta - conhecimento estruturado
+          </span>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <SectionTitle icon={<Mic className="h-5 w-5" />} title="Nova captura" />
+          <div className="mt-4 grid gap-3">
+            <label className="grid gap-1 text-sm font-bold text-brand-teal">
+              Titulo
+              <input
+                className="form-input"
+                value={form.title}
+                onChange={(event) => setForm({ ...form, title: event.target.value })}
+                placeholder="Ex: Duvidas sobre acesso ao curso"
+              />
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-sm font-bold text-brand-teal">
+                Tipo
+                <select
+                  className="form-input"
+                  value={form.capture_type}
+                  onChange={(event) => setForm({ ...form, capture_type: event.target.value as "video" | "audio" })}
+                >
+                  <option value="video">Video</option>
+                  <option value="audio">Audio</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm font-bold text-brand-teal">
+                Produto relacionado
+                <select
+                  className="form-input"
+                  value={form.product_id}
+                  onChange={(event) => setForm({ ...form, product_id: event.target.value })}
+                >
+                  <option value="">Sem produto vinculado</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>{product.nome_oficial}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-sm font-bold text-brand-teal">
+                Missao relacionada
+                <select
+                  className="form-input"
+                  value={form.mission_id}
+                  onChange={(event) => setForm({ ...form, mission_id: event.target.value })}
+                >
+                  <option value="">Sem missao vinculada</option>
+                  {missions.map((mission) => (
+                    <option key={mission.id} value={mission.id}>{mission.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm font-bold text-brand-teal">
+                Campanha opcional
+                <select
+                  className="form-input"
+                  value={form.campaign_id}
+                  onChange={(event) => setForm({ ...form, campaign_id: event.target.value })}
+                >
+                  <option value="">Sem campanha</option>
+                  {campaigns.map((campaign) => (
+                    <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="grid gap-1 text-sm font-bold text-brand-teal">
+              Objetivo opcional
+              <select
+                className="form-input"
+                value={form.objective_id}
+                onChange={(event) => setForm({ ...form, objective_id: event.target.value })}
+              >
+                <option value="">Sem objetivo</option>
+                {objectives.map((objective) => (
+                  <option key={objective.id} value={objective.id}>{objective.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm font-bold text-brand-teal">
+              Link Google Drive
+              <div className="relative">
+                <Link2 className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-brand-teal/45" />
+                <input
+                  className="form-input pl-9"
+                  value={form.drive_url}
+                  onChange={(event) => setForm({ ...form, drive_url: event.target.value })}
+                  placeholder="https://drive.google.com/..."
+                />
+              </div>
+            </label>
+            <label className="grid gap-1 text-sm font-bold text-brand-teal">
+              Descricao opcional
+              <textarea
+                className="form-input min-h-28"
+                value={form.description}
+                onChange={(event) => setForm({ ...form, description: event.target.value })}
+                placeholder="Opcional: cole notas, pontos principais ou uma transcricao manual. Se o Drive bloquear o arquivo, este texto preserva o fluxo."
+              />
+            </label>
+            <button
+              type="button"
+              onClick={submitCapture}
+              disabled={processing}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-teal px-4 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Sparkles className="h-4 w-4" /> {processing ? "Processando..." : "Processar Conteudo"}
+            </button>
+            {message ? <p className="rounded-md bg-[#F4F1EA] p-3 text-sm font-semibold text-brand-teal">{message}</p> : null}
+          </div>
+        </Card>
+
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <SectionTitle icon={<BookOpen className="h-5 w-5" />} title="Capturas recentes" />
+          <div className="mt-4 grid gap-3">
+            {captures.length ? captures.slice(0, 8).map((capture) => (
+              <button
+                key={capture.id}
+                type="button"
+                onClick={() => setSelectedCaptureId(capture.id)}
+                className={`rounded-md border p-3 text-left transition ${
+                  selectedCapture?.id === capture.id ? "border-brand-clay bg-[#FFF8F1]" : "border-brand-sand bg-white/85 hover:border-brand-clay/50"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-black text-brand-teal">{capture.title}</p>
+                  <span className="rounded-full bg-[#F4F1EA] px-2 py-1 text-[11px] font-black uppercase text-brand-clay">{capture.status}</span>
+                </div>
+                <p className="mt-1 text-xs font-semibold text-brand-teal/55">{capture.capture_type === "audio" ? "Audio" : "Video"} - {formatUpdatedAt(capture.updated_at)}</p>
+                <p className="mt-2 line-clamp-2 text-sm leading-6 text-brand-teal/65">{capture.summary ?? capture.description ?? "Aguardando processamento."}</p>
+              </button>
+            )) : <EmptyState>Nenhuma captura registrada ainda.</EmptyState>}
+          </div>
+        </Card>
+      </div>
+
+      {selectedCapture ? (
+        <Card className="border-[#E9CBD1] p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase text-brand-clay">Resultado estruturado</p>
+              <h3 className="mt-1 text-xl font-semibold text-brand-teal">{selectedCapture.title}</h3>
+              <p className="mt-1 text-sm text-brand-teal/60">
+                Provider: {selectedCapture.provider ?? "-"} {selectedCapture.model ? `- ${selectedCapture.model}` : ""} - {selectedCapture.duration_ms ?? 0}ms
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => reprocessCapture(selectedCapture)}
+                disabled={processing}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal disabled:opacity-60"
+              >
+                <Repeat className="h-4 w-4" /> Reprocessar captura
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTranscript((current) => !current)}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal"
+              >
+                <Eye className="h-4 w-4" /> {showTranscript ? "Ocultar transcricao" : "Ver transcricao"}
+              </button>
+              <button
+                type="button"
+                onClick={() => copyTranscript(selectedCapture)}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal"
+              >
+                <Copy className="h-4 w-4" /> Copiar transcricao
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTranscript(true);
+                  setEditingTranscript((current) => !current);
+                }}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal"
+              >
+                <Pencil className="h-4 w-4" /> {selectedCapture.transcript ? "Editar transcricao" : "Colar transcricao"}
+              </button>
+              <a href={selectedCapture.drive_url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal">
+                <Link2 className="h-4 w-4" /> Abrir referencia
+              </a>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2 text-xs font-black uppercase">
+            <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Status: {selectedCapture.status}</span>
+            <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Transcricao: {selectedCapture.transcript_status ?? "sem status"}</span>
+            <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Fonte: {selectedCapture.transcript_source ?? "nao definida"}</span>
+            {selectedCapture.file_name ? <span className="rounded-full bg-[#F4F1EA] px-3 py-1 text-brand-clay">Arquivo: {selectedCapture.file_name}</span> : null}
+          </div>
+
+          <CaptureDecisionBlock capture={selectedCapture} />
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <div className="rounded-md border border-brand-sand bg-white/85 p-4">
+              <p className="text-xs font-black uppercase text-brand-clay">Resumo Executivo</p>
+              <p className="mt-2 text-sm leading-6 text-brand-teal/70">{selectedCapture.summary ?? "Sem resumo ainda."}</p>
+            </div>
+            <div className="rounded-md border border-brand-sand bg-white/85 p-4">
+              <p className="text-xs font-black uppercase text-brand-clay">Transcricao / nota operacional</p>
+              <p className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-sm leading-6 text-brand-teal/70">{selectedCapture.transcript ?? "Sem transcricao registrada."}</p>
+            </div>
+          </div>
+
+          {showTranscript ? (
+            <div className="mt-4 rounded-md border border-brand-sand bg-white/85 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase text-brand-clay">Transcricao completa</p>
+                  <p className="mt-1 text-sm text-brand-teal/60">
+                    {selectedCapture.transcript_source === "manual_edit"
+                      ? "Transcricao editada manualmente pela equipe."
+                      : selectedCapture.transcript_source === "gemini_files_api"
+                        ? "Transcricao automatica gerada a partir do arquivo do Google Drive."
+                        : "Use a edicao manual se o Google Drive bloquear o arquivo."}
+                  </p>
+                </div>
+                {selectedCapture.error_message ? (
+                  <span className="max-w-2xl rounded-md bg-[#FFF3C7] px-3 py-2 text-xs font-bold text-brand-clay">{selectedCapture.error_message}</span>
+                ) : null}
+              </div>
+              {editingTranscript ? (
+                <div className="mt-3 grid gap-3">
+                  <textarea
+                    className="form-input min-h-64 whitespace-pre-wrap"
+                    value={manualTranscript}
+                    onChange={(event) => setManualTranscript(event.target.value)}
+                    placeholder="Cole aqui a transcricao real para reprocessar a analise."
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => reprocessCapture(selectedCapture, manualTranscript)}
+                      disabled={processing || !manualTranscript.trim()}
+                      className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-teal px-3 text-sm font-black text-white disabled:opacity-60"
+                    >
+                      <Repeat className="h-4 w-4" /> Salvar e reprocessar analise
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualTranscript(selectedCapture.transcript ?? "");
+                        setEditingTranscript(false);
+                      }}
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-brand-sand px-3 text-sm font-bold text-brand-teal"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 max-h-96 overflow-auto rounded-md border border-brand-sand bg-[#FBF8F2] p-3">
+                  <p className="whitespace-pre-wrap text-sm leading-6 text-brand-teal/75">{selectedCapture.transcript ?? "Sem transcricao registrada."}</p>
+                </div>
+              )}
+              {Array.isArray(selectedCapture.transcript_segments) && selectedCapture.transcript_segments.length ? (
+                <div className="mt-3 rounded-md border border-brand-sand bg-[#FBF8F2] p-3">
+                  <p className="text-xs font-black uppercase text-brand-clay">Segmentos</p>
+                  <div className="mt-2 grid max-h-60 gap-2 overflow-auto text-sm text-brand-teal/70">
+                    {selectedCapture.transcript_segments.slice(0, 30).map((segment, index) => (
+                      <p key={`segment-${selectedCapture.id}-${index}`}>
+                        <span className="font-black text-brand-teal">
+                          {String(segment.start_seconds ?? "-")}s - {String(segment.end_seconds ?? "-")}s:
+                        </span>{" "}
+                        {String(segment.text ?? "")}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <CaptureList title="Topicos" items={selectedCapture.topics} />
+            <CaptureList title="Casos clinicos" items={selectedCapture.cases} />
+            <CaptureStructuredList title="Dores humanas" items={selectedCapture.knowledge_generated?.pain_points_human} fallback={selectedCapture.pain_points} />
+            <CaptureStructuredList title="Objecoes" items={selectedCapture.knowledge_generated?.objections_human} fallback={selectedCapture.objections} />
+            <CaptureStructuredList title="Falas exatas da especialista" items={selectedCapture.knowledge_generated?.strong_quotes} fallback={selectedCapture.quotes} />
+            <CaptureStructuredList title="Headlines sugeridas" items={selectedCapture.knowledge_generated?.suggested_headlines} />
+            <CaptureStructuredList title="CTA por intencao" items={selectedCapture.knowledge_generated?.cta_suggestions} fallback={selectedCapture.cta} />
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <ProductRelationList
+              capture={selectedCapture}
+              products={products}
+              selectPrimaryProduct={selectPrimaryProduct}
+            />
+            <ReferenceList title="Conteudos semelhantes" items={selectedCapture.similar_content} labelKeys={["title", "similarity_percent", "recommendation"]} />
+            <ReferenceList title="Campanhas semelhantes" items={selectedCapture.similar_campaigns} labelKeys={["name", "similarity_percent", "status"]} />
+          </div>
+
+          <CaptureDiagnostics capture={selectedCapture} />
+
+          <div className="mt-4 rounded-md border border-brand-sand bg-white/85 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-brand-clay">Gerar conteudos</p>
+                <p className="mt-1 text-sm text-brand-teal/65">Cria rascunhos no Studio. Nada e publicado automaticamente.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {draftOptions.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    onClick={() => createDraft(selectedCapture, option.type)}
+                    className="inline-flex h-8 items-center gap-2 rounded-md bg-brand-teal px-3 text-xs font-black text-white"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" /> {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+function CaptureList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-md border border-brand-sand bg-white/85 p-4">
+      <p className="text-xs font-black uppercase text-brand-clay">{title}</p>
+      <ul className="mt-2 grid gap-2 text-sm leading-6 text-brand-teal/70">
+        {items?.length ? items.slice(0, 8).map((item, index) => <li key={`${title}-${index}`}>- {item}</li>) : <li className="text-brand-teal/45">Ainda sem itens.</li>}
+      </ul>
+    </div>
+  );
+}
+
+function compactRecordText(item: Record<string, unknown>) {
+  const priorityKeys = [
+    "quote",
+    "headline",
+    "cta",
+    "technical",
+    "audience_language",
+    "objection",
+    "how_it_appears",
+    "possible_response",
+    "title",
+    "reason",
+    "evidence",
+    "recommendation",
+  ];
+  return priorityKeys
+    .map((key) => item[key])
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(" | ");
+}
+
+function arrayFromUnknown(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === "object") as Array<Record<string, unknown>> : [];
+}
+
+function CaptureStructuredList({ title, items, fallback }: { title: string; items: unknown; fallback?: string[] }) {
+  const structured = arrayFromUnknown(items);
+  return (
+    <div className="rounded-md border border-brand-sand bg-white/85 p-4">
+      <p className="text-xs font-black uppercase text-brand-clay">{title}</p>
+      <div className="mt-2 grid gap-2 text-sm leading-6 text-brand-teal/70">
+        {structured.length ? structured.slice(0, 6).map((item, index) => (
+          <div key={`${title}-${index}`} className="rounded-md bg-[#F8F4ED] p-2">
+            <p className="font-bold text-brand-teal">{compactRecordText(item) || "Item estruturado"}</p>
+            {item.confidence ? <p className="mt-1 text-xs text-brand-teal/55">Confianca: {String(item.confidence)}%</p> : null}
+            {item.label ? <p className="mt-1 text-xs font-bold text-brand-clay">{String(item.label)}</p> : null}
+            {item.recommended_use ? <p className="mt-1 text-xs text-brand-teal/55">Uso: {String(item.recommended_use)}</p> : null}
+          </div>
+        )) : fallback?.length ? fallback.slice(0, 6).map((item, index) => <p key={`${title}-fallback-${index}`}>- {item}</p>) : <p className="text-brand-teal/45">Ainda sem itens.</p>}
+      </div>
+    </div>
+  );
+}
+
+function CaptureDecisionBlock({ capture }: { capture: NorwynContentCapture }) {
+  const decision = capture.knowledge_generated?.decision && typeof capture.knowledge_generated.decision === "object"
+    ? capture.knowledge_generated.decision as Record<string, unknown>
+    : {};
+  const decisionRows: Array<[string, unknown]> = [
+    ["Produto principal", decision.recommended_product_base],
+    ["Missao", decision.related_mission],
+    ["Melhor formato", decision.best_format],
+    ["Segundo uso", decision.second_best_format],
+    ["Nivel comercial", decision.commercial_level],
+    ["Originalidade", decision.originality],
+    ["Principal risco", decision.main_risk],
+    ["Proximo passo", decision.next_step],
+  ];
+  return (
+    <div className="mt-4 rounded-md border border-[#E9CBD1] bg-[#FFF8F1] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase text-brand-clay">Como aproveitar esta captura</p>
+          <h4 className="mt-1 text-lg font-semibold text-brand-teal">{String(decision.main_theme ?? capture.topics?.[0] ?? capture.title)}</h4>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-brand-teal">
+          Confianca {String(capture.confidence ?? capture.knowledge_generated?.confianca ?? "-")}%
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        {decisionRows.map(([label, value]) => (
+          <div key={label} className="rounded-md bg-white/80 p-3">
+            <p className="text-[11px] font-black uppercase text-brand-clay">{label}</p>
+            <p className="mt-1 text-sm font-semibold leading-5 text-brand-teal">{String(value ?? "a validar")}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductRelationList({
+  capture,
+  products,
+  selectPrimaryProduct,
+}: {
+  capture: NorwynContentCapture;
+  products: NorwynProduct[];
+  selectPrimaryProduct: (capture: NorwynContentCapture, productId: string | null) => void;
+}) {
+  const related = arrayFromUnknown(capture.knowledge_generated?.related_products).length
+    ? arrayFromUnknown(capture.knowledge_generated?.related_products)
+    : capture.products_detected;
+  const selected = capture.manually_selected_product_id ?? capture.primary_product_id;
+  return (
+    <div className="rounded-md border border-brand-sand bg-white/85 p-4">
+      <p className="text-xs font-black uppercase text-brand-clay">Produtos e temas relacionados</p>
+      <div className="mt-2 grid gap-2">
+        {related?.length ? related.slice(0, 6).map((item, index) => {
+          const productId = String(item.product_id ?? "");
+          const isSelected = productId && selected === productId;
+          return (
+            <div key={`${productId || "product"}-${index}`} className={`rounded-md p-2 text-xs font-semibold ${isSelected ? "bg-[#E5F7EF] text-brand-teal" : "bg-[#F8F4ED] text-brand-teal/70"}`}>
+              <p className="font-black">{String(item.nome ?? item.nome_oficial ?? item.produto_base ?? "Tema relacionado")}</p>
+              <p className="mt-1">{String(item.tipo ?? "tema")} - {String(item.relation ?? "relacionado")} - {String(item.confidence ?? "-")}%</p>
+              {Array.isArray(item.evidence) && item.evidence.length ? <p className="mt-1 text-brand-teal/55">Evidencia: {item.evidence.slice(0, 3).join(", ")}</p> : null}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {productId ? (
+                  <button
+                    type="button"
+                    onClick={() => selectPrimaryProduct(capture, productId)}
+                    className="rounded-md border border-brand-sand bg-white px-2 py-1 text-[11px] font-black text-brand-teal"
+                  >
+                    {isSelected ? "Selecionado" : "Selecionar principal"}
+                  </button>
+                ) : null}
+                {isSelected ? (
+                  <button
+                    type="button"
+                    onClick={() => selectPrimaryProduct(capture, null)}
+                    className="rounded-md border border-brand-sand bg-white px-2 py-1 text-[11px] font-black text-brand-clay"
+                  >
+                    Remover vinculo
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          );
+        }) : <p className="text-sm text-brand-teal/45">Nenhum produto ou tema relacionado encontrado.</p>}
+      </div>
+      <label className="mt-3 grid gap-1 text-xs font-black uppercase text-brand-clay">
+        Vinculo manual
+        <select
+          className="form-input text-sm normal-case"
+          value={selected ?? ""}
+          onChange={(event) => selectPrimaryProduct(capture, event.target.value || null)}
+        >
+          <option value="">Sem produto principal manual</option>
+          {products.map((product) => (
+            <option key={product.id} value={product.id}>{product.nome_oficial}</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function CaptureDiagnostics({ capture }: { capture: NorwynContentCapture }) {
+  return (
+    <div className="mt-4 rounded-md border border-brand-sand bg-white/85 p-4">
+      <p className="text-xs font-black uppercase text-brand-clay">Diagnostico tecnico</p>
+      <div className="mt-3 grid gap-3 text-sm text-brand-teal/70 md:grid-cols-3">
+        <p><strong>Provider:</strong> {capture.provider ?? "-"}</p>
+        <p><strong>Modelo:</strong> {capture.model ?? "-"}</p>
+        <p><strong>Tempo:</strong> {capture.duration_ms ?? 0}ms</p>
+        <p><strong>Transcricao:</strong> {capture.transcript_status ?? "nao informado"}</p>
+        <p><strong>Origem:</strong> {capture.transcript_source ?? "nao informado"}</p>
+        <p><strong>Versao:</strong> {capture.result_version ?? 1}</p>
+      </div>
+      {capture.error_message ? <p className="mt-3 rounded-md bg-[#FFF3C7] p-2 text-sm font-semibold text-brand-clay">{capture.error_message}</p> : null}
+    </div>
+  );
+}
+
+function ReferenceList({ title, items, labelKeys }: { title: string; items: Array<Record<string, unknown>>; labelKeys: string[] }) {
+  return (
+    <div className="rounded-md border border-brand-sand bg-white/85 p-4">
+      <p className="text-xs font-black uppercase text-brand-clay">{title}</p>
+      <div className="mt-2 grid gap-2">
+        {items?.length ? items.slice(0, 6).map((item, index) => (
+          <div key={`${title}-${index}`} className="rounded-md bg-[#F8F4ED] p-2 text-xs font-semibold text-brand-teal/70">
+            {labelKeys.map((key) => String(item[key] ?? "")).filter(Boolean).join(" - ") || "Item relacionado"}
+            {item.reason ? <p className="mt-1 text-brand-teal/55">Motivo: {String(item.reason)}</p> : null}
+            {item.open_url ? <a href={String(item.open_url)} target="_blank" rel="noreferrer" className="mt-1 inline-flex font-black text-brand-teal underline">Abrir post</a> : null}
+          </div>
+        )) : <p className="text-sm text-brand-teal/45">Nenhuma referencia encontrada.</p>}
+      </div>
     </div>
   );
 }

@@ -444,6 +444,70 @@ export type NorwynMarketingQAReviewItem = {
   created_at: string;
 };
 
+export type NorwynContentCapture = {
+  id: string;
+  tenant_id: string;
+  title: string;
+  capture_type: "video" | "audio";
+  drive_url: string;
+  status:
+    | "aguardando"
+    | "acessando_arquivo"
+    | "enviando_para_transcricao"
+    | "transcrevendo"
+    | "analisando"
+    | "processando"
+    | "concluido"
+    | "concluido_parcialmente"
+    | "erro";
+  product_id: string | null;
+  mission_id: string | null;
+  campaign_id: string | null;
+  objective_id: string | null;
+  description: string | null;
+  summary: string | null;
+  transcript: string | null;
+  transcript_source: string | null;
+  transcript_status: string | null;
+  transcript_segments: Array<Record<string, unknown>>;
+  file_id: string | null;
+  file_name: string | null;
+  file_type: string | null;
+  file_size: number | null;
+  duration_seconds: number | null;
+  topics: string[];
+  pain_points: string[];
+  objections: string[];
+  cases: string[];
+  quotes: string[];
+  cta: string[];
+  products_detected: Array<Record<string, unknown>>;
+  related_missions: string[];
+  tags: string[];
+  knowledge_generated: Record<string, unknown>;
+  similar_content: Array<Record<string, unknown>>;
+  similar_campaigns: Array<Record<string, unknown>>;
+  winning_plays: Array<Record<string, unknown>>;
+  provider: string | null;
+  model: string | null;
+  duration_ms: number | null;
+  success: boolean;
+  error_message: string | null;
+  usage_json: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  processing_metadata: Record<string, unknown>;
+  result_version: number | null;
+  result_versions: Array<Record<string, unknown>>;
+  primary_product_id: string | null;
+  manually_selected_product_id: string | null;
+  confidence: number | null;
+  processing_started_at: string | null;
+  processing_completed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type NorwynContext = {
   role?: string | null;
   tenant: { id: string; nome: string } | null;
@@ -469,4 +533,5 @@ export type NorwynContext = {
   campaignApprovals: NorwynCampaignApproval[];
   marketingQAReviews: NorwynMarketingQAReview[];
   marketingQAReviewItems: NorwynMarketingQAReviewItem[];
+  contentCaptures: NorwynContentCapture[];
 };

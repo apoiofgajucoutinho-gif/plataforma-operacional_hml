@@ -60,6 +60,7 @@ function emptyContext(partial?: Partial<NorwynContext>): NorwynContext {
     campaignApprovals: [],
     marketingQAReviews: [],
     marketingQAReviewItems: [],
+    contentCaptures: [],
     ...partial,
   };
 }
@@ -146,6 +147,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     campaignApprovalsResult,
     marketingQAReviewsResult,
     marketingQAReviewItemsResult,
+    contentCapturesResult,
   ] = await Promise.all([
     postQuery,
     dataClient
@@ -265,6 +267,12 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       .eq("tenant_id", membership.tenant_id)
       .order("created_at", { ascending: false })
       .limit(1000),
+    dataClient
+      .from("content_capture")
+        .select("id, tenant_id, title, capture_type, drive_url, status, product_id, mission_id, campaign_id, objective_id, description, summary, transcript, transcript_source, transcript_status, transcript_segments, file_id, file_name, file_type, file_size, duration_seconds, topics, pain_points, objections, cases, quotes, cta, products_detected, related_missions, tags, knowledge_generated, similar_content, similar_campaigns, winning_plays, provider, model, duration_ms, success, error_message, usage_json, metadata, processing_metadata, result_version, result_versions, primary_product_id, manually_selected_product_id, confidence, processing_started_at, processing_completed_at, created_by, created_at, updated_at")
+      .eq("tenant_id", membership.tenant_id)
+      .order("updated_at", { ascending: false })
+      .limit(200),
   ]);
 
   const metricsByPost = new Map((followerMetricsResult.data ?? []).map((metric: any) => [metric.post_id, metric]));
@@ -296,6 +304,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     ...(contentEventsResult.data ?? []).map((event: any) => event.updated_at ?? event.published_at),
     ...(campaignsResult.data ?? []).map((campaign: any) => campaign.updated_at),
     ...(campaignMaterialsResult.data ?? []).map((material: any) => material.updated_at),
+    ...(contentCapturesResult.data ?? []).map((capture: any) => capture.updated_at ?? capture.created_at),
   ]
     .filter(Boolean)
     .sort()
@@ -335,5 +344,6 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     campaignApprovals: campaignApprovalsResult.data ?? [],
     marketingQAReviews: marketingQAReviewsResult.data ?? [],
     marketingQAReviewItems: marketingQAReviewItemsResult.data ?? [],
+    contentCaptures: contentCapturesResult.data ?? [],
   };
 }
