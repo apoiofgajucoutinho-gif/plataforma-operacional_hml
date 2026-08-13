@@ -6,7 +6,10 @@ export const localBypassUser = {
 };
 
 export function isLocalAuthBypassEnabled() {
-  return process.env.NODE_ENV === "development" && process.env.LOCAL_AUTH_BYPASS !== "false";
+  const isLocalRuntime = process.env.NODE_ENV === "development" && !process.env.VERCEL;
+  const explicitBypass = process.env.LOCAL_AUTH_BYPASS === "true";
+
+  return isLocalRuntime && explicitBypass;
 }
 
 export function getLocalBypassUser() {
@@ -32,5 +35,5 @@ export async function getLocalBypassMembership(dataClient: any) {
 }
 
 export function getLocalBypassAllowedModules() {
-  return allModules;
+  return isLocalAuthBypassEnabled() ? allModules : [];
 }

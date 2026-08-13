@@ -99,6 +99,8 @@ type NorwynMission = {
   mainGoal: string;
   goalUnit: string;
   products: string;
+  audience?: string;
+  budget?: string;
   sources: string[];
   owner: string;
   notes: string;
@@ -217,6 +219,53 @@ type KnowledgeEvent = {
   evidence: string[];
   createdAt: string;
   updatedAt: string;
+};
+
+type OperationalEvidenceKind = "Dado real" | "Regra" | "Inferencia IA" | "Recomendacao";
+type OperationalStatus = "READY" | "PARTIAL" | "MOCK" | "BROKEN" | "BUILD" | "LATER";
+type OperationalTaskStatus =
+  | "Planejado"
+  | "Em producao"
+  | "Aguardando aprovacao"
+  | "Aguardando QA"
+  | "Homologado"
+  | "Publicado/Executado"
+  | "Bloqueado"
+  | "Concluido";
+
+type OperationalAuditItem = {
+  area: string;
+  status: OperationalStatus;
+  existing: string;
+  mvpUse: string;
+};
+
+type TodayPriority = {
+  id: string;
+  title: string;
+  priority: "critica" | "alta" | "media" | "baixa";
+  reason: string;
+  evidenceKind: OperationalEvidenceKind;
+  source: string;
+  action: string;
+};
+
+type OperationalPlanTask = {
+  id: string;
+  title: string;
+  missionId: string;
+  owner: string;
+  dueDate: string;
+  status: OperationalTaskStatus;
+  priority: "critica" | "alta" | "media" | "baixa";
+  dependencies: string[];
+  tool: string;
+  needsApproval: boolean;
+  needsQA: boolean;
+  copilotType: "Conteudo" | "Criativo de anuncio" | "Landing Page" | "E-mail" | "WhatsApp" | "Instagram Automation" | "QA";
+  objective: string;
+  hypothesis: string;
+  output: string[];
 };
 
 type BusinessObjective = {
@@ -526,6 +575,8 @@ function emptyMission(seed?: Partial<NorwynMission>): NorwynMission {
     mainGoal: "",
     goalUnit: "vendas",
     products: "",
+    audience: "",
+    budget: "",
     sources: ["Comercial", "Instagram"],
     owner: "",
     notes: "",
@@ -1470,6 +1521,414 @@ function buildOpportunityRadar(context: NorwynContext, mission: NorwynMission | 
   }];
 }
 
+function buildOperationalAudit(context: NorwynContext): OperationalAuditItem[] {
+  return [
+    {
+      area: "Dashboard / Executive Home",
+      status: "PARTIAL",
+      existing: "Home executiva, resumo, riscos e radar de oportunidades ja existem no modulo Norwyn.",
+      mvpUse: "Evoluido para responder o que fazer agora com prioridades rastreaveis.",
+    },
+    {
+      area: "Instagram / Directs / Comentarios",
+      status: context.posts.length || context.interactions.length ? "PARTIAL" : "BUILD",
+      existing: `${context.posts.length} posts e ${context.interactions.length} interacoes carregadas.`,
+      mvpUse: "Fonte para pautas, respostas, objecoes e sinais de audiencia. Cobertura depende dos webhooks Meta/n8n.",
+    },
+    {
+      area: "Inteligencia editorial / Content Lab",
+      status: context.contentEvents.length || context.contentCaptures.length ? "PARTIAL" : "MOCK",
+      existing: `${context.contentEvents.length} eventos de conteudo e ${context.contentCaptures.length} capturas.`,
+      mvpUse: "Reutilizado para winning plays, drafts e copiloto de conteudo.",
+    },
+    {
+      area: "Meta Ads",
+      status: context.adsRows.length ? "PARTIAL" : "BUILD",
+      existing: `${context.adsRows.length} linhas de Ads disponiveis.`,
+      mvpUse: "Gera alertas de criativo, CTR, frequencia e QA antes de escalar campanha.",
+    },
+    {
+      area: "Hotmart / Comercial / Produtos",
+      status: context.commercialSales.length || context.products.length ? "PARTIAL" : "BUILD",
+      existing: `${context.commercialSales.length} vendas e ${context.products.length} produtos no contexto.`,
+      mvpUse: "Fonte para priorizar produto, receita, recuperacao e Fonte da Verdade.",
+    },
+    {
+      area: "Campanhas / Aprovacoes / QA",
+      status: context.campaigns.length || context.marketingQAReviews.length ? "PARTIAL" : "BUILD",
+      existing: `${context.campaigns.length} campanhas, ${context.campaignApprovals.length} aprovacoes e ${context.marketingQAReviews.length} QAs.`,
+      mvpUse: "Fluxo persistido para material, versao, aprovacao humana e bloqueio objetivo de QA.",
+    },
+    {
+      area: "Calendario / Tarefas",
+      status: context.agendaEvents.length || context.atividades.length ? "PARTIAL" : "BUILD",
+      existing: `${context.agendaEvents.length} eventos e ${context.atividades.length} tarefas.`,
+      mvpUse: "Sensores de prazo, producao e risco operacional.",
+    },
+    {
+      area: "Agentes / Prompts / IA",
+      status: "PARTIAL",
+      existing: "Strategy Planner, Evidence Engine, Mission Engine e Marketing QA ja existem como servicos/componentes.",
+      mvpUse: "Centralizado como recomendações estruturadas; quando nao ha LLM, opera em modo assistido ou exploratorio.",
+    },
+    {
+      area: "Historico / Regras / Memoria",
+      status: "PARTIAL",
+      existing: "Knowledge local, learnings por missao, signals, produtos e QA ficam registrados.",
+      mvpUse: "Decision Log simples e aprendizado inicial sem promover correlacao a regra definitiva.",
+    },
+    {
+      area: "Integracoes externas",
+      status: "LATER",
+      existing: "n8n, Supabase, Meta, Hotmart e Telegram existem; Lovable, HeyGen, ActiveCampaign, SellFlux e ManyChat ficam como ferramentas externas.",
+      mvpUse: "Norwyn governa briefing, plano e QA; execucao segue manual ou externa nesta etapa.",
+    },
+  ];
+}
+
+function openStatus(value: string | null | undefined) {
+  return !["concluida", "concluido", "ignorada", "ignorado", "cancelada", "cancelado", "resolvido", "arquivado"].includes(normalizeKey(value));
+}
+
+function dueSoon(value: string | null | undefined, days = 3) {
+  const date = parseDate(value);
+  if (!date) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const limit = new Date(today);
+  limit.setDate(limit.getDate() + days);
+  return date >= today && date <= limit;
+}
+
+function buildTodayPriorities({
+  context,
+  activeMission,
+  opportunities,
+  campaigns,
+  materials,
+  approvals,
+  qaReviews,
+}: {
+  context: NorwynContext;
+  activeMission: NorwynMission | null;
+  opportunities: BriefingSeed[];
+  campaigns: NorwynCampaign[];
+  materials: NorwynCampaignMaterial[];
+  approvals: NorwynCampaignApproval[];
+  qaReviews: NorwynMarketingQAReview[];
+}): TodayPriority[] {
+  const items: TodayPriority[] = [];
+  const urgentTask = context.atividades.find((task) => openStatus(task.status) && (["alta", "urgente"].includes(normalizeKey(task.prioridade)) || dueSoon(task.prazo)));
+  const adAlert = context.adsRows.find((row) => Number(row.valor_gasto ?? 0) > 0 && inLastDays(row.data_referencia, 7) && (Number(row.ctr ?? 0) < 1 || Number(row.frequencia ?? 0) >= 3 || String(row.performance_status ?? "").toUpperCase() !== "OK"));
+  const pendingApproval = approvals.find((approval) => ["requested", "changes_requested"].includes(String(approval.status)));
+  const materialWaitingQA = materials.find((material) => ["draft", "em_producao", "aguardando_qa"].includes(normalizeKey(material.status)) && !qaReviews.some((review) => review.material_id === material.id));
+  const blockedReview = qaReviews.find((review) => ["blocked", "changes_required"].includes(review.status));
+  const upcomingEvent = context.agendaEvents.find((event) => dueSoon(event.inicio, 2) && openStatus(event.status));
+  const pendingInteraction = context.interactions.find((item) => item.status !== "respondido" && item.status !== "arquivado");
+  const firstOpportunity = opportunities[0];
+
+  if (blockedReview) {
+    items.push({
+      id: `qa-${blockedReview.id}`,
+      title: "Resolver bloqueio de QA antes de homologar",
+      priority: "critica",
+      reason: blockedReview.summary ?? "Existe revisao com bloqueio ou ajustes obrigatorios.",
+      evidenceKind: "Dado real",
+      source: "Marketing QA",
+      action: "Abrir Campanhas, revisar itens criticos e criar versao corrigida ou registrar excecao justificada.",
+    });
+  }
+
+  if (adAlert) {
+    items.push({
+      id: `ads-${adAlert.id}`,
+      title: `Revisar campanha ${adAlert.campanha ?? "sem nome"}`,
+      priority: Number(adAlert.ctr ?? 0) < 1 ? "alta" : "media",
+      reason: `CTR ${Number(adAlert.ctr ?? 0).toFixed(2)}%, frequencia ${Number(adAlert.frequencia ?? 0).toFixed(2)} e gasto ${Number(adAlert.valor_gasto ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}.`,
+      evidenceKind: "Dado real",
+      source: "Meta Ads",
+      action: "Gerar briefing de criativo alternativo e validar promessa, link, publico e oferta.",
+    });
+  }
+
+  if (pendingApproval) {
+    items.push({
+      id: `approval-${pendingApproval.id}`,
+      title: "Decidir aprovacao humana pendente",
+      priority: "alta",
+      reason: `Aprovacao em status ${pendingApproval.status} para material de campanha.`,
+      evidenceKind: "Dado real",
+      source: "Campaign Approvals",
+      action: "Aprovar, aprovar com alteracao, rejeitar ou pedir nova sugestao registrando justificativa.",
+    });
+  }
+
+  if (urgentTask) {
+    items.push({
+      id: `task-${urgentTask.id}`,
+      title: urgentTask.titulo,
+      priority: ["alta", "urgente"].includes(normalizeKey(urgentTask.prioridade)) ? "alta" : "media",
+      reason: `Tarefa aberta com prioridade ${urgentTask.prioridade ?? "-"} e prazo ${urgentTask.prazo ?? "nao informado"}.`,
+      evidenceKind: "Dado real",
+      source: "Atividades",
+      action: "Abrir tarefa, confirmar responsavel e mover para producao ou bloqueado.",
+    });
+  }
+
+  if (materialWaitingQA) {
+    items.push({
+      id: `material-${materialWaitingQA.id}`,
+      title: `Rodar QA em ${materialWaitingQA.title}`,
+      priority: "media",
+      reason: "Material existe, mas ainda nao possui revisao de QA registrada.",
+      evidenceKind: "Regra",
+      source: "Campanhas",
+      action: "Executar Marketing QA antes de homologar ou publicar.",
+    });
+  }
+
+  if (upcomingEvent) {
+    items.push({
+      id: `agenda-${upcomingEvent.id}`,
+      title: `Preparar ${upcomingEvent.titulo}`,
+      priority: "media",
+      reason: `Evento proximo em ${new Date(upcomingEvent.inicio).toLocaleString("pt-BR")}.`,
+      evidenceKind: "Dado real",
+      source: "Agenda",
+      action: "Conferir se existe conteudo, landing, CTA ou comunicacao necessaria.",
+    });
+  }
+
+  if (pendingInteraction) {
+    items.push({
+      id: `interaction-${pendingInteraction.id}`,
+      title: "Transformar interacao pendente em pauta ou resposta",
+      priority: pendingInteraction.potential === "alto" ? "alta" : "media",
+      reason: `Interacao ${pendingInteraction.potential ?? "sem potencial"} ainda nao respondida.`,
+      evidenceKind: "Dado real",
+      source: "Instagram",
+      action: "Responder, classificar objecao e gerar briefing se houver padrao recorrente.",
+    });
+  }
+
+  if (firstOpportunity) {
+    items.push({
+      id: `opportunity-${normalizeKey(firstOpportunity.title)}`,
+      title: firstOpportunity.title,
+      priority: firstOpportunity.priority === "Alta" ? "alta" : firstOpportunity.priority === "Media" ? "media" : "baixa",
+      reason: firstOpportunity.evidence?.[0] ?? firstOpportunity.rule ?? "Recomendacao gerada por leitura deterministica.",
+      evidenceKind: firstOpportunity.confidence && firstOpportunity.confidence >= 70 ? "Recomendacao" : "Inferencia IA",
+      source: firstOpportunity.sourceModule ?? "Norwyn",
+      action: "Criar briefing revisavel e validar antes de executar.",
+    });
+  }
+
+  if (activeMission && daysUntil(activeMission.endDate) != null && Number(daysUntil(activeMission.endDate)) <= 3) {
+    items.push({
+      id: `mission-deadline-${activeMission.id}`,
+      title: `Fechar proxima acao da missao ${activeMission.name}`,
+      priority: "alta",
+      reason: `Missao termina em ${daysUntil(activeMission.endDate)} dia(s).`,
+      evidenceKind: "Regra",
+      source: "Mission OS",
+      action: "Revisar plano, pendencias de QA e aprovacoes antes do encerramento.",
+    });
+  }
+
+  const order = { critica: 0, alta: 1, media: 2, baixa: 3 };
+  const seen = new Set<string>();
+  return items
+    .filter((item) => {
+      const key = `${item.title}-${item.source}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => order[a.priority] - order[b.priority])
+    .slice(0, 5);
+}
+
+function buildMissionExecutionPlan(mission: NorwynMission | null, context: NorwynContext, opportunities: BriefingSeed[]): OperationalPlanTask[] {
+  if (!mission) return [];
+  const due = mission.endDate || futureInput(7);
+  const product = missionProductLabels(mission)[0] || buildMissionSignals(context, mission).products[0] || "produto a confirmar";
+  const baseEvidence = opportunities[0]?.evidence?.[0] ?? operationalContextFor(context, mission).reason;
+  const canUseAds = mission.type === "Campanha Ads" || missionIsCommercial(mission);
+  const canUseRelationship = missionIsCommercial(mission) || mission.type === "Recuperacao Comercial" || mission.type === "Evergreen";
+  const tasks: OperationalPlanTask[] = [
+    {
+      id: `${mission.id}-strategy`,
+      title: "Validar estrategia recomendada",
+      missionId: mission.id,
+      owner: mission.owner || "Juliana / Jefferson",
+      dueDate: todayInput(),
+      status: "Planejado",
+      priority: "alta",
+      dependencies: ["Fonte da Verdade do produto revisada"],
+      tool: "Norwyn Strategy",
+      needsApproval: true,
+      needsQA: false,
+      copilotType: "QA",
+      objective: mission.objective || `Definir estrategia para ${product}.`,
+      hypothesis: baseEvidence,
+      output: [
+        "Diagnostico do que sabemos.",
+        "Hipoteses separadas de fatos.",
+        "Dados ausentes antes de escalar.",
+        "Metrica de sucesso da missao.",
+      ],
+    },
+    {
+      id: `${mission.id}-content-reel`,
+      title: `Criar Reel educativo - ${product}`,
+      missionId: mission.id,
+      owner: "Juliana",
+      dueDate: due,
+      status: "Planejado",
+      priority: "alta",
+      dependencies: ["Estrategia aprovada", "Produto e CTA oficiais confirmados"],
+      tool: "Content Lab / Instagram",
+      needsApproval: true,
+      needsQA: true,
+      copilotType: "Conteudo",
+      objective: `Gerar interesse em ${product} com uma dor ou erro comum da audiencia.`,
+      hypothesis: "Mostrar um erro comum aumenta identificacao sem afirmar resultado clinico.",
+      output: [
+        "Gancho: Se voce faz isso no atendimento, talvez esteja pulando uma decisao importante.",
+        "Roteiro 30-45s: dor, erro comum, criterio de decisao, exemplo anonimizado, CTA.",
+        "CTA: responder com a principal duvida ou acessar o link oficial cadastrado.",
+        "Variacoes: autoridade, dor, curiosidade.",
+      ],
+    },
+    {
+      id: `${mission.id}-landing`,
+      title: `Briefing de landing - ${product}`,
+      missionId: mission.id,
+      owner: "Jefferson / Lovable",
+      dueDate: due,
+      status: "Planejado",
+      priority: "media",
+      dependencies: ["Oferta, preco, checkout e datas na Fonte da Verdade"],
+      tool: "Lovable",
+      needsApproval: true,
+      needsQA: true,
+      copilotType: "Landing Page",
+      objective: "Garantir que a pagina esteja consistente com oferta, promessa e CTA.",
+      hypothesis: "Clareza de promessa, prova e objecoes reduz friccao de conversao.",
+      output: [
+        "Headline, promessa, publico, oferta, secoes, prova, objecoes e CTA.",
+        "Tracking necessario: UTMs e evento de checkout.",
+        "Hipoteses A/B: headline de dor versus headline de resultado esperado.",
+      ],
+    },
+  ];
+
+  if (canUseAds) {
+    tasks.push({
+      id: `${mission.id}-ad-creative`,
+      title: `Briefing de criativo de anuncio - ${product}`,
+      missionId: mission.id,
+      owner: "Gestor de trafego / Editor",
+      dueDate: due,
+      status: "Planejado",
+      priority: "media",
+      dependencies: ["Landing conferida", "Oferta aprovada"],
+      tool: "Meta Ads + execucao externa",
+      needsApproval: true,
+      needsQA: true,
+      copilotType: "Criativo de anuncio",
+      objective: "Criar variacoes testaveis sem escalar investimento antes da validacao.",
+      hypothesis: "Variacao com dor explicita pode melhorar CTR; validar contra autoridade e curiosidade.",
+      output: [
+        "Funil: aquecimento ou conversao, conforme campanha.",
+        "Cenas: Juliana em camera, texto na tela, prova/criterio, CTA.",
+        "Variações A/B/C: autoridade, dor, curiosidade.",
+        "Execucao externa: Juliana, HeyGen ou editor.",
+      ],
+    });
+  }
+
+  if (canUseRelationship) {
+    tasks.push(
+      {
+        id: `${mission.id}-email`,
+        title: `Sequencia de e-mail - ${product}`,
+        missionId: mission.id,
+        owner: "Operacao / ActiveCampaign",
+        dueDate: due,
+        status: "Planejado",
+        priority: "media",
+        dependencies: ["Segmento confirmado", "CTA oficial"],
+        tool: "ActiveCampaign",
+        needsApproval: true,
+        needsQA: true,
+        copilotType: "E-mail",
+        objective: "Nutrir ou recuperar leads sem disparo automatico pela Norwyn.",
+        hypothesis: "Sequencia curta com uma objecao por mensagem melhora clareza da decisao.",
+        output: [
+          "Assunto, preheader, corpo, CTA e timing.",
+          "Sequencia: contexto, objecao, prova, fechamento.",
+        ],
+      },
+      {
+        id: `${mission.id}-whatsapp`,
+        title: `Mensagem de WhatsApp - ${product}`,
+        missionId: mission.id,
+        owner: "Comercial / SellFlux",
+        dueDate: due,
+        status: "Planejado",
+        priority: "alta",
+        dependencies: ["Segmentacao e regra de contato confirmadas"],
+        tool: "SellFlux",
+        needsApproval: true,
+        needsQA: true,
+        copilotType: "WhatsApp",
+        objective: "Remover friccao de decisao em conversas ja iniciadas.",
+        hypothesis: "Mensagem curta e contextual ajuda sem parecer cobranca agressiva.",
+        output: [
+          "Mensagem inicial, follow-up, criterio de parada e CTA.",
+          "Regra: sem prometer resultado, sem inventar prazo ou preco.",
+        ],
+      },
+    );
+  }
+
+  tasks.push({
+    id: `${mission.id}-homologation`,
+    title: "QA e homologacao final",
+    missionId: mission.id,
+    owner: "Jefferson / Juliana",
+    dueDate: due,
+    status: "Aguardando QA",
+    priority: "critica",
+    dependencies: ["Materiais produzidos", "Aprovacao humana registrada"],
+    tool: "Marketing QA",
+    needsApproval: true,
+    needsQA: true,
+    copilotType: "QA",
+    objective: "Bloquear divergencias objetivas antes de publicar ou executar.",
+    hypothesis: "Erros de data, preco, link e CTA geram risco operacional maior que opiniao estetica.",
+    output: [
+      "Conferir data, horario, preco, lote, nome, CTA, links, checkout, UTM e consistencia.",
+      "Classificar problemas como critico, alto, medio ou baixo.",
+      "Homologar apenas sem bloqueio critico ou com excecao justificada.",
+    ],
+  });
+
+  return tasks;
+}
+
+function copilotChecklist(task: OperationalPlanTask) {
+  const common = [
+    `Objetivo: ${task.objective}`,
+    `Hipotese: ${task.hypothesis}`,
+    `Ferramenta de execucao: ${task.tool}`,
+    `Aprovacao humana: ${task.needsApproval ? "obrigatoria" : "nao obrigatoria"}`,
+    `QA: ${task.needsQA ? "obrigatorio antes de homologar" : "nao obrigatorio"}`,
+  ];
+  return [...common, ...task.output];
+}
+
 function TabButton({
   active,
   onClick,
@@ -2309,6 +2768,10 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
           opportunities={opportunities}
           evidenceEngine={evidenceEngine}
           knowledgeEvents={knowledgeEvents}
+          campaigns={campaigns}
+          campaignMaterials={campaignMaterials}
+          campaignApprovals={campaignApprovals}
+          marketingQAReviews={marketingQAReviews}
           openMission={(id) => {
             setDetailMissionId(id);
             setActiveTab("mission");
@@ -2499,6 +2962,10 @@ function ExecutiveHomeView({
   opportunities,
   evidenceEngine,
   knowledgeEvents,
+  campaigns,
+  campaignMaterials,
+  campaignApprovals,
+  marketingQAReviews,
   openMission,
   openBriefing,
   goTo,
@@ -2511,6 +2978,10 @@ function ExecutiveHomeView({
   opportunities: BriefingSeed[];
   evidenceEngine: ReturnType<typeof buildEvidenceEngine>;
   knowledgeEvents: KnowledgeEvent[];
+  campaigns: NorwynCampaign[];
+  campaignMaterials: NorwynCampaignMaterial[];
+  campaignApprovals: NorwynCampaignApproval[];
+  marketingQAReviews: NorwynMarketingQAReview[];
   openMission: (id: string) => void;
   openBriefing: (seed: BriefingSeed) => void;
   goTo: (tab: NorwynTab) => void;
@@ -2531,6 +3002,27 @@ function ExecutiveHomeView({
     products: context.products,
     commercialSales: context.commercialSales,
   });
+  const todayPriorities = buildTodayPriorities({
+    context,
+    activeMission,
+    opportunities,
+    campaigns,
+    materials: campaignMaterials,
+    approvals: campaignApprovals,
+    qaReviews: marketingQAReviews,
+  });
+  const auditItems = buildOperationalAudit(context);
+  const flow = [
+    { label: "Missoes", count: activeMissions.length },
+    { label: "Recomendacoes", count: opportunities.length },
+    { label: "Plano", count: activeMission ? buildMissionExecutionPlan(activeMission, context, opportunities).length : 0 },
+    { label: "Em producao", count: campaignMaterials.filter((item) => ["em_producao", "draft"].includes(normalizeKey(item.status))).length },
+    { label: "Aprovacao", count: campaignApprovals.filter((item) => ["requested", "changes_requested"].includes(String(item.status))).length },
+    { label: "QA", count: marketingQAReviews.filter((item) => ["pending", "processing", "changes_required", "blocked"].includes(item.status)).length },
+    { label: "Homologado", count: campaignMaterials.filter((item) => ["homologado", "approved"].includes(normalizeKey(item.status))).length },
+    { label: "Publicado", count: campaigns.filter((item) => ["completed", "published", "executed"].includes(normalizeKey(item.status))).length },
+    { label: "Aprendizados", count: knowledgeEvents.length },
+  ];
 
   return (
     <div className="space-y-4">
@@ -2557,10 +3049,52 @@ function ExecutiveHomeView({
 
       <ExecutiveFinancialOverviewCard overview={executiveFinancials} />
 
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitle icon={<Target className="h-5 w-5" />} title="O que faco agora" />
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/65">
+              No maximo 5 acoes priorizadas por dados reais, regras objetivas ou recomendacoes rastreaveis. Quando faltar dado, a Norwyn mostra a lacuna.
+            </p>
+          </div>
+          <button type="button" onClick={() => goTo("mission")} className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-teal px-3 text-sm font-bold text-white">
+            <Plus className="h-4 w-4" /> Nova missao
+          </button>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-5">
+          {todayPriorities.map((item, index) => (
+            <article key={item.id} className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-[10px] font-black uppercase text-brand-clay">{index + 1}. {item.priority} - {item.evidenceKind}</p>
+              <h3 className="mt-2 text-sm font-semibold text-brand-teal">{item.title}</h3>
+              <p className="mt-2 text-xs leading-5 text-brand-teal/65">Motivo: {item.reason}</p>
+              <p className="mt-2 text-xs font-semibold text-brand-teal/55">Fonte: {item.source}</p>
+              <p className="mt-2 text-xs leading-5 text-brand-teal/75">Acao: {item.action}</p>
+            </article>
+          ))}
+          {!todayPriorities.length ? (
+            <div className="lg:col-span-5">
+              <EmptyState>Nao ha dado suficiente para apontar urgencia hoje. Proxima acao segura: criar uma missao exploratoria ou coletar perguntas da audiencia.</EmptyState>
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<Layers3 className="h-5 w-5" />} title="Control Center" />
+        <div className="mt-4 grid gap-2 md:grid-cols-3 xl:grid-cols-9">
+          {flow.map((step) => (
+            <button key={step.label} type="button" onClick={() => goTo(step.label === "Missoes" ? "mission" : step.label === "QA" || step.label === "Aprovacao" ? "campaigns" : step.label === "Aprendizados" ? "knowledge" : "campaigns")} className="rounded-md border border-brand-sand bg-white/85 p-3 text-left">
+              <p className="text-[10px] font-black uppercase text-brand-clay">{step.label}</p>
+              <p className="mt-1 text-xl font-semibold text-brand-teal">{step.count}</p>
+            </button>
+          ))}
+        </div>
+      </Card>
+
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <ExecutiveSummaryCard summary={summary} knowledgeEvents={knowledgeEvents} />
         <Card className="border-[#E9CBD1] p-4 sm:p-5">
-          <SectionTitle icon={<Target className="h-5 w-5" />} title="O que fazer agora" />
+          <SectionTitle icon={<Target className="h-5 w-5" />} title="Recomendacoes para briefing" />
           <div className="mt-4 space-y-3">
             {opportunities.slice(0, 4).map((item) => (
               <article key={`${item.title}-${item.rule}`} className="rounded-md border border-brand-sand bg-white/85 p-3">
@@ -2575,6 +3109,20 @@ function ExecutiveHomeView({
           </div>
         </Card>
       </div>
+
+      <Card className="border-[#E9CBD1] p-4 sm:p-5">
+        <SectionTitle icon={<ClipboardList className="h-5 w-5" />} title="Auditoria MVP" />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          {auditItems.map((item) => (
+            <article key={item.area} className="rounded-md border border-brand-sand bg-white/85 p-3">
+              <p className="text-[10px] font-black uppercase text-brand-clay">{item.status}</p>
+              <h3 className="mt-1 text-sm font-semibold text-brand-teal">{item.area}</h3>
+              <p className="mt-2 text-xs leading-5 text-brand-teal/65">{item.existing}</p>
+              <p className="mt-2 text-xs leading-5 text-brand-teal/75">{item.mvpUse}</p>
+            </article>
+          ))}
+        </div>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="border-[#E9CBD1] p-4 sm:p-5">
@@ -3047,7 +3595,20 @@ function CampaignsView({
               <Field label="Tipo"><input value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
               <Field label="Status">
                 <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
-                  {["draft", "active", "paused", "completed", "archived"].map((status) => <option key={status} value={status}>{status}</option>)}
+                  {[
+                    ["draft", "Rascunho legado"],
+                    ["active", "Ativa legado"],
+                    ["paused", "Pausada legado"],
+                    ["planned", "Planejado"],
+                    ["in_production", "Em producao"],
+                    ["waiting_approval", "Aguardando aprovacao"],
+                    ["waiting_qa", "Aguardando QA"],
+                    ["approved", "Homologado"],
+                    ["published", "Publicado/Executado"],
+                    ["blocked", "Bloqueado"],
+                    ["completed", "Concluido"],
+                    ["archived", "Arquivado"],
+                  ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </Field>
             </div>
@@ -3328,7 +3889,13 @@ function CampaignsView({
               <Field label="Aprovador"><input value={approvalDraft.approver_name} onChange={(event) => setApprovalDraft({ ...approvalDraft, approver_name: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
               <Field label="Status">
                 <select value={approvalDraft.status} onChange={(event) => setApprovalDraft({ ...approvalDraft, status: event.target.value })} className="rounded-md border border-brand-sand bg-white px-3 py-2">
-                  {["requested", "approved", "changes_requested", "rejected"].map((status) => <option key={status} value={status}>{status}</option>)}
+                  {[
+                    ["requested", "Pedir nova sugestao"],
+                    ["approved", "Aprovar"],
+                    ["approved_with_changes", "Aprovar com alteracao"],
+                    ["rejected", "Rejeitar"],
+                    ["changes_requested", "Pedir ajuste"],
+                  ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </Field>
               <Field label="Observacao"><textarea value={approvalDraft.observation} onChange={(event) => setApprovalDraft({ ...approvalDraft, observation: event.target.value })} rows={3} className="rounded-md border border-brand-sand bg-white px-3 py-2" /></Field>
@@ -3903,7 +4470,9 @@ function MissionDetail({
   const goalDetails = missionGoalDetails(mission, context);
   const contextLabel = operationalContextFor(context, mission);
   const risks = buildOperationalRisks(context, mission);
-  const confidence = confidenceExplanation(context, mission, buildOpportunityRadar(context, mission));
+  const missionOpportunities = buildOpportunityRadar(context, mission);
+  const confidence = confidenceExplanation(context, mission, missionOpportunities);
+  const executionPlan = buildMissionExecutionPlan(mission, context, missionOpportunities);
   const tabs = ["Resumo", "KPIs", "Plano", "Recomendacoes", "Timeline", "Checklist", "Aprendizados"];
 
   function updateChecklist(itemId: string, status: MissionChecklistItem["status"]) {
@@ -3970,6 +4539,9 @@ function MissionDetail({
           <MissionMeta label="Status" value={mission.status} />
           <MissionMeta label="Progresso temporal" value={`${missionProgress(mission)}%`} />
           <MissionMeta label="Responsavel" value={mission.owner || "Nao definido"} />
+          <MissionMeta label="Publico" value={mission.audience || "Nao informado"} />
+          <MissionMeta label="Orcamento" value={mission.budget || "Nao informado"} />
+          <MissionMeta label="Produtos" value={mission.products || "Nao informado"} />
           <div className="md:col-span-2 rounded-md border border-brand-sand p-3">
             <p className="text-[11px] font-black uppercase text-brand-clay">Objetivo</p>
             <p className="mt-1 text-sm leading-6 text-brand-teal/75">{mission.objective}</p>
@@ -3983,7 +4555,50 @@ function MissionDetail({
         </div>
       ) : null}
 
-      {tab === "Plano" || tab === "Checklist" ? (
+      {tab === "Plano" ? (
+        <div className="mt-4 space-y-3">
+          <div className="rounded-md border border-brand-sand bg-brand-cream/35 p-4 text-sm leading-6 text-brand-teal/75">
+            <p className="font-semibold text-brand-teal">Dados + regras + contexto + historico {"->"} recomendacao {"->"} decisao humana {"->"} plano {"->"} producao {"->"} QA {"->"} publicacao {"->"} aprendizado.</p>
+            <p className="mt-1">Status operacionais: Planejado, Em producao, Aguardando aprovacao, Aguardando QA, Homologado, Publicado/Executado, Bloqueado, Concluido.</p>
+          </div>
+          {executionPlan.map((task) => (
+            <article key={task.id} className="rounded-md border border-brand-sand bg-white/85 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-black uppercase text-brand-clay">{task.priority} - {task.status} - {task.copilotType}</p>
+                  <h3 className="mt-1 text-base font-semibold text-brand-teal">{task.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-brand-teal/70">{task.objective}</p>
+                </div>
+                <div className="grid min-w-[220px] gap-2">
+                  <MissionMeta label="Responsavel" value={task.owner} />
+                  <MissionMeta label="Prazo" value={task.dueDate} />
+                </div>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <MissionMeta label="Ferramenta" value={task.tool} />
+                <MissionMeta label="Aprovacao" value={task.needsApproval ? "Obrigatoria" : "Nao obrigatoria"} />
+                <MissionMeta label="QA" value={task.needsQA ? "Obrigatorio" : "Nao obrigatorio"} />
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                <div className="rounded-md border border-brand-sand bg-brand-cream/35 p-3">
+                  <p className="text-[11px] font-black uppercase text-brand-clay">Dependencias</p>
+                  <ul className="mt-2 grid gap-1 text-sm text-brand-teal/70">
+                    {task.dependencies.map((item) => <li key={item}>- {item}</li>)}
+                  </ul>
+                </div>
+                <div className="rounded-md border border-brand-sand bg-[#F1FBF4] p-3">
+                  <p className="text-[11px] font-black uppercase text-brand-clay">Copiloto da tarefa</p>
+                  <ul className="mt-2 grid gap-1 text-sm text-brand-teal/70">
+                    {copilotChecklist(task).slice(0, 8).map((item) => <li key={item}>- {item}</li>)}
+                  </ul>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+
+      {tab === "Checklist" ? (
         <div className="mt-4 space-y-3">
           {mission.checklist.map((item) => (
             <div key={item.id} className="rounded-md border border-brand-sand p-3">
@@ -4158,6 +4773,8 @@ function MissionForm({
           <Field label="Objetivo principal"><textarea value={draft.objective} onChange={(event) => setDraft({ ...draft, objective: event.target.value })} className="form-input min-h-24" /></Field>
           <Field label="Meta principal"><textarea value={draft.mainGoal} onChange={(event) => setDraft({ ...draft, mainGoal: event.target.value })} className="form-input min-h-24" /></Field>
           <Field label="Produtos relacionados"><textarea value={draft.products} onChange={(event) => setDraft({ ...draft, products: event.target.value })} className="form-input min-h-20" /></Field>
+          <Field label="Publico, se souber"><textarea value={draft.audience ?? ""} onChange={(event) => setDraft({ ...draft, audience: event.target.value })} className="form-input min-h-20" /></Field>
+          <Field label="Orcamento, se houver"><input value={draft.budget ?? ""} onChange={(event) => setDraft({ ...draft, budget: event.target.value })} className="form-input" /></Field>
           <Field label="Observacoes"><textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} className="form-input min-h-20" /></Field>
         </div>
         <div className="mt-4">
@@ -4624,8 +5241,10 @@ function ContentCaptureView({
               <p className="mt-2 text-sm leading-6 text-brand-teal/70">{selectedCapture.summary ?? "Sem resumo ainda."}</p>
             </div>
             <div className="rounded-md border border-brand-sand bg-white/85 p-4">
-              <p className="text-xs font-black uppercase text-brand-clay">Transcricao / nota operacional</p>
-              <p className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-sm leading-6 text-brand-teal/70">{selectedCapture.transcript ?? "Sem transcricao registrada."}</p>
+              <p className="text-xs font-black uppercase text-brand-clay">Transcricao real</p>
+              <p className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-sm leading-6 text-brand-teal/70">
+                {selectedCapture.transcript ?? "Sem transcricao real validada. Use Ver transcricao para consultar metadados, texto bruto e diagnostico."}
+              </p>
             </div>
           </div>
 
@@ -4648,6 +5267,25 @@ function ContentCaptureView({
                   <span className="max-w-2xl rounded-md bg-[#FFF3C7] px-3 py-2 text-xs font-bold text-brand-clay">{selectedCapture.error_message}</span>
                 ) : null}
               </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                <MediaMetadataBlock title="Titulo da midia" value={selectedCapture.source_title} />
+                <MediaMetadataBlock title="Descricao da midia" value={selectedCapture.source_description} />
+                <div className="rounded-md border border-brand-sand bg-[#FBF8F2] p-3">
+                  <p className="text-xs font-black uppercase text-brand-clay">Capitulos</p>
+                  <div className="mt-2 max-h-40 overflow-auto text-sm leading-6 text-brand-teal/70">
+                    {Array.isArray(selectedCapture.source_chapters) && selectedCapture.source_chapters.length ? (
+                      selectedCapture.source_chapters.slice(0, 12).map((chapter, index) => (
+                        <p key={`chapter-${selectedCapture.id}-${index}`}>
+                          {String(chapter.start_seconds ?? "-")}s - {String(chapter.title ?? "Capitulo")}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-brand-teal/45">Nenhum capitulo retornado.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <TranscriptQualityBlock capture={selectedCapture} />
               {editingTranscript ? (
                 <div className="mt-3 grid gap-3">
                   <textarea
@@ -4679,7 +5317,16 @@ function ContentCaptureView({
                 </div>
               ) : (
                 <div className="mt-3 max-h-96 overflow-auto rounded-md border border-brand-sand bg-[#FBF8F2] p-3">
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-brand-teal/75">{selectedCapture.transcript ?? "Sem transcricao registrada."}</p>
+                  <p className="text-xs font-black uppercase text-brand-clay">Transcricao real</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-brand-teal/75">
+                    {selectedCapture.transcript ?? "Sem transcricao real validada."}
+                  </p>
+                  {selectedCapture.transcript_full_text && selectedCapture.transcript_full_text !== selectedCapture.transcript ? (
+                    <details className="mt-3 rounded-md border border-brand-sand bg-white/70 p-3">
+                      <summary className="cursor-pointer text-xs font-black uppercase text-brand-clay">Texto bruto retornado pelo provider</summary>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-brand-teal/70">{selectedCapture.transcript_full_text}</p>
+                    </details>
+                  ) : null}
                 </div>
               )}
               {Array.isArray(selectedCapture.transcript_segments) && selectedCapture.transcript_segments.length ? (
@@ -4744,6 +5391,59 @@ function ContentCaptureView({
           </div>
         </Card>
       ) : null}
+    </div>
+  );
+}
+
+function MediaMetadataBlock({ title, value }: { title: string; value: string | null | undefined }) {
+  return (
+    <div className="rounded-md border border-brand-sand bg-[#FBF8F2] p-3">
+      <p className="text-xs font-black uppercase text-brand-clay">{title}</p>
+      <p className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-sm leading-6 text-brand-teal/70">
+        {value?.trim() ? value : "Nao retornado pelo provider."}
+      </p>
+    </div>
+  );
+}
+
+function numberFromRecord(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function TranscriptQualityBlock({ capture }: { capture: NorwynContentCapture }) {
+  const quality = capture.transcript_quality && typeof capture.transcript_quality === "object" ? capture.transcript_quality : {};
+  const status = String(quality.status ?? capture.transcript_status ?? "sem status");
+  const reason = String(quality.reason ?? capture.error_message ?? "Sem diagnostico registrado.");
+  const charCount = numberFromRecord(quality.char_count);
+  const wordCount = numberFromRecord(quality.word_count);
+  const segmentCount = numberFromRecord(quality.segment_count);
+  const duration = numberFromRecord(quality.duration_seconds);
+  const covered = numberFromRecord(quality.covered_duration_seconds);
+  const titleSimilarity = numberFromRecord(quality.title_similarity);
+  const tone =
+    status === "completed"
+      ? "bg-[#E5F7EF] text-[#26724F]"
+      : status === "partial"
+        ? "bg-[#FFF3C7] text-brand-clay"
+        : "bg-[#FDE8EA] text-[#9A3F44]";
+  return (
+    <div className={`mt-3 rounded-md p-3 ${tone}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-black uppercase">Diagnostico da transcricao</p>
+          <p className="mt-1 text-sm font-semibold">{reason}</p>
+        </div>
+        <span className="rounded-full bg-white/70 px-3 py-1 text-xs font-black uppercase">{status}</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs font-bold sm:grid-cols-2 lg:grid-cols-5">
+        <p>Caracteres: {charCount ?? "-"}</p>
+        <p>Palavras: {wordCount ?? "-"}</p>
+        <p>Segmentos: {segmentCount ?? "-"}</p>
+        <p>Duração: {duration ? `${duration}s` : "-"}</p>
+        <p>Cobertura: {covered ? `${covered}s` : "-"}</p>
+        <p>Similaridade com título: {titleSimilarity !== null ? `${Math.round(titleSimilarity * 100)}%` : "-"}</p>
+      </div>
     </div>
   );
 }

@@ -462,6 +462,11 @@ export type NorwynContentCapture = {
   transcript_source: string | null;
   transcript_status: string | null;
   transcript_segments: Array<Record<string, unknown>>;
+  source_title: string | null;
+  source_description: string | null;
+  source_chapters: Array<Record<string, unknown>>;
+  transcript_full_text: string | null;
+  transcript_quality: Record<string, unknown>;
   file_id: string | null;
   file_name: string | null;
   file_type: string | null;

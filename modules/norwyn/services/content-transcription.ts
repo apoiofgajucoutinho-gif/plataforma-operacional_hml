@@ -5,6 +5,28 @@ type TranscriptSegment = {
   text: string;
 };
 
+type SourceChapter = {
+  title: string;
+  start_seconds: number | null;
+  end_seconds: number | null;
+};
+
+export type TranscriptQuality = {
+  status: "completed" | "partial" | "failed";
+  reason: string;
+  char_count: number;
+  word_count: number;
+  segment_count: number;
+  duration_seconds: number | null;
+  covered_duration_seconds: number | null;
+  title_similarity: number;
+  description_similarity: number;
+  is_similar_to_title: boolean;
+  is_similar_to_description: boolean;
+  min_chars_required: number;
+  min_words_required: number;
+};
+
 export type ContentTranscriptionResult = {
   success: boolean;
   language: string;
@@ -16,7 +38,12 @@ export type ContentTranscriptionResult = {
   file_size: number | null;
   duration_seconds: number | null;
   transcript_source: string;
-  transcript_status: "completed" | "failed" | "blocked" | "unsupported" | "missing";
+  transcript_status: "completed" | "partial" | "failed" | "blocked" | "unsupported" | "missing";
+  source_title: string | null;
+  source_description: string | null;
+  source_chapters: SourceChapter[];
+  transcript_full_text: string;
+  transcript_quality: TranscriptQuality | null;
   provider: "gemini";
   model: string;
   duration_ms: number;
@@ -58,6 +85,141 @@ function text(value: unknown) {
 
 function modelName() {
   return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+}
+
+function normalizeComparable(value: unknown) {
+  return text(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wordsFrom(value: unknown) {
+  const normalized = normalizeComparable(value);
+  return normalized ? normalized.split(" ").filter(Boolean) : [];
+}
+
+function wordCount(value: unknown) {
+  return wordsFrom(value).length;
+}
+
+function jaccardSimilarity(a: unknown, b: unknown) {
+  const left = new Set(wordsFrom(a));
+  const right = new Set(wordsFrom(b));
+  if (!left.size || !right.size) return 0;
+  let intersection = 0;
+  left.forEach((item) => {
+    if (right.has(item)) intersection += 1;
+  });
+  const union = new Set([...left, ...right]).size;
+  return union ? intersection / union : 0;
+}
+
+function textSimilarity(a: unknown, b: unknown) {
+  const left = normalizeComparable(a);
+  const right = normalizeComparable(b);
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  if (left.length >= 12 && right.length >= 12 && (left.includes(right) || right.includes(left))) return 0.92;
+  return jaccardSimilarity(left, right);
+}
+
+function coveredDuration(segments: TranscriptSegment[]) {
+  const starts = segments.map((segment) => segment.start_seconds).filter((value): value is number => Number.isFinite(value));
+  const ends = segments.map((segment) => segment.end_seconds).filter((value): value is number => Number.isFinite(value));
+  if (!starts.length || !ends.length) return null;
+  const minStart = Math.min(...starts);
+  const maxEnd = Math.max(...ends);
+  return maxEnd > minStart ? Math.round(maxEnd - minStart) : null;
+}
+
+function transcriptThresholds(durationSeconds: number | null) {
+  if (!durationSeconds) return { minChars: 120, minWords: 24 };
+  if (durationSeconds >= 600) return { minChars: 1000, minWords: 180 };
+  if (durationSeconds >= 180) return { minChars: 450, minWords: 80 };
+  if (durationSeconds >= 60) return { minChars: 200, minWords: 40 };
+  return { minChars: 90, minWords: 18 };
+}
+
+function validateTranscriptQuality(input: {
+  fullText: string;
+  segments: TranscriptSegment[];
+  durationSeconds: number | null;
+  title: string | null;
+  description: string | null;
+}): TranscriptQuality {
+  const fullText = text(input.fullText);
+  const charCount = fullText.length;
+  const countWords = wordCount(fullText);
+  const segmentCount = input.segments.length;
+  const covered = coveredDuration(input.segments);
+  const titleSimilarity = textSimilarity(fullText, input.title);
+  const descriptionSimilarity = textSimilarity(fullText, input.description);
+  const thresholds = transcriptThresholds(input.durationSeconds);
+  const chapterLike = /^\s*\d+[\).\s-]+/.test(fullText) && countWords <= 10;
+  const similarToTitle = titleSimilarity >= 0.82 && countWords <= Math.max(wordCount(input.title) + 8, 14);
+  const similarToDescription = descriptionSimilarity >= 0.88 && countWords <= Math.max(wordCount(input.description) + 12, 24);
+
+  const base = {
+    char_count: charCount,
+    word_count: countWords,
+    segment_count: segmentCount,
+    duration_seconds: input.durationSeconds,
+    covered_duration_seconds: covered,
+    title_similarity: Number(titleSimilarity.toFixed(2)),
+    description_similarity: Number(descriptionSimilarity.toFixed(2)),
+    is_similar_to_title: similarToTitle,
+    is_similar_to_description: similarToDescription,
+    min_chars_required: thresholds.minChars,
+    min_words_required: thresholds.minWords,
+  };
+
+  if (!fullText) {
+    return { ...base, status: "failed", reason: "Transcricao vazia." };
+  }
+  if (chapterLike || similarToTitle || similarToDescription || countWords < 12 || charCount < 50) {
+    return {
+      ...base,
+      status: "failed",
+      reason: "Nao foi possivel obter a fala real do video. O texto retornado corresponde apenas ao titulo, capitulo ou metadados da midia.",
+    };
+  }
+  if (countWords < thresholds.minWords || charCount < thresholds.minChars || segmentCount <= 1) {
+    return {
+      ...base,
+      status: "partial",
+      reason: "A transcricao recebida parece incompleta e nao representa todo o video.",
+    };
+  }
+  if (input.durationSeconds && input.durationSeconds > 120 && covered && covered < input.durationSeconds * 0.3) {
+    return {
+      ...base,
+      status: "partial",
+      reason: "A duracao coberta pelos segmentos parece pequena em relacao ao video.",
+    };
+  }
+  return { ...base, status: "completed", reason: "Transcricao validada como fala real suficiente para analise." };
+}
+
+function emptyTranscriptQuality(reason: string): TranscriptQuality {
+  return {
+    status: "failed",
+    reason,
+    char_count: 0,
+    word_count: 0,
+    segment_count: 0,
+    duration_seconds: null,
+    covered_duration_seconds: null,
+    title_similarity: 0,
+    description_similarity: 0,
+    is_similar_to_title: false,
+    is_similar_to_description: false,
+    min_chars_required: 120,
+    min_words_required: 24,
+  };
 }
 
 export function extractYouTubeVideoId(value: string) {
@@ -272,12 +434,21 @@ Regras obrigatorias:
 - Nao invente falas.
 - Quando um trecho nao for compreensivel, escreva "[trecho inaudivel]".
 - Nao identifique a falante como Juliana sem evidencia suficiente.
+- Separe metadados da fala real. Titulo, descricao e capitulos nao sao transcricao.
+- Se a midia tiver titulo, descricao ou capitulos, preencha os campos proprios.
+- full_text deve conter somente a fala real transcrita.
 - Retorne somente JSON valido, sem markdown.
 - Use segmentos com inicio e fim em segundos quando for possivel inferir.
 
 Formato:
 {
   "language": "pt-BR",
+  "source_title": "Titulo da midia, quando disponivel",
+  "source_description": "Descricao da midia, quando disponivel",
+  "source_chapters": [
+    {"title": "Capitulo", "start_seconds": 0, "end_seconds": null}
+  ],
+  "duration_seconds": null,
   "full_text": "Texto integral...",
   "segments": [
     {"start_seconds": 0, "end_seconds": 12, "speaker": null, "text": "..."}
@@ -328,6 +499,18 @@ Formato:
     usage: json.usageMetadata ?? {},
     source_hint: sourceHint,
     language: text(parsed.language) || "pt-BR",
+    source_title: text(parsed.source_title) || null,
+    source_description: text(parsed.source_description) || null,
+    source_chapters: Array.isArray(parsed.source_chapters)
+      ? parsed.source_chapters
+          .map((item: any) => ({
+            title: text(item.title),
+            start_seconds: Number.isFinite(Number(item.start_seconds)) ? Number(item.start_seconds) : null,
+            end_seconds: Number.isFinite(Number(item.end_seconds)) ? Number(item.end_seconds) : null,
+          }))
+          .filter((item: SourceChapter) => item.title)
+      : [],
+    duration_seconds: Number.isFinite(Number(parsed.duration_seconds)) ? Number(parsed.duration_seconds) : null,
     full_text: text(parsed.full_text),
     segments,
   };
@@ -351,6 +534,11 @@ async function transcribeYouTubeMedia(youtubeUrl: string): Promise<ContentTransc
       duration_seconds: null,
       transcript_source: "not_configured",
       transcript_status: "missing",
+      source_title: null,
+      source_description: null,
+      source_chapters: [],
+      transcript_full_text: "",
+      transcript_quality: emptyTranscriptQuality("GEMINI_API_KEY ausente."),
       provider: "gemini",
       model,
       duration_ms: Date.now() - startedAt,
@@ -363,19 +551,33 @@ async function transcribeYouTubeMedia(youtubeUrl: string): Promise<ContentTransc
     const transcription = await requestTranscription(apiKey, { uri: youtubeUrl, mimeType: "video/mp4" }, "video/mp4", "youtube_url");
     const fullText = text(transcription.full_text);
     if (!fullText) throw new Error("Transcricao retornou vazia.");
+    const durationSeconds = transcription.duration_seconds;
+    const quality = validateTranscriptQuality({
+      fullText,
+      segments: transcription.segments,
+      durationSeconds,
+      title: transcription.source_title,
+      description: transcription.source_description,
+    });
+    const isComplete = quality.status === "completed";
 
     return {
-      success: true,
+      success: isComplete,
       language: transcription.language,
-      full_text: fullText,
+      full_text: isComplete ? fullText : "",
       segments: transcription.segments,
       file_id: videoId,
       file_name: videoId ? `youtube-${videoId}` : null,
       file_type: "youtube",
       file_size: null,
-      duration_seconds: null,
+      duration_seconds: durationSeconds,
       transcript_source: "youtube_url",
-      transcript_status: "completed",
+      transcript_status: quality.status,
+      source_title: transcription.source_title,
+      source_description: transcription.source_description,
+      source_chapters: transcription.source_chapters,
+      transcript_full_text: fullText,
+      transcript_quality: quality,
       provider: "gemini",
       model: transcription.model,
       duration_ms: Date.now() - startedAt,
@@ -384,8 +586,9 @@ async function transcribeYouTubeMedia(youtubeUrl: string): Promise<ContentTransc
         youtube_id: videoId,
         access: "public_url_required",
         usage: transcription.usage,
+        transcript_quality: quality,
       },
-      error_message: null,
+      error_message: isComplete ? null : quality.reason,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao transcrever YouTube.";
@@ -401,6 +604,11 @@ async function transcribeYouTubeMedia(youtubeUrl: string): Promise<ContentTransc
       duration_seconds: null,
       transcript_source: "youtube_url",
       transcript_status: "failed",
+      source_title: null,
+      source_description: null,
+      source_chapters: [],
+      transcript_full_text: "",
+      transcript_quality: emptyTranscriptQuality(message),
       provider: "gemini",
       model,
       duration_ms: Date.now() - startedAt,
@@ -431,6 +639,11 @@ export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTra
       duration_seconds: null,
       transcript_source: "not_configured",
       transcript_status: "missing",
+      source_title: null,
+      source_description: null,
+      source_chapters: [],
+      transcript_full_text: "",
+      transcript_quality: emptyTranscriptQuality("GEMINI_API_KEY ausente."),
       provider: "gemini",
       model,
       duration_ms: Date.now() - startedAt,
@@ -454,19 +667,33 @@ export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTra
     );
     const fullText = text(transcription.full_text);
     if (!fullText) throw new Error("Transcricao retornou vazia.");
+    const durationSeconds = transcription.duration_seconds;
+    const quality = validateTranscriptQuality({
+      fullText,
+      segments: transcription.segments,
+      durationSeconds,
+      title: transcription.source_title || file.fileName,
+      description: transcription.source_description,
+    });
+    const isComplete = quality.status === "completed";
 
     return {
-      success: true,
+      success: isComplete,
       language: transcription.language,
-      full_text: fullText,
+      full_text: isComplete ? fullText : "",
       segments: transcription.segments,
       file_id: file.fileId,
       file_name: file.fileName,
       file_type: file.mimeType,
       file_size: file.size,
-      duration_seconds: null,
+      duration_seconds: durationSeconds,
       transcript_source: "gemini_files_api",
-      transcript_status: "completed",
+      transcript_status: quality.status,
+      source_title: transcription.source_title || file.fileName,
+      source_description: transcription.source_description,
+      source_chapters: transcription.source_chapters,
+      transcript_full_text: fullText,
+      transcript_quality: quality,
       provider: "gemini",
       model: transcription.model,
       duration_ms: Date.now() - startedAt,
@@ -477,8 +704,9 @@ export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTra
         usage: transcription.usage,
         drive_access: "public_link",
         source_type: "google_drive",
+        transcript_quality: quality,
       },
-      error_message: null,
+      error_message: isComplete ? null : quality.reason,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao transcrever arquivo.";
@@ -495,6 +723,11 @@ export async function transcribeDriveMedia(driveUrl: string): Promise<ContentTra
       duration_seconds: null,
       transcript_source: "gemini_files_api",
       transcript_status: isAccess ? "blocked" : "failed",
+      source_title: null,
+      source_description: null,
+      source_chapters: [],
+      transcript_full_text: "",
+      transcript_quality: emptyTranscriptQuality(message),
       provider: "gemini",
       model,
       duration_ms: Date.now() - startedAt,
@@ -522,6 +755,11 @@ export async function transcribeMediaFromUrl(sourceUrl: string): Promise<Content
     duration_seconds: null,
     transcript_source: "unsupported",
     transcript_status: "unsupported",
+    source_title: null,
+    source_description: null,
+    source_chapters: [],
+    transcript_full_text: "",
+    transcript_quality: emptyTranscriptQuality(source.limitation ?? "Fonte nao suportada."),
     provider: "gemini",
     model: modelName(),
     duration_ms: 0,

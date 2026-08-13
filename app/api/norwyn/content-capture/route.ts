@@ -18,7 +18,7 @@ type SupabaseAny = any;
 
 const writableRoles = new Set(["ADMIN", "SUPORTE"]);
 const captureSelect =
-  "id, tenant_id, title, capture_type, drive_url, status, product_id, mission_id, campaign_id, objective_id, description, summary, transcript, transcript_source, transcript_status, transcript_segments, file_id, file_name, file_type, file_size, duration_seconds, topics, pain_points, objections, cases, quotes, cta, products_detected, related_missions, tags, knowledge_generated, similar_content, similar_campaigns, winning_plays, provider, model, duration_ms, success, error_message, usage_json, metadata, processing_metadata, result_version, result_versions, primary_product_id, manually_selected_product_id, confidence, processing_started_at, processing_completed_at, created_by, created_at, updated_at";
+  "id, tenant_id, title, capture_type, drive_url, status, product_id, mission_id, campaign_id, objective_id, description, summary, transcript, transcript_source, transcript_status, transcript_segments, source_title, source_description, source_chapters, transcript_full_text, transcript_quality, file_id, file_name, file_type, file_size, duration_seconds, topics, pain_points, objections, cases, quotes, cta, products_detected, related_missions, tags, knowledge_generated, similar_content, similar_campaigns, winning_plays, provider, model, duration_ms, success, error_message, usage_json, metadata, processing_metadata, result_version, result_versions, primary_product_id, manually_selected_product_id, confidence, processing_started_at, processing_completed_at, created_by, created_at, updated_at";
 
 async function getAuthContext() {
   const userClient = await createClient();
@@ -189,6 +189,16 @@ function resultToUpdatePayload(
     transcript_source: options.transcriptSource ?? result.transcript_source,
     transcript_status: options.transcriptStatus ?? result.transcript_status,
     transcript_segments: options.transcriptSegments ?? previous?.transcript_segments ?? [],
+    source_title: options.transcription?.source_title ?? previous?.source_title ?? null,
+    source_description: options.transcription?.source_description ?? previous?.source_description ?? null,
+    source_chapters: options.transcription?.source_chapters ?? previous?.source_chapters ?? [],
+    transcript_full_text:
+      options.transcription?.transcript_full_text ??
+      options.transcriptOverride ??
+      previous?.transcript_full_text ??
+      previous?.transcript ??
+      null,
+    transcript_quality: options.transcription?.transcript_quality ?? previous?.transcript_quality ?? {},
     file_id: options.transcription?.file_id ?? previous?.file_id ?? null,
     file_name: options.transcription?.file_name ?? previous?.file_name ?? null,
     file_type: options.transcription?.file_type ?? previous?.file_type ?? null,
@@ -229,6 +239,8 @@ function resultToUpdatePayload(
             file_size: options.transcription.file_size,
             duration_ms: options.transcription.duration_ms,
             error_message: options.transcription.error_message,
+            quality: options.transcription.transcript_quality,
+            source_title: options.transcription.source_title,
           }
         : undefined,
     },
@@ -445,7 +457,63 @@ export async function POST(request: Request) {
       await auth.dataClient.from("content_capture").update({ status: CONTENT_CAPTURE_STATUS.TRANSCRIBING }).eq("tenant_id", auth.tenantId).eq("id", captureId);
     }
     const transcription = hasManualTranscript ? null : await transcribeMediaFromUrl(existing.drive_url);
-    const analysisText = (hasManualTranscript ? cleanString(existing.transcript) : "") || transcription?.full_text || existing.transcript || existing.description;
+    const validAutomaticTranscript =
+      transcription?.success && transcription.transcript_status === "completed"
+        ? cleanString(transcription.full_text)
+        : "";
+    const previousTranscript = cleanString(existing.transcript);
+    const fallbackNotes = cleanString(existing.description);
+    const primaryTranscript = hasManualTranscript ? previousTranscript : validAutomaticTranscript;
+    const analysisText = primaryTranscript || previousTranscript || fallbackNotes;
+    if (!analysisText && transcription && !transcription.success) {
+      const { error: updateError } = await auth.dataClient
+        .from("content_capture")
+        .update({
+          status: CONTENT_CAPTURE_STATUS.PARTIAL,
+          transcript_source: transcription.transcript_source,
+          transcript_status: transcription.transcript_status,
+          transcript_segments: transcription.segments as Array<Record<string, unknown>>,
+          source_title: transcription.source_title,
+          source_description: transcription.source_description,
+          source_chapters: transcription.source_chapters,
+          transcript_full_text: transcription.transcript_full_text,
+          transcript_quality: transcription.transcript_quality ?? {},
+          file_id: transcription.file_id ?? existing.file_id ?? null,
+          file_name: transcription.file_name ?? existing.file_name ?? null,
+          file_type: transcription.file_type ?? existing.file_type ?? null,
+          file_size: transcription.file_size ?? existing.file_size ?? null,
+          duration_seconds: transcription.duration_seconds ?? existing.duration_seconds ?? null,
+          provider: transcription.provider,
+          model: transcription.model,
+          duration_ms: transcription.duration_ms,
+          success: false,
+          error_message: transcription.error_message,
+          metadata: {
+            ...(existing.metadata ?? {}),
+            transcription: {
+              success: transcription.success,
+              source: transcription.transcript_source,
+              status: transcription.transcript_status,
+              quality: transcription.transcript_quality,
+              source_title: transcription.source_title,
+              error_message: transcription.error_message,
+            },
+          },
+          processing_metadata: {
+            ...(existing.processing_metadata ?? {}),
+            transcription: transcription.processing_metadata,
+          },
+          processing_completed_at: new Date().toISOString(),
+        })
+        .eq("tenant_id", auth.tenantId)
+        .eq("id", captureId);
+      if (updateError) return NextResponse.json({ error: contentCaptureDbError(updateError) }, { status: 500 });
+      return NextResponse.json({
+        message: transcription.error_message ?? "A transcricao recebida nao parece conter fala real suficiente. O resultado anterior foi preservado.",
+        captureId,
+        contentCaptures: await fetchContentCaptures(auth.dataClient, auth.tenantId),
+      });
+    }
     await auth.dataClient.from("content_capture").update({ status: CONTENT_CAPTURE_STATUS.ANALYZING }).eq("tenant_id", auth.tenantId).eq("id", captureId);
     const result = await runContentCapture({
       title: existing.title,
@@ -463,7 +531,7 @@ export async function POST(request: Request) {
     const partialError = transcription && !transcription.success ? transcription.error_message : null;
     const updatePayload = resultToUpdatePayload(result, missionName, existing, {
       statusOverride: partialError ? CONTENT_CAPTURE_STATUS.PARTIAL : result.success ? CONTENT_CAPTURE_STATUS.COMPLETED : CONTENT_CAPTURE_STATUS.ERROR,
-      transcriptOverride: analysisText || result.transcript,
+      transcriptOverride: primaryTranscript || previousTranscript || result.transcript,
       transcriptSource: hasManualTranscript ? "manual_edit" : transcription?.transcript_source ?? existing.transcript_source ?? result.transcript_source,
       transcriptStatus: hasManualTranscript ? "completed" : transcription?.transcript_status ?? existing.transcript_status ?? result.transcript_status,
       transcriptSegments: hasManualTranscript ? [] : (transcription?.segments as Array<Record<string, unknown>> | undefined),
