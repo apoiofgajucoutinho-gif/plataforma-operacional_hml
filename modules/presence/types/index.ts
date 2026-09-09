@@ -4,6 +4,7 @@ export type PresenceStatus = "healthy" | "warning" | "critical" | "unknown";
 export type PresenceContentStatus = "ok" | "missing_expected" | "suspicious" | "changed" | "unknown";
 export type PresenceSeverity = "low" | "medium" | "high" | "critical";
 export type PresenceIncidentStatus = "open" | "acknowledged" | "resolved" | "ignored";
+export type PresenceSourceType = "REAL" | "SIMULATED";
 export type PresenceIncidentType =
   | "site_down"
   | "http_error"
@@ -63,6 +64,8 @@ export type PresenceCheck = {
   health_score: number;
   status: PresenceStatus;
   result_json: Record<string, unknown> | null;
+  source_type: PresenceSourceType;
+  suspicious_evidence: Record<string, unknown>[] | null;
   error_message: string | null;
   created_at: string;
 };
@@ -79,6 +82,7 @@ export type PresenceIncident = {
   resolved_at: string | null;
   status: PresenceIncidentStatus;
   evidence: Record<string, unknown> | null;
+  source_type: PresenceSourceType;
   last_check_id: string | null;
   created_at: string;
   updated_at: string;
@@ -111,6 +115,7 @@ export type PresenceSummary = {
   criticalLinks: number;
   openIncidents: number;
   incidentsToday: number;
+  simulatedIncidents: number;
   needsAttention: PresenceIncident[];
   analysis: {
     observed: string;

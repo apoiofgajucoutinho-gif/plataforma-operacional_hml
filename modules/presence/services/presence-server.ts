@@ -34,6 +34,7 @@ function emptySummary(): PresenceSummary {
     criticalLinks: 0,
     openIncidents: 0,
     incidentsToday: 0,
+    simulatedIncidents: 0,
     needsAttention: [],
     analysis: {
       observed: "Ainda nao ha checagens suficientes para consolidar a saude da presenca digital.",
@@ -50,13 +51,23 @@ function statusFromScore(score: number | null): PresenceStatus {
   return "critical";
 }
 
+function isSimulatedAsset(asset: PresenceAsset) {
+  return asset.environment === "dev" || asset.url.startsWith("https://presence-simulated.invalid/") || asset.name.startsWith("QA Presence Center");
+}
+
+function isRealIncident(incident: PresenceIncident) {
+  return (incident.source_type ?? "REAL") === "REAL";
+}
+
 function buildSummary(assets: PresenceAsset[], incidents: PresenceIncident[]): PresenceSummary {
-  const activeAssets = assets.filter((asset) => asset.monitoring_enabled).length;
-  const scored = assets.filter((asset) => typeof asset.last_health_score === "number");
+  const realAssets = assets.filter((asset) => !isSimulatedAsset(asset));
+  const realIncidents = incidents.filter(isRealIncident);
+  const activeAssets = realAssets.filter((asset) => asset.monitoring_enabled).length;
+  const scored = realAssets.filter((asset) => typeof asset.last_health_score === "number");
   const overallScore = scored.length ? Math.round(scored.reduce((sum, asset) => sum + Number(asset.last_health_score ?? 0), 0) / scored.length) : null;
-  const openIncidents = incidents.filter((incident) => incident.status === "open" || incident.status === "acknowledged");
+  const openIncidents = realIncidents.filter((incident) => incident.status === "open" || incident.status === "acknowledged");
   const today = new Date().toISOString().slice(0, 10);
-  const incidentsToday = incidents.filter((incident) => incident.detected_at?.startsWith(today)).length;
+  const incidentsToday = realIncidents.filter((incident) => incident.detected_at?.startsWith(today)).length;
   const needsAttention = [...openIncidents].sort((a, b) => severityRank(b.severity) - severityRank(a.severity)).slice(0, 3);
   const broken = openIncidents.filter((incident) => incident.incident_type === "broken_link").length;
   const critical = openIncidents.filter((incident) => incident.severity === "critical").length;
@@ -79,10 +90,11 @@ function buildSummary(assets: PresenceAsset[], incidents: PresenceIncident[]): P
     overallScore,
     overallStatus: statusFromScore(overallScore),
     activeAssets,
-    landingPages: assets.filter((asset) => asset.asset_type === "landing_page").length,
-    criticalLinks: assets.filter((asset) => asset.is_critical).length,
+    landingPages: realAssets.filter((asset) => asset.asset_type === "landing_page").length,
+    criticalLinks: realAssets.filter((asset) => asset.is_critical).length,
     openIncidents: openIncidents.length,
     incidentsToday,
+    simulatedIncidents: incidents.filter((incident) => (incident.source_type ?? "REAL") === "SIMULATED").length,
     needsAttention,
     analysis: { observed, inference, recommendation },
   };

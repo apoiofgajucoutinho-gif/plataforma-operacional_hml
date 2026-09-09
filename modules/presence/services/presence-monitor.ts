@@ -6,6 +6,22 @@ import type { PresenceAsset, PresenceAssetType, PresenceCheck, PresenceContentSt
 
 type SupabaseAny = any;
 
+type SuspiciousEvidence = {
+  category: string;
+  match: string;
+  snippet: string;
+  location: "title" | "meta" | "body" | "script_text" | "unknown";
+  url: string;
+  observed: string;
+  inference: string | null;
+  recommendation: string;
+  confidence: "high" | "medium" | "low";
+  occurrences: number;
+  first_detected_at: string;
+  last_detected_at: string;
+  current_status: "present" | "not_found_last_check";
+};
+
 type CheckIssue = {
   type: PresenceIncidentType;
   severity: PresenceSeverity;
@@ -34,6 +50,7 @@ type CheckResult = {
   health_score: number;
   status: PresenceStatus;
   result_json: Record<string, unknown>;
+  suspicious_evidence: SuspiciousEvidence[];
   error_message: string | null;
   issues: CheckIssue[];
 };
@@ -50,6 +67,19 @@ const DEFAULT_FORBIDDEN_PATTERNS = [
   "porn",
   "hackeado",
 ];
+
+const PATTERN_CATEGORIES: Record<string, string> = {
+  casino: "Gambling",
+  bet: "Gambling",
+  aposta: "Gambling",
+  slot: "Gambling",
+  "crypto spam": "Crypto spam",
+  adult: "Adult spam",
+  porn: "Adult spam",
+  "pharma spam": "Pharma spam",
+  viagra: "Pharma spam",
+  hackeado: "Security defacement",
+};
 
 const STATIC_EXTENSIONS = /\.(?:png|jpe?g|gif|webp|svg|ico|css|js|json|xml|pdf|zip|rar|mp4|mp3|webm|woff2?|ttf|eot)(?:$|[?#])/i;
 const USER_AGENT = "NorwynPresenceCenter/1.0 (+read-only; HML)";
@@ -95,6 +125,22 @@ function stripHtml(html: string) {
 function pageTitle(html: string) {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return match ? stripHtml(match[1]).slice(0, 180) : null;
+}
+
+function metaText(html: string) {
+  const values: string[] = [];
+  const regex = /<meta\s+[^>]*(?:name|property)=["'](?:description|og:title|og:description|twitter:title|twitter:description)["'][^>]*content=["']([^"']+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(html))) values.push(match[1] ?? "");
+  return stripHtml(values.join(" "));
+}
+
+function scriptText(html: string) {
+  const values: string[] = [];
+  const regex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(html)) && values.join(" ").length < 5000) values.push(match[1] ?? "");
+  return values.join(" ").replace(/\s+/g, " ").slice(0, 5000);
 }
 
 function hashContent(text: string) {
@@ -276,17 +322,84 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function suspiciousMatches(asset: PresenceAsset, text: string) {
-  const patterns = [...DEFAULT_FORBIDDEN_PATTERNS, ...(asset.forbidden_patterns ?? [])];
-  return Array.from(new Set(patterns.filter((pattern) => {
-    const trimmed = pattern.trim();
-    if (!trimmed) return false;
-    const regex = new RegExp(`(^|[^a-z0-9])${escapeRegExp(trimmed.toLowerCase())}(?=[^a-z0-9]|$)`, "i");
-    return regex.test(text.toLowerCase());
-  })));
+function sanitizeSnippet(value: string) {
+  return stripHtml(value).replace(/[<>]/g, "").slice(0, 220);
 }
 
-function calculateScore(asset: PresenceAsset, params: { httpStatus: number | null; responseTimeMs: number | null; sslOk: boolean | null; brokenLinks: number; suspicious: number; missingContent: number; missingElements: number; contentChangeScore: number | null; error: string | null }) {
+function snippetAround(value: string, index: number, length: number) {
+  const start = Math.max(0, index - 70);
+  const end = Math.min(value.length, index + length + 70);
+  return sanitizeSnippet(value.slice(start, end));
+}
+
+function patternCategory(pattern: string) {
+  return PATTERN_CATEGORIES[pattern.toLowerCase()] ?? "Configured pattern";
+}
+
+function suspiciousEvidence(asset: PresenceAsset, html: string, text: string): SuspiciousEvidence[] {
+  const detectedAt = nowIso();
+  const patterns = Array.from(new Set([...DEFAULT_FORBIDDEN_PATTERNS, ...(asset.forbidden_patterns ?? [])].map((pattern) => pattern.trim()).filter(Boolean)));
+  const locations: Array<{ location: SuspiciousEvidence["location"]; value: string }> = [
+    { location: "title", value: pageTitle(html) ?? "" },
+    { location: "meta", value: metaText(html) },
+    { location: "body", value: text },
+  ];
+  const script = scriptText(html);
+  if (script) locations.push({ location: "script_text", value: script });
+
+  const findings: SuspiciousEvidence[] = [];
+  for (const pattern of patterns) {
+    const regex = new RegExp(`(^|[^a-z0-9])${escapeRegExp(pattern.toLowerCase())}(?=[^a-z0-9]|$)`, "gi");
+    for (const location of locations) {
+      const value = location.value;
+      const lower = value.toLowerCase();
+      const matches = Array.from(lower.matchAll(regex));
+      if (!matches.length) continue;
+      const first = matches[0];
+      findings.push({
+        category: patternCategory(pattern),
+        match: pattern,
+        snippet: snippetAround(value, first.index ?? 0, pattern.length),
+        location: location.location,
+        url: asset.url,
+        observed: `Termo/padrao "${pattern}" encontrado em ${location.location}.`,
+        inference: null,
+        recommendation: "Validar se o texto faz parte do conteudo esperado da pagina. Se nao fizer, tratar como possivel alteracao indevida ou spam.",
+        confidence: location.location === "script_text" ? "medium" : "high",
+        occurrences: matches.length,
+        first_detected_at: detectedAt,
+        last_detected_at: detectedAt,
+        current_status: "present",
+      });
+      break;
+    }
+  }
+
+  const unexpectedScript = /[぀-ヿ㐀-鿿가-힯]/u;
+  const scriptProbe = [pageTitle(html) ?? "", metaText(html), text].join(" ");
+  const scriptMatch = unexpectedScript.exec(scriptProbe);
+  if (scriptMatch) {
+    findings.push({
+      category: "Unexpected script",
+      match: "caracteres/escrita inesperados",
+      snippet: snippetAround(scriptProbe, scriptMatch.index, scriptMatch[0].length),
+      location: "body",
+      url: asset.url,
+      observed: "Caracteres de escrita inesperada encontrados no conteudo publico.",
+      inference: "Pode indicar conteudo fora do padrao esperado, mas nao define idioma ou causa raiz sozinho.",
+      recommendation: "Revisar o trecho no site publicado e confirmar se pertence ao conteudo legitimo da Juliana.",
+      confidence: "medium",
+      occurrences: Array.from(scriptProbe.matchAll(new RegExp(unexpectedScript, "gu"))).length,
+      first_detected_at: detectedAt,
+      last_detected_at: detectedAt,
+      current_status: "present",
+    });
+  }
+
+  return findings.slice(0, 20);
+}
+
+function calculateScore(asset: PresenceAsset, params: { httpStatus: number | null; responseTimeMs: number | null; sslOk: boolean | null; brokenLinks: number; suspicious: SuspiciousEvidence[]; missingContent: number; missingElements: number; contentChangeScore: number | null; error: string | null }) {
   let score = 100;
   const issues: CheckIssue[] = [];
   const warningMs = parseThreshold(asset, "response_warning_ms", 1500);
@@ -324,9 +437,9 @@ function calculateScore(asset: PresenceAsset, params: { httpStatus: number | nul
     score -= Math.min(20, params.brokenLinks * 5);
     addIssue(issues, { type: "broken_link", severity: params.brokenLinks > 2 ? "high" : "medium", title: "Links quebrados encontrados", description: `${params.brokenLinks} link(s) interno(s) exigem revisao.` });
   }
-  if (params.suspicious > 0) {
+  if (params.suspicious.length > 0) {
     score -= 40;
-    addIssue(issues, { type: "suspicious_content", severity: "critical", title: "Conteudo suspeito detectado", description: "A pagina contem termo(s) configurados como suspeitos." });
+    addIssue(issues, { type: "suspicious_content", severity: "critical", title: "Conteudo suspeito detectado", description: "A pagina contem termo(s), padrao ou escrita inesperada configurados como suspeitos.", evidence: { findings: params.suspicious.slice(0, 5), occurrences: params.suspicious.reduce((sum, item) => sum + item.occurrences, 0) } });
   }
   if (params.missingContent > 0 || params.missingElements > 0) {
     score -= 15 + Math.min(15, params.missingElements * 5);
@@ -358,13 +471,13 @@ export async function buildPresenceCheck(client: SupabaseAny, asset: PresenceAss
   const ssl = await getCertificateExpiry(asset.url).catch((sslError) => ({ ok: false, expiresAt: null, error: sslError instanceof Error ? sslError.message : "Erro SSL" }));
   const linkResult = html ? await checkLinks(html, asset) : { tested: [], broken: [] as BrokenLink[] };
   const expected = asset.monitor_content ? expectedMissing(asset, text, html) : { missingContent: [], missingElements: [] };
-  const suspicious = asset.monitor_content ? suspiciousMatches(asset, text) : [];
+  const suspicious = asset.monitor_content ? suspiciousEvidence(asset, html, text) : [];
   const scoring = calculateScore(asset, {
     httpStatus,
     responseTimeMs,
     sslOk: ssl.ok,
     brokenLinks: linkResult.broken.length,
-    suspicious: suspicious.length,
+    suspicious,
     missingContent: expected.missingContent.length,
     missingElements: expected.missingElements.length,
     contentChangeScore,
@@ -387,12 +500,14 @@ export async function buildPresenceCheck(client: SupabaseAny, asset: PresenceAss
     status: scoring.status,
     error_message: error,
     issues: scoring.issues,
+    suspicious_evidence: suspicious,
     result_json: {
       title: pageTitle(html),
       final_url: finalUrl,
       ssl_error: ssl.error,
       content_length: text.length,
-      suspicious_matches: suspicious,
+      suspicious_matches: suspicious.map((item) => item.match),
+      suspicious_evidence: suspicious,
       missing_content: expected.missingContent,
       missing_elements: expected.missingElements.map((item) => item.label ?? "Elemento esperado"),
       links_tested_count: linkResult.tested.length,
@@ -403,21 +518,22 @@ export async function buildPresenceCheck(client: SupabaseAny, asset: PresenceAss
   };
 }
 
-async function syncIncidents(client: SupabaseAny, asset: PresenceAsset, checkId: string, issues: CheckIssue[]) {
+async function syncIncidents(client: SupabaseAny, asset: PresenceAsset, checkId: string, issues: CheckIssue[], sourceType: "REAL" | "SIMULATED" = "REAL") {
   const activeTypes = new Set(issues.map((issue) => issue.type));
   const { data: openIncidents } = await client
     .from("presence_incidents")
-    .select("id, incident_type, status")
+    .select("id, incident_type, status, source_type")
     .eq("tenant_id", asset.tenant_id)
     .eq("asset_id", asset.id)
-    .in("status", ["open", "acknowledged"]);
+    .in("status", ["open", "acknowledged"])
+    .eq("source_type", sourceType);
 
   for (const issue of issues) {
     const existing = (openIncidents ?? []).find((incident: any) => incident.incident_type === issue.type);
     if (existing) {
-      await client.from("presence_incidents").update({ severity: issue.severity, title: issue.title, description: issue.description, evidence: issue.evidence ?? {}, last_check_id: checkId, updated_at: nowIso(), status: "open" }).eq("id", existing.id);
+      await client.from("presence_incidents").update({ severity: issue.severity, title: issue.title, description: issue.description, evidence: issue.evidence ?? {}, source_type: sourceType, last_check_id: checkId, updated_at: nowIso(), status: "open" }).eq("id", existing.id);
     } else {
-      await client.from("presence_incidents").insert({ tenant_id: asset.tenant_id, asset_id: asset.id, severity: issue.severity, incident_type: issue.type, title: issue.title, description: issue.description, evidence: issue.evidence ?? {}, last_check_id: checkId, status: "open" });
+      await client.from("presence_incidents").insert({ tenant_id: asset.tenant_id, asset_id: asset.id, severity: issue.severity, incident_type: issue.type, title: issue.title, description: issue.description, evidence: issue.evidence ?? {}, source_type: sourceType, last_check_id: checkId, status: "open" });
     }
   }
 
@@ -449,12 +565,14 @@ export async function runPresenceCheck(client: SupabaseAny, asset: PresenceAsset
       status: result.status,
       result_json: result.result_json,
       error_message: result.error_message,
+      source_type: "REAL",
+      suspicious_evidence: result.suspicious_evidence,
     })
     .select("*")
     .single();
 
   if (error) throw new Error(error.message);
-  await syncIncidents(client, asset, check.id, result.issues);
+  await syncIncidents(client, asset, check.id, result.issues, "REAL");
   await client.from("digital_assets").update({ last_checked_at: nowIso(), last_status: result.status, last_health_score: result.health_score, last_check_id: check.id, updated_at: nowIso() }).eq("id", asset.id);
   return { check, result };
 }
@@ -518,19 +636,21 @@ export async function runPresenceSimulations(client: SupabaseAny, tenantId: stri
   for (const item of cases) {
     const { data: check } = await client
       .from("presence_checks")
-      .insert({ tenant_id: tenantId, asset_id: asset.id, http_status: item.name.includes("404") ? 404 : item.name === "redirect" ? 302 : item.name === "timeout_simulado" ? null : 200, response_time_ms: item.name === "timeout_simulado" ? 15000 : 900, is_available: item.score >= 70, ssl_ok: item.name !== "ssl_invalido", broken_links_count: item.name === "link_quebrado" ? 1 : 0, content_status: item.name === "palavra_suspeita" ? "suspicious" : item.name === "elemento_ausente" ? "missing_expected" : item.name === "redirect" ? "changed" : "ok", health_score: item.score, status: item.status, result_json: { simulation: item.name } })
+      .insert({ tenant_id: tenantId, asset_id: asset.id, http_status: item.name.includes("404") ? 404 : item.name === "redirect" ? 302 : item.name === "timeout_simulado" ? null : 200, response_time_ms: item.name === "timeout_simulado" ? 15000 : 900, is_available: item.score >= 70, ssl_ok: item.name !== "ssl_invalido", broken_links_count: item.name === "link_quebrado" ? 1 : 0, content_status: item.name === "palavra_suspeita" ? "suspicious" : item.name === "elemento_ausente" ? "missing_expected" : item.name === "redirect" ? "changed" : "ok", health_score: item.score, status: item.status, source_type: "SIMULATED", suspicious_evidence: item.name === "palavra_suspeita" ? [{ category: "Gambling", match: "casino", snippet: "Simulacao controlada de palavra suspeita: casino.", location: "body", url: simulationUrl, observed: "Termo suspeito simulado para QA.", inference: null, recommendation: "Usado apenas para teste da Central de Presence.", confidence: "high", occurrences: 1, first_detected_at: nowIso(), last_detected_at: nowIso(), current_status: "present" }] : [], result_json: { simulation: item.name, source_type: "SIMULATED" } })
       .select("*")
       .single();
-    if (check && item.issue) await syncIncidents(client, asset as PresenceAsset, check.id, [item.issue as CheckIssue]);
+    if (check && item.issue) {
+      await syncIncidents(client, asset as PresenceAsset, check.id, [item.issue as CheckIssue], "SIMULATED");
+    }
     inserted.push({ case: item.name, status: item.status, health_score: item.score });
   }
 
   const { data: recoveryCheck } = await client
     .from("presence_checks")
-    .insert({ tenant_id: tenantId, asset_id: asset.id, http_status: 200, response_time_ms: 700, is_available: true, ssl_ok: true, broken_links_count: 0, content_status: "ok", health_score: 100, status: "healthy", result_json: { simulation: "recovery" } })
+    .insert({ tenant_id: tenantId, asset_id: asset.id, http_status: 200, response_time_ms: 700, is_available: true, ssl_ok: true, broken_links_count: 0, content_status: "ok", health_score: 100, status: "healthy", source_type: "SIMULATED", result_json: { simulation: "recovery", source_type: "SIMULATED" } })
     .select("*")
     .single();
-  if (recoveryCheck) await syncIncidents(client, asset as PresenceAsset, recoveryCheck.id, []);
+  if (recoveryCheck) await syncIncidents(client, asset as PresenceAsset, recoveryCheck.id, [], "SIMULATED");
 
   const { data: incidents } = await client.from("presence_incidents").select("incident_type, status, resolved_at").eq("asset_id", asset.id).order("created_at", { ascending: true });
   return { asset, cases: inserted, recovery: { status: "resolved", check_id: recoveryCheck?.id ?? null }, incidents: incidents ?? [] };

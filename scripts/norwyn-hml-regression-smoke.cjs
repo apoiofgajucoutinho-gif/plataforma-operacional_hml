@@ -8,6 +8,7 @@ const tests = [
   "scripts/norwyn-student360-filters-sort-profile-test.cjs",
   "scripts/norwyn-student360-searchparams-test.cjs",
   "scripts/norwyn-student-enrollment-backfill-tests.cjs",
+  "scripts/norwyn-presence-regression-test.cjs",
 ];
 
 function runNode(script) {
@@ -63,3 +64,4 @@ async function checkHttp(baseUrl) {
   console.error(error);
   process.exit(1);
 });
+
