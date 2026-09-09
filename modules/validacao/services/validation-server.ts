@@ -237,20 +237,37 @@ export async function getValidationAuth(): Promise<ValidationAuth> {
   return { tenantId: membership.tenant_id, role: membership.role, functionalRole: functionalRoleFor(membership.role), userId: currentUser.id, userEmail: currentUser.email ?? null, userName: (meta.nome as string) || (meta.name as string) || currentUser.email || null, allowedModules: membership.role === "ADMIN" ? allModules : modules, dataClient, canWrite };
 }
 
-async function fetchRowsPaged(client: SupabaseAny, table: string, select: string, tenantId: string, options?: { order?: string; ascending?: boolean; pageSize?: number; maxRows?: number }) {
+async function fetchRowsPaged(client: SupabaseAny, table: string, select: string, tenantId: string, options?: { order?: string; ascending?: boolean; pageSize?: number; maxRows?: number; eq?: Record<string, string | number | boolean | null> }) {
   const pageSize = options?.pageSize ?? 1000;
   const maxRows = options?.maxRows ?? 20000;
   const rows: any[] = [];
-  let error: string | null = null;
-  for (let from = 0; from < maxRows; from += pageSize) {
-    let query = client.from(table).select(select).eq("tenant_id", tenantId).range(from, from + pageSize - 1);
+  const buildQuery = (from: number) => {
+    let query = client.from(table).select(select, { count: from === 0 ? "exact" : undefined }).eq("tenant_id", tenantId);
+    for (const [column, value] of Object.entries(options?.eq ?? {})) {
+      query = value === null ? query.is(column, null) : query.eq(column, value);
+    }
+    query = query.range(from, from + pageSize - 1);
     if (options?.order) query = query.order(options.order, { ascending: options.ascending ?? false, nullsFirst: false });
-    const { data, error: pageError } = await query;
-    if (pageError) { error = pageError.message; break; }
-    rows.push(...(data ?? []));
-    if (!data || data.length < pageSize) break;
+    return query;
+  };
+
+  const first = await buildQuery(0);
+  if (first.error) return { data: rows, error: first.error.message };
+  rows.push(...(first.data ?? []));
+  const total = Math.min(first.count ?? rows.length, maxRows);
+  if (!first.data || first.data.length < pageSize || total <= pageSize) return { data: rows, error: null };
+
+  const ranges: number[] = [];
+  for (let from = pageSize; from < total; from += pageSize) ranges.push(from);
+  const batchSize = 4;
+  for (let index = 0; index < ranges.length; index += batchSize) {
+    const batch = await Promise.all(ranges.slice(index, index + batchSize).map((from) => buildQuery(from)));
+    for (const page of batch) {
+      if (page.error) return { data: rows, error: page.error.message };
+      rows.push(...(page.data ?? []));
+    }
   }
-  return { data: rows, error };
+  return { data: rows, error: null };
 }
 
 async function countRows(client: SupabaseAny, table: string, tenantId: string) {
@@ -310,7 +327,7 @@ function coverageBucket(label: string, rows: any[]) {
 }
 
 function officialDate(row: any) {
-  const value = row.official_snapshot?.purchase_date;
+  const value = row.official_purchase_date ?? row.official_snapshot?.purchase_date;
   const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.getTime()) ? date : null;
 }
@@ -330,37 +347,45 @@ function groupCoverage(rows: any[], keyFor: (row: any) => string, limit = 12) {
 export async function getValidationContext(tab: ValidationTab = "hotmart") {
   const auth = await getValidationAuth();
   const client = auth.dataClient;
+  const shouldLoadProductValidation = tab === "produtos";
+  const shouldLoadContentValidation = tab === "conteudos";
+  const emptyRows = { data: [] as any[], error: null as string | null };
   const [tenantResult, sales, uploads, decisions, knowledge, products, productIdentities, posts, contentEvents, totalSalesCount] = await Promise.all([
     client.from("tenants").select("id, nome").eq("id", auth.tenantId).maybeSingle(),
-    fetchRowsPaged(client, "comercial_vendas", "id, transaction_id, hotmart_product_id, produto_nome, comprador_nome, comprador_email, status_original, status_normalizado, status, grupo_comercial, moeda, valor_bruto, data_compra, data_aprovacao, data_reembolso, imported_at, updated_at", auth.tenantId, { order: "data_compra", pageSize: 1000, maxRows: 20000 }),
-    fetchRowsPaged(client, "norwyn_validation_uploads", "*", auth.tenantId, { order: "uploaded_at", pageSize: 1000, maxRows: 2000 }),
-    fetchRowsPaged(client, "norwyn_validation_decisions", "*", auth.tenantId, { order: "decided_at", pageSize: 1000, maxRows: 5000 }),
-    fetchRowsPaged(client, "norwyn_validation_knowledge", "*", auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 5000 }),
-    fetchRowsPaged(client, "products", "id, nome_oficial, produto_base, categoria, ativo, metadata, product_aliases(id, alias, produto_base, principal, ativo), product_components(id, componente, categoria, ativo)", auth.tenantId, { order: "nome_oficial", ascending: true, pageSize: 1000, maxRows: 3000 }),
-    fetchRowsPaged(client, "norwyn_product_external_identities", "*", auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 3000 }),
-    fetchRowsPaged(client, "instagram_posts", "id, post_id, data_postagem, tipo, legenda, permalink", auth.tenantId, { order: "data_postagem", pageSize: 1000, maxRows: 3000 }),
-    fetchRowsPaged(client, "norwyn_content_events", "id, source_id, title, caption, published_at, product_tags, theme_tags, objective, funnel_stage, campaign_id, metadata, updated_at", auth.tenantId, { order: "published_at", pageSize: 1000, maxRows: 3000 }),
+    fetchRowsPaged(client, "comercial_vendas", "id, transaction_id, hotmart_product_id, produto_nome, comprador_nome, comprador_email, status_original, status_normalizado, status, grupo_comercial, commercial_transaction, sale_confirmed, revenue_eligible, sale_comparable, event_class, moeda, valor_bruto, data_compra, data_aprovacao, data_reembolso, imported_at, updated_at", auth.tenantId, { order: "data_compra", pageSize: 1000, maxRows: 20000 }),
+    fetchRowsPaged(client, "norwyn_validation_uploads", "id, tenant_id, validation_type, source, original_filename, file_hash, uploaded_by, uploaded_at, detected_period_start, detected_period_end, row_count, unique_transaction_count, duplicate_count, status, summary, error_message, created_at, updated_at", auth.tenantId, { order: "uploaded_at", pageSize: 1000, maxRows: 2000 }),
+    fetchRowsPaged(client, "norwyn_validation_decisions", "id, tenant_id, validation_type, entity_type, entity_id, upload_id, decision_type, previous_value, new_value, comment, learn_scope, status, decided_by, decided_role, decided_at, source, metadata, created_at", auth.tenantId, { order: "decided_at", pageSize: 1000, maxRows: 5000 }),
+    fetchRowsPaged(client, "norwyn_validation_knowledge", "id, tenant_id, knowledge_type, subject_type, subject_key, predicate, object_type, object_key, confidence, status, source_decision_id, evidence, approved_by, approved_at, created_at, updated_at", auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 5000 }),
+    shouldLoadProductValidation ? fetchRowsPaged(client, "products", "id, nome_oficial, produto_base, categoria, ativo, metadata, product_aliases(id, alias, produto_base, principal, ativo), product_components(id, componente, categoria, ativo)", auth.tenantId, { order: "nome_oficial", ascending: true, pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
+    shouldLoadProductValidation ? fetchRowsPaged(client, "norwyn_product_external_identities", "id, tenant_id, product_id, product_key, source, external_id, external_name, relationship, revenue_scope, confidence, evidence, status, created_at, updated_at", auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
+    shouldLoadContentValidation ? fetchRowsPaged(client, "instagram_posts", "id, post_id, data_postagem, tipo, legenda, permalink", auth.tenantId, { order: "data_postagem", pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
+    shouldLoadContentValidation ? fetchRowsPaged(client, "norwyn_content_events", "id, source_id, title, caption, published_at, product_tags, theme_tags, objective, funnel_stage, campaign_id, metadata, updated_at", auth.tenantId, { order: "published_at", pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
     countRows(client, "comercial_vendas", auth.tenantId),
   ]);
   const uploadRows = uploads.data as any[];
   const latestHotmartUpload = uploadRows.filter((row) => row.validation_type === "HOTMART").sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at)))[0] ?? null;
+  const comparisonSummarySelect = "id, tenant_id, upload_id, transaction_id, normalized_transaction_id, match_status, sale_comparable, difference_types, created_at, official_purchase_date:official_snapshot->>purchase_date, official_raw_status:official_snapshot->>raw_status, official_canonical_status:official_snapshot->>canonical_status, official_hotmart_product_id:official_snapshot->>hotmart_product_id, official_hotmart_product_name:official_snapshot->>hotmart_product_name, official_normalized_value:official_snapshot->>normalized_value, official_currency:official_snapshot->>currency, norwyn_hotmart_product_id:norwyn_snapshot->>hotmart_product_id, norwyn_produto_nome:norwyn_snapshot->>produto_nome";
   const comparisons = latestHotmartUpload
-    ? await fetchRowsPaged(client, "norwyn_hotmart_validation_comparisons", "*", auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 20000 })
+    ? await fetchRowsPaged(client, "norwyn_hotmart_validation_comparisons", comparisonSummarySelect, auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 20000, eq: { upload_id: latestHotmartUpload.id } })
     : { data: [], error: null };
-  const comparisonRows = (comparisons.data as any[]).filter((row) => !latestHotmartUpload || row.upload_id === latestHotmartUpload.id);
+  const comparisonDetails = latestHotmartUpload
+    ? await fetchRowsPaged(client, "norwyn_hotmart_validation_comparisons", "id, tenant_id, upload_id, transaction_id, normalized_transaction_id, match_status, sale_comparable, official_snapshot, norwyn_snapshot, difference_types, created_at", auth.tenantId, { order: "created_at", pageSize: 250, maxRows: 250, eq: { upload_id: latestHotmartUpload.id } })
+    : { data: [], error: null };
+  const comparisonRows = comparisons.data as any[];
+  const comparisonDetailRows = comparisonDetails.data as any[];
   const officialComparisonRows = comparisonRows.filter((row) => row.sale_comparable && ["MATCH_EXACT", "MATCH_DIVERGENT", "ONLY_HOTMART"].includes(row.match_status));
   const coverage = coverageBucket("Total", officialComparisonRows);
   const coverageByYear = groupCoverage(officialComparisonRows, (row) => String(officialDate(row)?.getUTCFullYear() ?? "Sem data"), 8).sort((a, b) => a.label.localeCompare(b.label));
   const coverageByProduct = groupCoverage(officialComparisonRows, (row) => {
-    const productId = row.official_snapshot?.hotmart_product_id ?? row.norwyn_snapshot?.hotmart_product_id ?? "Sem produto";
-    const productName = row.official_snapshot?.hotmart_product_name ?? row.norwyn_snapshot?.produto_nome ?? "";
+    const productId = row.official_hotmart_product_id ?? row.norwyn_hotmart_product_id ?? row.official_snapshot?.hotmart_product_id ?? row.norwyn_snapshot?.hotmart_product_id ?? "Sem produto";
+    const productName = row.official_hotmart_product_name ?? row.norwyn_produto_nome ?? row.official_snapshot?.hotmart_product_name ?? row.norwyn_snapshot?.produto_nome ?? "";
     return productName ? `${productId} - ${productName}` : String(productId);
   });
-  const coverageByStatus = groupCoverage(officialComparisonRows, (row) => row.official_snapshot?.raw_status ?? row.official_snapshot?.canonical_status ?? "Sem status");
+  const coverageByStatus = groupCoverage(officialComparisonRows, (row) => row.official_raw_status ?? row.official_canonical_status ?? row.official_snapshot?.raw_status ?? row.official_snapshot?.canonical_status ?? "Sem status");
   const onlyHotmartClassification = groupCoverage(
     comparisonRows.filter((row) => row.match_status === "ONLY_HOTMART"),
     (row) => {
-      const status = row.official_snapshot?.raw_status;
+      const status = row.official_raw_status ?? row.official_snapshot?.raw_status;
       const transaction = row.normalized_transaction_id ?? "";
       if (status === "Completo" && /^HP\d+C\d+$/.test(transaction)) return "Completo com sufixo de item";
       if (status === "Completo") return "Venda completa ausente";
@@ -383,12 +408,14 @@ export async function getValidationContext(tab: ValidationTab = "hotmart") {
   const productRows = products.data as any[];
   const identityRows = productIdentities.data as any[];
   const contentRows = (contentEvents.data.length ? contentEvents.data : posts.data) as any[];
-  const [productMatchQuality, clubMatchCandidates, learningEvents, customerRows] = await Promise.all([
-    fetchRowsPaged(client, "norwyn_student_360_p13_product_match_quality", "enrollment_id, hotmart_product_id, product_name, canonical_product_id, external_product_id, relationship, source, confidence", auth.tenantId, { pageSize: 1000, maxRows: 6000 }),
-    fetchRowsPaged(client, "norwyn_student_360_club_match_candidates", "event_id, customer_id, canonical_product_id, enrollment_id", auth.tenantId, { pageSize: 1000, maxRows: 5000 }),
-    fetchRowsPaged(client, "norwyn_hotmart_learning_events", "event_id, event_type, event_class, buyer_email, buyer_name, hotmart_product_id, hotmart_product_name, module_name, occurred_at", auth.tenantId, { order: "occurred_at", pageSize: 1000, maxRows: 2000 }),
-    fetchRowsPaged(client, "norwyn_customers", "id, primary_email", auth.tenantId, { pageSize: 1000, maxRows: 3000 }),
-  ]);
+  const [productMatchQuality, clubMatchCandidates, learningEvents, customerRows] = shouldLoadProductValidation
+    ? await Promise.all([
+        fetchRowsPaged(client, "norwyn_student_360_p13_product_match_quality", "enrollment_id, hotmart_product_id, product_name, canonical_product_id, external_product_id, relationship, source, confidence", auth.tenantId, { pageSize: 1000, maxRows: 6000 }),
+        fetchRowsPaged(client, "norwyn_student_360_club_match_candidates", "event_id, customer_id, canonical_product_id, enrollment_id", auth.tenantId, { pageSize: 1000, maxRows: 5000 }),
+        fetchRowsPaged(client, "norwyn_hotmart_learning_events", "event_id, event_type, event_class, buyer_email, buyer_name, hotmart_product_id, hotmart_product_name, module_name, occurred_at", auth.tenantId, { order: "occurred_at", pageSize: 1000, maxRows: 2000 }),
+        fetchRowsPaged(client, "norwyn_customers", "id, primary_email", auth.tenantId, { pageSize: 1000, maxRows: 3000 }),
+      ])
+    : [emptyRows, emptyRows, emptyRows, emptyRows];
   const productRowsById = new Map(productRows.map((product) => [product.id, product]));
   const rankedProductMatches = [...groupByKey(productMatchQuality.data as any[], (row) => row.enrollment_id).entries()].map(([enrollmentId, rows]) => {
     const best = [...rows].sort((a, b) => productMatchRank(a) - productMatchRank(b))[0] ?? {};
@@ -420,8 +447,8 @@ export async function getValidationContext(tab: ValidationTab = "hotmart") {
     allowedModules: auth.allowedModules,
     canWrite: auth.canWrite,
     updatedAt: latest([...saleRows, ...comparisonRows, ...decisionRows, ...knowledgeRows]),
-    schemaReady: !uploads.error && !comparisons.error && !decisions.error && !knowledge.error,
-    schemaErrors: [uploads.error, comparisons.error, decisions.error, knowledge.error, sales.error, totalSalesCount.error].filter(Boolean),
+    schemaReady: !uploads.error && !comparisons.error && !comparisonDetails.error && !decisions.error && !knowledge.error,
+    schemaErrors: [uploads.error, comparisons.error, comparisonDetails.error, decisions.error, knowledge.error, sales.error, totalSalesCount.error].filter(Boolean),
     bigNumbers: { pending: needsReview, validated: decisionRows.filter((row) => row.status === "active").length, divergences: objectNumber(comparisonCounts.MATCH_DIVERGENT) + objectNumber(comparisonCounts.ONLY_HOTMART) + objectNumber(comparisonCounts.ONLY_NORWYN) + nonBrlCommercial.length, learnings: knowledgeRows.length },
     hotmart: {
       transactionsNorwynRaw: totalSalesCount.count || saleRows.length,
@@ -442,7 +469,7 @@ export async function getValidationContext(tab: ValidationTab = "hotmart") {
       coverageByProduct,
       coverageByStatus,
       onlyHotmartClassification,
-      comparisons: comparisonRows.slice(0, 250),
+      comparisons: comparisonDetailRows,
     },
     products: { canonical: productRows, identities: identityRows, pending: pendingProducts, hotmartProductIds: [...new Set(comparableSales.map((row) => row.hotmart_product_id).filter(Boolean))], matchCounts: productMatchCounts, nameOnlyReviewGroups, clubProductReviews: p13DecisionRows.filter((row) => row.entity_type === "HOTMART_CLUB_PRODUCT"), enrollmentReviewGroups: p13DecisionRows.filter((row) => row.entity_type === "HOTMART_CLUB_ENROLLMENT_MATCH_GROUP"), accessOnlyGroups, probableEnrollmentEvents, ambiguousEnrollmentEvents, p14SchemaErrors: [productMatchQuality.error, clubMatchCandidates.error, learningEvents.error, customerRows.error].filter(Boolean) },
     contents: { rows: contentRows, pending: pendingContents },
@@ -552,6 +579,7 @@ export async function createValidationDecision(input: any) {
   }
   return decision;
 }
+
 
 
 

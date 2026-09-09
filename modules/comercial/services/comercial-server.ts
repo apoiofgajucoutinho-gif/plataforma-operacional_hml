@@ -17,6 +17,10 @@ import type {
 
 type SupabaseAny = any;
 
+const COMERCIAL_VENDAS_SELECT = "id, tenant_id, transaction_id, aluno_id, produto_id, hotmart_product_id, produto_nome, comprador_nome, comprador_email, status, status_original, status_normalizado, grupo_comercial, commercial_transaction, sale_confirmed, revenue_eligible, student_eligible, sale_comparable, event_class, eligibility_reason, forma_pagamento, parcelas, moeda, valor_bruto, valor_liquido, taxas, coproducao, data_compra, data_aprovacao, data_reembolso, data_chargeback, expected_payment_date, source_sck, origem, raw_id, last_event_at, imported_at, data_lacunas, metadata, created_at, updated_at";
+const COMERCIAL_RECEBIVEIS_SELECT = "id, tenant_id, venda_id, transaction_id, parcela_numero, total_parcelas, status, data_prevista, data_recebimento, valor_bruto, valor_liquido, fonte_previsao, created_at, updated_at";
+const COMERCIAL_ALUNOS_SELECT = "id, tenant_id, nome, email, telefone, origem, primeira_compra_at, ultima_compra_at, status_acesso, acesso_expira_em, ultimo_acesso_at, created_at, updated_at";
+
 async function getMembershipByUserId(userId: string) {
   const admin = createAdminClient();
   const supabase = admin ?? (await createClient());
@@ -77,6 +81,7 @@ async function fetchTenantRows({
   ascending,
   nullsFirst,
   maxRows = 20000,
+  select = "*",
 }: {
   client: SupabaseAny;
   table: string;
@@ -85,22 +90,32 @@ async function fetchTenantRows({
   ascending: boolean;
   nullsFirst?: boolean;
   maxRows?: number;
+  select?: string;
 }) {
   const pageSize = 1000;
   const rows: Array<Record<string, unknown>> = [];
+  const buildQuery = (from: number) => client
+    .from(table)
+    .select(select, { count: from === 0 ? "exact" : undefined })
+    .eq("tenant_id", tenantId)
+    .order(orderColumn, { ascending, nullsFirst })
+    .range(from, from + pageSize - 1);
 
-  for (let from = 0; from < maxRows; from += pageSize) {
-    const { data, error } = await client
-      .from(table)
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .order(orderColumn, { ascending, nullsFirst })
-      .range(from, from + pageSize - 1);
+  const first = await buildQuery(0);
+  if (first.error) throw new Error(first.error.message);
+  rows.push(...(first.data ?? []));
+  const total = Math.min(first.count ?? rows.length, maxRows);
+  if (!first.data || first.data.length < pageSize || total <= pageSize) return rows;
 
-    if (error) throw new Error(error.message);
-
-    rows.push(...(data ?? []));
-    if (!data || data.length < pageSize) break;
+  const ranges: number[] = [];
+  for (let from = pageSize; from < total; from += pageSize) ranges.push(from);
+  const batchSize = 4;
+  for (let index = 0; index < ranges.length; index += batchSize) {
+    const batch = await Promise.all(ranges.slice(index, index + batchSize).map((from) => buildQuery(from)));
+    for (const page of batch) {
+      if (page.error) throw new Error(page.error.message);
+      rows.push(...(page.data ?? []));
+    }
   }
 
   return rows;
@@ -166,6 +181,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
         orderColumn: "data_compra",
         ascending: false,
         nullsFirst: false,
+        select: COMERCIAL_VENDAS_SELECT,
       }),
       fetchTenantRows({
         client: dataClient,
@@ -174,6 +190,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
         orderColumn: "data_prevista",
         ascending: true,
         nullsFirst: false,
+        select: COMERCIAL_RECEBIVEIS_SELECT,
       }),
       fetchTenantRows({
         client: dataClient,
@@ -182,6 +199,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
         orderColumn: "ultima_compra_at",
         ascending: false,
         nullsFirst: false,
+        select: COMERCIAL_ALUNOS_SELECT,
       }),
       dataClient
         .from("comercial_produtos")
@@ -267,6 +285,7 @@ function emptyContext(diagnostic: string): ComercialContext {
     rawImports: [],
   };
 }
+
 
 
 
