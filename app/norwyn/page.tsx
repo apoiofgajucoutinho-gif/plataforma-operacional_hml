@@ -6,8 +6,10 @@ export default async function NorwynPage() {
   const context = await getNorwynContext();
 
   return (
-    <AppShell activeItem="norwyn" allowedItems={context.allowedModules}>
+    <AppShell activeItem="norwyn" allowedItems={context.allowedModules} role={"role" in context ? context.role : null}>
       <NorwynDashboard context={context} />
     </AppShell>
   );
 }
+
+

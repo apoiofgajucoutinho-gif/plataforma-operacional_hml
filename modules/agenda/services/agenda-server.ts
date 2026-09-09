@@ -234,6 +234,7 @@ export async function getAgendaContext() {
       updatedAt: null,
       diagnostic: `${source}: ${membershipError.message}`,
       allowedModules: [],
+      role: null,
     };
   }
 
@@ -248,6 +249,7 @@ export async function getAgendaContext() {
           ? "Nenhum tenant encontrado via RLS. Configure SUPABASE_SERVICE_ROLE_KEY no .env.local ou revise as policies."
           : "Nenhum tenant ativo encontrado para este usuario.",
       allowedModules: [],
+      role: null,
     };
   }
 
@@ -261,6 +263,7 @@ export async function getAgendaContext() {
       updatedAt: null,
       diagnostic: "Seu perfil nao possui acesso ao modulo Agenda.",
       allowedModules,
+      role: membership.role,
     };
   }
 
@@ -295,6 +298,7 @@ export async function getAgendaContext() {
     updatedAt,
     diagnostic: source === "service_role" ? null : "Usando leitura via RLS.",
     allowedModules,
+    role: membership.role,
   };
 }
 
@@ -848,3 +852,4 @@ export async function deleteAgendaEvent(eventId: string) {
 
   return data as { id: string };
 }
+

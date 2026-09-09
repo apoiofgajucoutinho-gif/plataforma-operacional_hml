@@ -28,6 +28,7 @@ import {
 import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
 import { FinancialConfig } from "@/lib/financial-config";
+import { canonicalProductIdForSale, listCanonicalProductOptions, type CanonicalProduct } from "@/modules/norwyn/services/product-identity";
 import type {
   ComercialAluno,
   ComercialBusinessProfile,
@@ -143,6 +144,7 @@ const launchSourceSortOptions: Array<{ key: LaunchSourceSortKey; label: string }
 const commercialStatusValues = new Set([
   "APPROVED",
   "COMPLETE",
+  "COMPLETED",
   "STARTED",
   "WAITING_PAYMENT",
   "PRINTED_BILLET",
@@ -162,6 +164,7 @@ const commercialStatusValues = new Set([
   "CHARGEBACK",
   "PURCHASE_APPROVED",
   "PURCHASE_COMPLETE",
+  "PURCHASE_COMPLETED",
   "PURCHASE_CANCELED",
   "PURCHASE_CANCELLED",
   "PURCHASE_REFUNDED",
@@ -302,7 +305,7 @@ function normalizeStatus(status: string | null | undefined) {
 
 function commercialGroupFromStatus(status: string | null | undefined): ComercialStatusGroup {
   const normalized = normalizeStatus(status);
-  if (["APPROVED", "COMPLETE", "PURCHASE_APPROVED", "PURCHASE_COMPLETE"].includes(normalized)) return "confirmed";
+  if (["APPROVED", "COMPLETE", "COMPLETED", "PURCHASE_APPROVED", "PURCHASE_COMPLETE", "PURCHASE_COMPLETED"].includes(normalized)) return "confirmed";
   if (["STARTED", "WAITING_PAYMENT", "PRINTED_BILLET", "PROCESSING_TRANSACTION", "UNDER_ANALISYS", "UNDER_ANALYSIS", "PRE_ORDER", "OVERDUE", "PURCHASE_BILLET_PRINTED", "PURCHASE_DELAYED"].includes(normalized)) return "pending";
   if (["REFUNDED", "PARTIALLY_REFUNDED", "PURCHASE_REFUNDED"].includes(normalized)) return "refunded";
   if (["CHARGEBACK", "PURCHASE_CHARGEBACK"].includes(normalized)) return "chargeback";
@@ -372,6 +375,7 @@ function rawImportEventDomain(row: ComercialRawImport): EventDomain {
 }
 
 function isCommercialSale(row: ComercialVenda, rawImports: ComercialRawImport[] = []) {
+  if (row.commercial_transaction !== null && row.commercial_transaction !== undefined) return row.commercial_transaction === true;
   return saleEventDomain(row, rawImports) === "commercial";
 }
 
@@ -603,7 +607,13 @@ function hasGap(row: ComercialVenda, gap: string) {
 }
 
 function isConfirmed(row: ComercialVenda) {
+  if (row.sale_confirmed !== null && row.sale_confirmed !== undefined) return row.sale_confirmed === true;
   return commercialGroup(row) === "confirmed";
+}
+
+function isRevenueEligible(row: ComercialVenda) {
+  if (row.revenue_eligible !== null && row.revenue_eligible !== undefined) return row.revenue_eligible === true;
+  return isConfirmed(row) && String(row.moeda ?? "BRL").toUpperCase() === "BRL";
 }
 
 function isRefundedOrChargeback(row: ComercialVenda) {
@@ -650,6 +660,10 @@ function productFilterValue(row: ComercialVenda) {
   return row.produto_nome?.trim() || row.produto_id || row.hotmart_product_id || "Produto nao informado";
 }
 
+function canonicalProductFilterValue(row: ComercialVenda, products: ComercialNorwynProduct[]) {
+  return canonicalProductIdForSale(row, products);
+}
+
 function paymentFilterValue(row: ComercialVenda) {
   const payment = normalizeStatus(row.forma_pagamento);
   if (payment.includes("PIX")) return "PIX";
@@ -667,9 +681,9 @@ function uniqueFilterOptions(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
-function applyCommercialGlobalFilters(rows: ComercialVenda[], filters: CommercialGlobalFiltersState) {
+function applyCommercialGlobalFilters(rows: ComercialVenda[], filters: CommercialGlobalFiltersState, products: ComercialNorwynProduct[]) {
   return rows.filter((row) => {
-    if (filters.product !== "all" && productFilterValue(row) !== filters.product) return false;
+    if (filters.product !== "all" && canonicalProductFilterValue(row, products) !== filters.product) return false;
     if (filters.status !== "all" && commercialGroup(row) !== filters.status) return false;
     if (filters.payment !== "all" && paymentFilterValue(row) !== filters.payment) return false;
     if (filters.source !== "all" && sourceFilterValue(row) !== filters.source) return false;
@@ -955,7 +969,7 @@ function buildEstimatedFinancials({
   taxRules: ComercialBusinessTaxRule[];
 }) {
   const normalizedProfile = FinancialConfig.normalizeBusinessProfile(profile);
-  const confirmed = rows.filter(isConfirmed);
+  const confirmed = rows.filter(isRevenueEligible);
   const gross = grossTotal(confirmed);
   let configuredGross = 0;
   let configuredSales = 0;
@@ -1069,7 +1083,7 @@ function buildTemporalRows(rows: ComercialVenda[], range: LaunchRange) {
 
   return Array.from(groups.entries())
     .map(([label, sales]) => {
-      const confirmed = sales.filter(isConfirmed);
+      const confirmed = sales.filter(isRevenueEligible);
       return {
         label,
         vendas: confirmed.length,
@@ -1087,10 +1101,10 @@ function buildProductRows(rows: ComercialVenda[]) {
     groups.set(key, [...(groups.get(key) ?? []), row]);
   });
 
-  const confirmedTotal = grossTotal(rows.filter(isConfirmed));
+  const confirmedTotal = grossTotal(rows.filter(isRevenueEligible));
   return Array.from(groups.entries())
     .map(([name, sales]) => {
-      const confirmed = sales.filter(isConfirmed);
+      const confirmed = sales.filter(isRevenueEligible);
       const revenue = grossTotal(confirmed);
       return {
         name,
@@ -1129,10 +1143,10 @@ function buildSourceRows(rows: ComercialVenda[]) {
     const key = row.source_sck?.trim() || "Sem source_sck";
     groups.set(key, [...(groups.get(key) ?? []), row]);
   });
-  const confirmedTotal = grossTotal(rows.filter(isConfirmed));
+  const confirmedTotal = grossTotal(rows.filter(isRevenueEligible));
   return Array.from(groups.entries())
     .map(([source, sales]) => {
-      const confirmed = sales.filter(isConfirmed);
+      const confirmed = sales.filter(isRevenueEligible);
       const revenue = grossTotal(confirmed);
       return {
         source,
@@ -1151,10 +1165,10 @@ function buildPaymentRows(rows: ComercialVenda[]) {
     const key = paymentFilterValue(row);
     groups.set(key, [...(groups.get(key) ?? []), row]);
   });
-  const confirmedTotal = grossTotal(rows.filter(isConfirmed));
+  const confirmedTotal = grossTotal(rows.filter(isRevenueEligible));
   return Array.from(groups.entries())
     .map(([payment, sales]) => {
-      const confirmed = sales.filter(isConfirmed);
+      const confirmed = sales.filter(isRevenueEligible);
       const revenue = grossTotal(confirmed);
       return {
         payment,
@@ -1210,11 +1224,16 @@ function compactFilterLabel(value: string, fallback: string) {
   return value === "all" ? fallback : value;
 }
 
-function viewingLabel(period: PeriodKey, filters: CommercialGlobalFiltersState) {
+function productFilterLabel(value: string, options: CanonicalProduct[]) {
+  if (value === "all") return "Todos os produtos";
+  return options.find((option) => option.id === value)?.label ?? value;
+}
+
+function viewingLabel(period: PeriodKey, filters: CommercialGlobalFiltersState, productOptions: CanonicalProduct[]) {
   return [
     statusLabel(filters.status),
     periodLabel(period),
-    compactFilterLabel(filters.product, "Todos os produtos"),
+    productFilterLabel(filters.product, productOptions),
     compactFilterLabel(filters.payment, "Todos os pagamentos"),
     compactFilterLabel(filters.source, "Todas as origens"),
   ].join(" • ");
@@ -1568,18 +1587,22 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   );
   const commercialFilterOptions = useMemo(
     () => ({
-      products: uniqueFilterOptions(commercialSales.map(productFilterValue)),
+      products: listCanonicalProductOptions({
+        products: context.norwynProducts,
+        comercialProducts: context.produtos,
+        sales: commercialSales,
+      }),
       payments: uniqueFilterOptions(commercialSales.map(paymentFilterValue)),
       sources: uniqueFilterOptions(commercialSales.map(sourceFilterValue)),
     }),
-    [commercialSales],
+    [commercialSales, context.norwynProducts, context.produtos],
   );
   const overviewSales = useMemo(
-    () => applyCommercialGlobalFilters(filterSalesByPeriod(commercialSales, period), commercialGlobalFilters),
-    [commercialGlobalFilters, commercialSales, period],
+    () => applyCommercialGlobalFilters(filterSalesByPeriod(commercialSales, period), commercialGlobalFilters, context.norwynProducts),
+    [commercialGlobalFilters, commercialSales, context.norwynProducts, period],
   );
   const filteredReceivables = useMemo(() => filterReceivablesByPeriod(context.recebiveis, period), [context.recebiveis, period]);
-  const confirmedSales = overviewSales.filter(isConfirmed);
+  const confirmedSales = overviewSales.filter(isRevenueEligible);
   const pendingSales = overviewSales.filter((sale) => commercialGroup(sale) === "pending");
   const lostSales = overviewSales.filter((sale) => commercialGroup(sale) === "lost");
   const refundedSales = overviewSales.filter(isRefundedOrChargeback);
@@ -1658,10 +1681,10 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   }, [context.alunos, monthFilter, search, statusFilter, yearFilter]);
   const launchRange = useMemo(() => buildLaunchRange(launchPeriod, launchName, launchStart, launchEnd), [launchEnd, launchName, launchPeriod, launchStart]);
   const launchRows = useMemo(
-    () => applyCommercialGlobalFilters(launchSaleRows(context.vendas, launchRange, context.rawImports), commercialGlobalFilters),
-    [commercialGlobalFilters, context.rawImports, context.vendas, launchRange],
+    () => applyCommercialGlobalFilters(launchSaleRows(context.vendas, launchRange, context.rawImports), commercialGlobalFilters, context.norwynProducts),
+    [commercialGlobalFilters, context.norwynProducts, context.rawImports, context.vendas, launchRange],
   );
-  const launchConfirmed = launchRows.filter(isConfirmed);
+  const launchConfirmed = launchRows.filter(isRevenueEligible);
   const launchPending = launchRows.filter((sale) => commercialGroup(sale) === "pending");
   const launchLost = launchRows.filter((sale) => commercialGroup(sale) === "lost");
   const launchRefunded = launchRows.filter(isRefundedOrChargeback);
@@ -1678,8 +1701,8 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const launchProductLossRows = buildProductLossRows(launchRiskRows);
   const launchTimelineRows = buildTimelineRows(launchRows);
   const launchPreviousRange = previousRange(launchRange);
-  const launchPreviousRows = launchPreviousRange ? applyCommercialGlobalFilters(launchSaleRows(context.vendas, launchPreviousRange, context.rawImports), commercialGlobalFilters) : [];
-  const launchPreviousConfirmed = launchPreviousRows.filter(isConfirmed);
+  const launchPreviousRows = launchPreviousRange ? applyCommercialGlobalFilters(launchSaleRows(context.vendas, launchPreviousRange, context.rawImports), commercialGlobalFilters, context.norwynProducts) : [];
+  const launchPreviousConfirmed = launchPreviousRows.filter(isRevenueEligible);
   const launchAlerts = buildLaunchAlerts(launchRows, context.rawImports, launchProductRows, launchRiskRows);
   const launchRawLast24h = context.rawImports.filter((row) => withinHours(row.received_at, 24));
   const launchRawLastHour = context.rawImports.filter((row) => withinHours(row.received_at, 1));
@@ -1708,7 +1731,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
   const overviewStatusRows = buildStatusRows(overviewSales);
   const overviewPaymentRows = buildPaymentRows(overviewSales);
   const overviewSourceRows = buildSourceRows(overviewSales);
-  const overviewViewingLabel = viewingLabel(period, commercialGlobalFilters);
+  const overviewViewingLabel = viewingLabel(period, commercialGlobalFilters, commercialFilterOptions.products);
   const overviewSummary = buildOverviewSummary({
     period,
     confirmed: confirmedSales.length,
@@ -2149,7 +2172,7 @@ function LaunchIntelligencePanel({
   launchEnd: string;
   setLaunchEnd: (value: string) => void;
   filters: CommercialGlobalFiltersState;
-  filterOptions: { products: string[]; payments: string[]; sources: string[] };
+  filterOptions: { products: CanonicalProduct[]; payments: string[]; sources: string[] };
   onProductFilter: (value: string) => void;
   onStatusFilter: (value: string) => void;
   onPaymentFilter: (value: string) => void;
@@ -2211,9 +2234,9 @@ function LaunchIntelligencePanel({
   const todayRange = buildLaunchRange("today", launchName, launchStart, launchEnd);
   const yesterdayRange = buildLaunchRange("yesterday", launchName, launchStart, launchEnd);
   const sevenDayRange = buildLaunchRange("7d", launchName, launchStart, launchEnd);
-  const todayConfirmed = launchSaleRows(allSales, todayRange, rawImports).filter(isConfirmed);
-  const yesterdayConfirmed = launchSaleRows(allSales, yesterdayRange, rawImports).filter(isConfirmed);
-  const sevenDayConfirmed = launchSaleRows(allSales, sevenDayRange, rawImports).filter(isConfirmed);
+  const todayConfirmed = launchSaleRows(allSales, todayRange, rawImports).filter(isRevenueEligible);
+  const yesterdayConfirmed = launchSaleRows(allSales, yesterdayRange, rawImports).filter(isRevenueEligible);
+  const sevenDayConfirmed = launchSaleRows(allSales, sevenDayRange, rawImports).filter(isRevenueEligible);
   const todayGross = grossTotal(todayConfirmed);
   const yesterdayGross = grossTotal(yesterdayConfirmed);
   const sevenDayAverage = grossTotal(sevenDayConfirmed) / 7;
@@ -2398,7 +2421,7 @@ function LaunchIntelligencePanel({
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Metric icon={<WalletCards />} label="Receita bruta" value={formatMoney(gross)} helper="oficial Hotmart" />
-        <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmed.length} helper="APPROVED ou COMPLETE" />
+        <Metric icon={<ReceiptText />} label="Vendas confirmadas" value={confirmed.length} helper="sale_confirmed=true" />
         <Metric icon={<TrendingUp />} label="Lucro líquido estimado" value={estimatedFinancials.estimatedNet === null ? "Indisponível" : formatMoney(estimatedFinancials.estimatedNet)} helper="Estimativa Norwyn" />
         <Metric icon={<ReceiptText />} label="Imposto estimado" value={formatMoney(estimatedFinancials.tax)} helper="DAS estimado" />
         <Metric icon={<TrendingUp />} label="Ticket médio bruto" value={formatMoney(ticket)} helper="bruto / confirmadas" />
@@ -2645,9 +2668,9 @@ function EstimatedFinancialsCard({
         <span className="rounded-full bg-[#FFF3C7] px-3 py-1 text-[11px] font-black uppercase text-[#8A5B18]">Estimativa Norwyn</span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-        <MiniMetric label="Receita bruta total" value={formatMoney(estimate.gross)} helper={`${estimate.sales} vendas confirmadas`} />
+        <MiniMetric label="Receita BRL elegível" value={formatMoney(estimate.gross)} helper={`${estimate.sales} vendas confirmadas e elegíveis`} />
         <MiniMetric label="Receita configurada" value={formatMoney(estimate.configuredGross)} helper={`${estimate.configuredSales} vendas na estimativa`} />
-        <MiniMetric label="Receita pendente" value={formatMoney(estimate.pendingGross)} helper="produtos sem configuracao completa" />
+        <MiniMetric label="Receita fora da configuração" value={formatMoney(estimate.pendingGross)} helper="valor ainda sem regra financeira completa" />
         <MiniMetric label="Taxas Hotmart" value={formatMoney(estimate.hotmartPercentFee + estimate.fixedFee)} helper="percentual + taxa fixa configurada" />
         <MiniMetric label="Parceria" value={formatMoney(estimate.coproduction)} helper="coproducao/coautoria por produto" />
         <MiniMetric label="Imposto/DAS" value={formatMoney(estimate.tax)} helper="por regra tributaria vigente" />
@@ -2753,7 +2776,7 @@ function OverviewFilterBar({
   period: PeriodKey;
   setPeriod: (period: PeriodKey) => void;
   filters: CommercialGlobalFiltersState;
-  options: { products: string[]; payments: string[]; sources: string[] };
+  options: { products: CanonicalProduct[]; payments: string[]; sources: string[] };
   onProduct: (value: string) => void;
   onStatus: (value: string) => void;
   onPayment: (value: string) => void;
@@ -2769,7 +2792,7 @@ function OverviewFilterBar({
         <FilterSelect label="Produto" value={filters.product} onChange={onProduct}>
           <option value="all">Todos os produtos</option>
           {options.products.map((item) => (
-            <option key={item} value={item}>{item}</option>
+            <option key={item.id} value={item.id}>{item.label}{item.source === "products" ? "" : ` (${item.source})`}</option>
           ))}
         </FilterSelect>
         <FilterSelect label="Status" value={filters.status} onChange={onStatus}>
@@ -2903,7 +2926,7 @@ function CommercialGlobalFilters({
   onSource,
 }: {
   filters: CommercialGlobalFiltersState;
-  options: { products: string[]; payments: string[]; sources: string[] };
+  options: { products: CanonicalProduct[]; payments: string[]; sources: string[] };
   onProduct: (value: string) => void;
   onStatus: (value: string) => void;
   onPayment: (value: string) => void;
@@ -2919,7 +2942,7 @@ function CommercialGlobalFilters({
         >
           <option value="all">Todos os produtos</option>
           {options.products.map((item) => (
-            <option key={item} value={item}>{item}</option>
+            <option key={item.id} value={item.id}>{item.label}{item.source === "products" ? "" : ` (${item.source})`}</option>
           ))}
         </select>
         <select

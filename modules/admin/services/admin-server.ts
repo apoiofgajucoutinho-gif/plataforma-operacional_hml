@@ -8,10 +8,12 @@ import type { AdminContext, AdminProfileAccess, AdminRole } from "@/modules/admi
 
 const roles: Array<{ value: AdminRole; label: string }> = [
   { value: "ADMIN", label: "Admin" },
-  { value: "SUPORTE", label: "Suporte" },
-  { value: "MARKETING_PARTNER", label: "Marketing" },
-  { value: "CLINICA", label: "Clinica" },
-  { value: "USER", label: "User" },
+  { value: "ESPECIALISTA", label: "Especialista" },
+  { value: "OPERACIONAL", label: "Operacional" },
+  { value: "USER", label: "Usuario" },
+  { value: "SUPORTE", label: "Suporte legado" },
+  { value: "MARKETING_PARTNER", label: "Marketing legado" },
+  { value: "CLINICA", label: "Clinica legado" },
 ];
 
 const moduleLabels: Record<string, string> = {
@@ -35,7 +37,7 @@ const moduleTabs: Record<string, string[]> = {
   adocao: ["Adoção", "Atividades recentes"],
   atividades: ["Em desenvolvimento"],
   relatorios: ["Em desenvolvimento"],
-  admin: ["Users", "Perfil"],
+  admin: ["Usuários", "Perfis"],
 };
 
 async function listAllUsers() {
@@ -80,6 +82,7 @@ export async function getAdminContext(): Promise<AdminContext> {
 
   if (!membership || membership.role !== "ADMIN") {
     return {
+      role: membership?.role ?? null,
       allowedModules: [],
       tenant: null,
       users: [],
@@ -146,6 +149,7 @@ export async function getAdminContext(): Promise<AdminContext> {
   });
 
   return {
+    role: membership.role,
     allowedModules: allModules,
     tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
     users,
@@ -155,18 +159,24 @@ export async function getAdminContext(): Promise<AdminContext> {
 }
 
 function tabsForRole(role: AdminRole, module: string) {
-  if (role === "MARKETING_PARTNER") {
+  if (role === "ESPECIALISTA" || role === "MARKETING_PARTNER") {
     if (module === "financeiro") return ["Marketing"];
     if (module === "instagram") return ["Insights", "Resultados"];
   }
 
-  if (role === "SUPORTE" && module === "financeiro") {
+  if ((role === "OPERACIONAL" || role === "SUPORTE") && module === "financeiro") {
     return ["Início", "Diagnóstico", "Lançar", "Consultar", "DRE", "Marketing"];
   }
 
-  if (role === "SUPORTE" && module === "objetivos") {
-    return ["Visao Geral", "OKRs", "Instagram", "Ads", "Faturamento"];
+  if ((role === "OPERACIONAL" || role === "SUPORTE") && module === "objetivos") {
+    return ["Visão geral", "OKRs", "Instagram", "Ads", "Faturamento"];
   }
 
   return moduleTabs[module] ?? [moduleLabels[module] ?? module];
 }
+
+
+
+
+
+

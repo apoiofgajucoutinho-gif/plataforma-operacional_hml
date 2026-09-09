@@ -24,7 +24,8 @@ function cleanPayload(payload: Record<string, unknown>) {
 }
 
 function roleCanTouchTeam(role: string, team: string | null | undefined) {
-  if (role === "ADMIN" || role === "SUPORTE") return true;
+  if (role === "ADMIN" || role === "SUPORTE" || role === "ESPECIALISTA") return true;
+  if (role === "OPERACIONAL") return team === "suporte";
   if (role === "MARKETING_PARTNER") return team === "marketing";
   if (role === "CLINICA") return team === "especialista";
   return false;
@@ -61,7 +62,7 @@ async function getAuthContext() {
       .eq("module", "atividades")
       .maybeSingle();
 
-    if (!permission?.can_write) return { error: "Sem permissao para alterar atividades.", status: 403 as const };
+    if (membership.role !== "ESPECIALISTA" && membership.role !== "OPERACIONAL" && !permission?.can_write) return { error: "Sem permissao para alterar atividades.", status: 403 as const };
   }
 
   return { dataClient, tenantId: membership.tenant_id as string, role: membership.role as string, userId: currentUser.id };

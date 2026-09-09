@@ -29,6 +29,7 @@ export type RelatorioTemplateKey =
   | "especialista_agenda"
   | "marketing_performance"
   | "lembrete_agenda"
+  | "operacional_atividades"
   | "personalizado";
 
 export type RelatorioBlocoConfig = {

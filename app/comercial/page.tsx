@@ -8,8 +8,12 @@ export default async function ComercialPage() {
   const context = await getComercialContext();
 
   return (
-    <AppShell activeItem="comercial" allowedItems={context.allowedModules}>
+    <AppShell activeItem="comercial" allowedItems={context.allowedModules} role={context.role}>
       <ComercialDashboard context={context} />
     </AppShell>
   );
 }
+
+
+
+

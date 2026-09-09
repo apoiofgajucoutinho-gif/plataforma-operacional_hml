@@ -17,3 +17,6 @@ export default async function AdocaoPage() {
     </AppShell>
   );
 }
+
+
+

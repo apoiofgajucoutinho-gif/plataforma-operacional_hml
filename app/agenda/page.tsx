@@ -36,7 +36,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000`}
   const context = await getAgendaContext();
 
   return (
-    <AppShell activeItem="agenda" allowedItems={context.allowedModules}>
+    <AppShell activeItem="agenda" allowedItems={context.allowedModules} role={"role" in context ? context.role : null}>
       <AgendaBoard
         initialEvents={context.events}
         tenantName={context.tenant?.nome ?? "Sem tenant vinculado"}
@@ -51,3 +51,4 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000`}
     </AppShell>
   );
 }
+

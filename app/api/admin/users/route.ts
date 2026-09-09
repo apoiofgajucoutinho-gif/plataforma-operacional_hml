@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { findAuthUserByEmail } from "@/lib/auth/registered-users";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { appRoles, normalizeAppRole } from "@/lib/auth/roles";
 import type { AdminRole } from "@/modules/admin/types";
 
-const roles = new Set(["ADMIN", "SUPORTE", "MARKETING_PARTNER", "CLINICA", "USER"]);
+const roles = new Set(appRoles);
 
 async function requireAdmin() {
   const userClient = await createClient();
@@ -33,7 +34,7 @@ async function requireAdmin() {
 }
 
 function normalizeRole(value: unknown): AdminRole {
-  const role = typeof value === "string" ? value : "USER";
+  const role = normalizeAppRole(value);
   return (roles.has(role) ? role : "USER") as AdminRole;
 }
 
@@ -43,7 +44,7 @@ async function syncFinanceiroProfile(
   userId: string,
   role: AdminRole,
 ) {
-  const perfil = role === "ADMIN" ? "admin" : role === "SUPORTE" ? "suporte" : role === "MARKETING_PARTNER" ? "marketing" : null;
+  const perfil = role === "ADMIN" ? "admin" : role === "OPERACIONAL" || role === "SUPORTE" ? "suporte" : role === "ESPECIALISTA" || role === "MARKETING_PARTNER" ? "marketing" : null;
 
   if (!perfil) {
     await admin
@@ -154,3 +155,5 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ error: "Acao invalida." }, { status: 400 });
 }
+
+

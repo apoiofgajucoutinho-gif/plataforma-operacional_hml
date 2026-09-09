@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { extractTrackingFromPayload } from "@/modules/norwyn/services/tracking-hardening";
 
 type RawRow = Record<string, unknown>;
 
@@ -17,7 +18,7 @@ export type HotmartImportResult = {
   errors: Array<{ row: number; error: string }>;
 };
 
-const CONFIRMED_STATUSES = new Set(["APPROVED", "COMPLETE"]);
+const CONFIRMED_STATUSES = new Set(["APPROVED", "APPROVADO", "COMPLETE", "COMPLETO", "COMPLETED"]);
 const PENDING_STATUSES = new Set([
   "STARTED",
   "WAITING_PAYMENT",
@@ -28,9 +29,24 @@ const PENDING_STATUSES = new Set([
   "PRE_ORDER",
   "OVERDUE",
 ]);
-const LOST_STATUSES = new Set(["CANCELLED", "CANCELED", "EXPIRED", "NO_FUNDS", "BLOCKED", "PROTESTED"]);
-const REFUNDED_STATUSES = new Set(["REFUNDED", "PARTIALLY_REFUNDED"]);
+const LOST_STATUSES = new Set(["CANCELLED", "CANCELED", "CANCELADO", "CANCELADA", "EXPIRED", "EXPIRADO", "EXPIRADA", "NO_FUNDS", "BLOCKED", "PROTESTED"]);
+const REFUNDED_STATUSES = new Set(["REFUNDED", "PARTIALLY_REFUNDED", "REEMBOLSADO", "REEMBOLSADA"]);
 const CHARGEBACK_STATUSES = new Set(["CHARGEBACK"]);
+const LEARNING_EVENT_STATUSES = new Set([
+  "CLUB_FIRST_ACCESS",
+  "CLUB_MODULE_COMPLETED",
+  "CLUB_COURSE_COMPLETED",
+  "CLUB_LESSON_COMPLETED",
+  "COURSE_STARTED",
+  "COURSE_COMPLETED",
+  "LESSON_STARTED",
+  "LESSON_COMPLETED",
+  "MODULE_STARTED",
+  "MODULE_COMPLETED",
+  "CERTIFICATE_GENERATED",
+  "FIRST_ACCESS",
+]);
+const CHECKOUT_EVENT_STATUSES = new Set(["CHECKOUT_ABANDONMENT", "CHECKOUT_STARTED", "CART_ABANDONED"]);
 
 function stringValue(...values: unknown[]) {
   for (const value of values) {
@@ -40,18 +56,41 @@ function stringValue(...values: unknown[]) {
   return null;
 }
 
+export function parseHotmartNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return null;
+
+  const compact = value
+    .replace(/\s/g, "")
+    .replace(/R\$/gi, "")
+    .replace(/[^0-9,.-]/g, "");
+  if (!compact) return null;
+
+  const lastComma = compact.lastIndexOf(",");
+  const lastDot = compact.lastIndexOf(".");
+  const decimalSeparator = lastComma >= 0 && lastDot >= 0
+    ? lastComma > lastDot ? "," : "."
+    : lastComma >= 0
+      ? compact.length - lastComma - 1 === 2 ? "," : null
+      : lastDot >= 0 && compact.length - lastDot - 1 === 2 ? "." : null;
+
+  const normalized = decimalSeparator
+    ? compact
+        .replace(new RegExp(`\\${decimalSeparator === "," ? "." : ","}`, "g"), "")
+        .replace(decimalSeparator, ".")
+    : compact.replace(/[,.]/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function numberValue(...values: unknown[]): number | null {
   for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string" && value.trim()) {
-      const normalized = value.replace(/\s/g, "").replace(/R\$/gi, "").replace(/\./g, "").replace(",", ".");
-      const parsed = Number(normalized);
-      if (Number.isFinite(parsed)) return parsed;
-    }
+    const parsed = parseHotmartNumber(value);
+    if (parsed !== null) return parsed;
     if (value && typeof value === "object") {
       const objectValue = value as Record<string, unknown>;
-      const parsed = numberValue(objectValue.value, objectValue.amount, objectValue.total, objectValue.price);
-      if (parsed !== null) return parsed;
+      const nested = numberValue(objectValue.value, objectValue.amount, objectValue.total, objectValue.price);
+      if (nested !== null) return nested;
     }
   }
   return null;
@@ -111,6 +150,34 @@ function commercialStatusGroup(statusNormalizado: string): CommercialStatusGroup
   if (LOST_STATUSES.has(statusNormalizado)) return "lost";
   return "unknown";
 }
+function eventClassFor(statusNormalizado: string, transactionId: string | null) {
+  if (LEARNING_EVENT_STATUSES.has(statusNormalizado)) return statusNormalizado.includes("MODULE") ? "MODULE_EVENT" : "PRODUCT_ACCESS_EVENT";
+  if (CHECKOUT_EVENT_STATUSES.has(statusNormalizado)) return "CHECKOUT_EVENT";
+  if (transactionId) return "SALE_TRANSACTION";
+  return "UNKNOWN_EVENT";
+}
+
+function eligibilityFor(input: { statusNormalizado: string; grupoComercial: CommercialStatusGroup; currency: string; transactionId: string | null }) {
+  const eventClass = eventClassFor(input.statusNormalizado, input.transactionId);
+  const commercialTransaction = eventClass === "SALE_TRANSACTION";
+  const isBundleChild = input.transactionId ? /^HP\d+C\d+$/.test(input.transactionId) : false;
+  const saleConfirmed = commercialTransaction && input.grupoComercial === "confirmed";
+  const currency = input.currency.trim().toUpperCase();
+  const saleComparable = commercialTransaction;
+  const revenueEligible = saleConfirmed && currency === "BRL" && !isBundleChild;
+  const studentEligible = saleConfirmed && !isBundleChild;
+  const eligibilityReason = !commercialTransaction
+    ? "non_commercial_event"
+    : !saleConfirmed
+      ? "not_confirmed_status"
+      : currency !== "BRL"
+        ? "non_brl_currency"
+        : isBundleChild
+          ? "bundle_item_requires_review"
+          : "brl_confirmed_sale";
+
+  return { eventClass, commercialTransaction, saleConfirmed, saleComparable, revenueEligible, studentEligible, eligibilityReason };
+}
 
 function commissionValue(row: RawRow) {
   const direct = numberValue(
@@ -167,6 +234,7 @@ function firstReceivableDate(row: RawRow) {
 }
 
 function normalizeRow(row: RawRow) {
+  const tracking = extractTrackingFromPayload(row, stringValue(row.source_sck, row.sck, row.src));
   const transactionId = stringValue(
     row.transaction_id,
     row.transaction,
@@ -282,6 +350,7 @@ function normalizeRow(row: RawRow) {
     readPath(row, "data.event.created_at"),
     purchaseDate,
   );
+  const eligibility = eligibilityFor({ statusNormalizado, grupoComercial, currency: stringValue(row.moeda, row.currency, readPath(row, "price.currency_code"), readPath(row, "data.purchase.price.currency_code")) ?? "BRL", transactionId });
   const dataLacunas: string[] = [];
 
   if (!transactionId) dataLacunas.push("transaction_id_missing");
@@ -317,6 +386,7 @@ function normalizeRow(row: RawRow) {
       readPath(row, "price.currency_code"),
       readPath(row, "data.purchase.price.currency_code"),
     ) ?? "BRL",
+    ...eligibility,
     grossAmount,
     netAmount,
     fees,
@@ -325,7 +395,8 @@ function normalizeRow(row: RawRow) {
     approvedDate,
     refundDate: dateValue(row.data_reembolso, row.refund_date, readPath(row, "purchase.refund_date"), readPath(row, "data.purchase.refund_date")),
     chargebackDate: dateValue(row.data_chargeback, row.chargeback_date, readPath(row, "purchase.chargeback_date"), readPath(row, "data.purchase.chargeback_date")),
-    sourceSck: stringValue(row.source_sck, row.sck, row.src, readPath(row, "tracking.source_sck"), readPath(row, "data.tracking.source_sck")),
+    sourceSck: tracking.sourceSck,
+    tracking,
     expectedDate,
     eventDate,
     dataLacunas,
@@ -357,9 +428,9 @@ export async function importHotmartRows(payload: HotmartImportPayload): Promise<
   for (const [index, row] of payload.rows.entries()) {
     try {
       const normalized = normalizeRow(row);
-      if (!normalized.transactionId) {
+      if (!normalized.transactionId && normalized.commercialTransaction) {
         skipped += 1;
-        errors.push({ row: index + 1, error: "Linha ignorada: transaction_id ausente." });
+        errors.push({ row: index + 1, error: "Linha ignorada: transaction_id ausente em evento comercial." });
         continue;
       }
 
@@ -379,6 +450,24 @@ export async function importHotmartRows(payload: HotmartImportPayload): Promise<
         .select("id")
         .single();
       if (rawError) throw rawError;
+
+      if (!normalized.commercialTransaction) {
+        await admin.from("norwyn_hotmart_learning_events").insert({
+          tenant_id: tenantId,
+          raw_id: raw.id,
+          event_id: normalized.eventId,
+          event_class: normalized.eventClass,
+          learner_email: normalized.buyerEmail,
+          learner_name: normalized.buyerName,
+          product_external_id: normalized.productId,
+          product_name: normalized.productName,
+          occurred_at: normalized.eventDate,
+          source: "hotmart",
+          metadata: { payload: row, eligibility_reason: normalized.eligibilityReason },
+        });
+        imported += 1;
+        continue;
+      }
 
       let productId: string | null = null;
       if (normalized.productId || normalized.productName) {
@@ -419,7 +508,7 @@ export async function importHotmartRows(payload: HotmartImportPayload): Promise<
       }
 
       let studentId: string | null = null;
-      if (normalized.buyerEmail) {
+      if (normalized.studentEligible && normalized.buyerEmail) {
         const { data: existingStudent } = await admin
           .from("comercial_alunos")
           .select("id, primeira_compra_at")
@@ -465,6 +554,13 @@ export async function importHotmartRows(payload: HotmartImportPayload): Promise<
         status_original: normalized.statusOriginal,
         status_normalizado: normalized.statusNormalizado,
         grupo_comercial: normalized.grupoComercial,
+        commercial_transaction: normalized.commercialTransaction,
+        sale_confirmed: normalized.saleConfirmed,
+        revenue_eligible: normalized.revenueEligible,
+        student_eligible: normalized.studentEligible,
+        sale_comparable: normalized.saleComparable,
+        event_class: normalized.eventClass,
+        eligibility_reason: normalized.eligibilityReason,
         forma_pagamento: normalized.paymentType,
         parcelas: normalized.installments,
         moeda: normalized.currency,
@@ -485,8 +581,27 @@ export async function importHotmartRows(payload: HotmartImportPayload): Promise<
         data_lacunas: normalized.dataLacunas,
         metadata: {
           importado_por: "n8n",
+          eligibility_reason: normalized.eligibilityReason,
           net_amount_source: normalized.netAmount === null ? "missing" : "hotmart_payload",
           expected_payment_source: normalized.expectedDate ? "hotmart_payload" : "missing",
+          tracking_source: normalized.tracking.trackingSource,
+          tracking_confidence: normalized.tracking.trackingConfidence,
+          tracking: {
+            source_sck: normalized.tracking.sourceSck,
+            utm_source: normalized.tracking.source,
+            utm_medium: normalized.tracking.medium,
+            utm_campaign: normalized.tracking.campaign,
+            utm_content: normalized.tracking.content,
+            utm_term: normalized.tracking.term,
+            campaign_id: normalized.tracking.campaignId,
+            adset_id: normalized.tracking.adsetId,
+            ad_id: normalized.tracking.adId,
+            fbclid: normalized.tracking.fbclid,
+            gclid: normalized.tracking.gclid,
+            click_id: normalized.tracking.clickId,
+            landing_url: normalized.tracking.landingUrl,
+            checkout_url: normalized.tracking.checkoutUrl,
+          },
         },
       };
 
@@ -497,7 +612,7 @@ export async function importHotmartRows(payload: HotmartImportPayload): Promise<
         .single();
       if (saleError) throw saleError;
 
-      if (normalized.expectedDate) {
+      if (normalized.revenueEligible && normalized.expectedDate) {
         const installments = Math.max(1, normalized.installments);
         const grossInstallment = normalized.grossAmount / installments;
         const netInstallment = normalized.netAmount === null ? null : normalized.netAmount / installments;
@@ -561,3 +676,6 @@ export async function importHotmartRows(payload: HotmartImportPayload): Promise<
     errors,
   };
 }
+
+
+

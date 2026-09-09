@@ -21,6 +21,35 @@ export type AdsDailyRow = {
   performance_status: AdsPerformanceStatus;
   performance_score: number;
   imported_at: string;
+  raw_payload?: Record<string, unknown> | null;
+  campaign_id?: string | null;
+  adset_id?: string | null;
+  ad_id?: string | null;
+  creative_id?: string | null;
+  creative_name?: string | null;
+  placement?: string | null;
+  publisher_platform?: string | null;
+  device_platform?: string | null;
+  link_clicks?: number | null;
+  landing_page_views?: number | null;
+  initiate_checkouts?: number | null;
+  meta_purchases?: number | null;
+  meta_purchase_value?: number | null;
+  cost_per_result?: number | null;
+  video_views?: number | null;
+  video_plays_3s?: number | null;
+  video_p25?: number | null;
+  video_p50?: number | null;
+  video_p75?: number | null;
+  video_p95?: number | null;
+  video_p100?: number | null;
+  thruplays?: number | null;
+  preview_url?: string | null;
+  thumbnail_url?: string | null;
+  destination_url?: string | null;
+  destination_domain?: string | null;
+  url_tags?: string | null;
+  landing_key?: string | null;
 };
 
 export type AdsContext = {
@@ -30,6 +59,8 @@ export type AdsContext = {
   } | null;
   rows: AdsDailyRow[];
   updatedAt: string | null;
+  role: string | null;
   diagnostic: string | null;
   allowedModules: string[];
 };
+

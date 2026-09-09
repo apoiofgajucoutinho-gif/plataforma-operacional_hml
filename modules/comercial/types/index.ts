@@ -103,6 +103,13 @@ export type ComercialVenda = {
   status_original: string | null;
   status_normalizado: string | null;
   grupo_comercial: ComercialStatusGroup | null;
+  commercial_transaction: boolean | null;
+  sale_confirmed: boolean | null;
+  revenue_eligible: boolean | null;
+  student_eligible: boolean | null;
+  sale_comparable: boolean | null;
+  event_class: string | null;
+  eligibility_reason: string | null;
   forma_pagamento: string | null;
   parcelas: number;
   moeda: string;
@@ -160,6 +167,7 @@ export type ComercialRawImport = {
 
 export type ComercialContext = {
   tenant: ComercialTenant | null;
+  role: string | null;
   allowedModules: string[];
   diagnostic: string | null;
   updatedAt: string | null;
@@ -173,3 +181,5 @@ export type ComercialContext = {
   taxRules: ComercialBusinessTaxRule[];
   rawImports: ComercialRawImport[];
 };
+
+

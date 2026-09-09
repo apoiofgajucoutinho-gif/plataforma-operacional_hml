@@ -80,6 +80,20 @@ function uniqueSales(sales: NorwynCommercialSale[]) {
   return [...map.values()];
 }
 
+function normalizeCommercialStatus(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+function isConfirmedCommercialSale(sale: NorwynCommercialSale) {
+  if (sale.sale_confirmed !== null && sale.sale_confirmed !== undefined) return sale.sale_confirmed === true;
+  const value = normalizeCommercialStatus(sale.grupo_comercial ?? sale.status_normalizado ?? sale.status_original);
+  return ["CONFIRMED", "APPROVED", "COMPLETE", "COMPLETED", "PURCHASE_APPROVED", "PURCHASE_COMPLETE", "PURCHASE_COMPLETED"].includes(value);
+}
+
+function isRevenueEligibleCommercialSale(sale: NorwynCommercialSale) {
+  if (sale.revenue_eligible !== null && sale.revenue_eligible !== undefined) return sale.revenue_eligible === true && normalizeCommercialStatus(sale.moeda ?? "BRL") === "BRL";
+  return isConfirmedCommercialSale(sale) && normalizeCommercialStatus(sale.moeda ?? "BRL") === "BRL";
+}
 function metadataText(event: NorwynContentEvent, keys: string[]) {
   for (const key of keys) {
     const metadataValue = event.metadata?.[key];
@@ -483,11 +497,7 @@ function buildRecommendations(patterns: NorwynLaunchPattern[], input: EvidenceEn
 }
 
 export function buildEvidenceEngine(input: EvidenceEngineInput): EvidenceEngineResult {
-  const confirmedSales = uniqueSales(input.commercialSales.filter((sale) => {
-    const group = normalizeText(sale.grupo_comercial);
-    const status = normalizeText(sale.status_normalizado ?? sale.status_original);
-    return group === "confirmed" || ["approved", "complete", "confirmed"].includes(status);
-  }));
+  const confirmedSales = uniqueSales(input.commercialSales.filter(isRevenueEligibleCommercialSale));
   const patterns = input.contentEvents
     .map((event) => buildPattern(event, confirmedSales, input.products))
     .filter((pattern): pattern is NorwynLaunchPattern => Boolean(pattern))

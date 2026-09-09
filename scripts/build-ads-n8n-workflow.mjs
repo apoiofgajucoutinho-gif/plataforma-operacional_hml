@@ -23,6 +23,14 @@ const fields = [
   "date_start",
   "date_stop",
   "actions",
+  "action_values",
+  "cost_per_action_type",
+  "video_p25_watched_actions",
+  "video_p50_watched_actions",
+  "video_p75_watched_actions",
+  "video_p95_watched_actions",
+  "video_p100_watched_actions",
+  "video_thruplay_watched_actions",
 ].join(",");
 
 function node(id, name, type, typeVersion, position, parameters = {}, extra = {}) {
@@ -114,10 +122,16 @@ const leadTypes = new Set([
 ]);
 const conversionTypes = new Set([
   'purchase',
+  'omni_purchase',
   'offsite_conversion.fb_pixel_purchase',
   'onsite_conversion.purchase',
   'complete_registration',
 ]);
+const linkClickTypes = new Set(['link_click']);
+const landingPageViewTypes = new Set(['landing_page_view', 'omni_landing_page_view']);
+const checkoutTypes = new Set(['initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);
+const videoViewTypes = new Set(['video_view']);
+const thruplayTypes = new Set(['video_view', 'thruplay']);
 
 return items.map(item => {
   const d = item.json;
@@ -142,6 +156,9 @@ return items.map(item => {
   const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();
   const leads = actionValue(d.actions, leadTypes);
   const conversoes = actionValue(d.actions, conversionTypes);
+  const linkClicks = actionValue(d.actions, linkClickTypes);
+  const landingPageViews = actionValue(d.actions, landingPageViewTypes);
+  const initiateCheckouts = actionValue(d.actions, checkoutTypes);
 
   let performance_status = 'OK';
   if (cpm > 50 && ctr < 1) performance_status = 'PUBLICO RUIM';
@@ -170,6 +187,29 @@ return items.map(item => {
       valor_gasto: spend,
       conversoes: Math.round(conversoes),
       leads: Math.round(leads),
+      campaign_id: d.campaign_id || null,
+      adset_id: d.adset_id || null,
+      ad_id: d.ad_id || null,
+      creative_id: d.creative_id || null,
+      creative_name: d.creative_name || null,
+      placement: d.placement || null,
+      publisher_platform: d.publisher_platform || null,
+      device_platform: d.device_platform || null,
+      link_clicks: Math.round(linkClicks),
+      landing_page_views: Math.round(landingPageViews),
+      initiate_checkouts: Math.round(initiateCheckouts),
+      meta_purchases: Math.round(conversoes),
+      video_views: Math.round(actionValue(d.actions, videoViewTypes)),
+      video_plays_3s: Math.round(actionValue(d.actions, videoViewTypes)),
+      video_p25: Math.round(actionValue(d.video_p25_watched_actions, videoViewTypes)),
+      video_p50: Math.round(actionValue(d.video_p50_watched_actions, videoViewTypes)),
+      video_p75: Math.round(actionValue(d.video_p75_watched_actions, videoViewTypes)),
+      video_p95: Math.round(actionValue(d.video_p95_watched_actions, videoViewTypes)),
+      video_p100: Math.round(actionValue(d.video_p100_watched_actions, videoViewTypes)),
+      thruplays: Math.round(actionValue(d.video_thruplay_watched_actions, thruplayTypes)),
+      preview_url: d.preview_url || null,
+      thumbnail_url: d.thumbnail_url || null,
+      destination_url: d.destination_url || null,
       performance_status,
       performance_score: Math.round(performance_score * 100) / 100,
       origem: 'n8n_meta_ads',

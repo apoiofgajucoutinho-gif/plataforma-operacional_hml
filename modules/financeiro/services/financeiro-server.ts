@@ -112,7 +112,7 @@ async function getFinanceiroAuth(): Promise<FinanceiroAuth> {
     .eq("ativo", true)
       .maybeSingle();
 
-  const inferredPerfil = membership.role === "SUPORTE" ? "suporte" : null;
+  const inferredPerfil = membership.role === "OPERACIONAL" || membership.role === "SUPORTE" ? "suporte" : membership.role === "ESPECIALISTA" ? "especialista" : membership.role === "ADMIN" ? "admin" : null;
   const perfil = finProfile?.perfil ?? inferredPerfil;
 
   if (!perfil) {
@@ -175,6 +175,8 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
       dreCentroResult,
       dreCursoResult,
       faturasResult,
+      commercialSalesResult,
+      adsRowsResult,
     ] = await Promise.all([
       canSeeAdminData
         ? auth.dataClient.from("fin_bancos").select("*").eq("tenant_id", auth.tenantId).order("nome")
@@ -236,6 +238,18 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
             .eq("tenant_id", auth.tenantId)
             .order("mes_vencimento", { ascending: false })
         : Promise.resolve({ data: [] }),
+      auth.dataClient
+        .from("comercial_vendas")
+        .select("id, transaction_id, produto_id, produto_nome, comprador_email, status_original, status_normalizado, grupo_comercial, commercial_transaction, sale_confirmed, revenue_eligible, student_eligible, sale_comparable, event_class, eligibility_reason, moeda, valor_bruto, data_compra, data_aprovacao, data_reembolso, imported_at, last_event_at")
+        .eq("tenant_id", auth.tenantId)
+        .order("data_compra", { ascending: false, nullsFirst: false })
+        .limit(1500),
+      auth.dataClient
+        .from("instagram_ads_daily")
+        .select("id, data_referencia, campanha, valor_gasto, meta_purchases, meta_purchase_value, imported_at, updated_at")
+        .eq("tenant_id", auth.tenantId)
+        .order("data_referencia", { ascending: false })
+        .limit(1500),
     ]);
 
     const lancamentos = asNumber(lancamentosResult.data) as FinLancamento[];
@@ -243,10 +257,11 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
     return {
       tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
       userEmail: auth.userEmail,
+      role: auth.role,
       perfil: auth.perfil,
       allowedModules: auth.allowedModules,
       diagnostic: null,
-      updatedAt: getLatestTimestamp(lancamentos),
+      updatedAt: getLatestTimestamp([...lancamentos, ...asNumber(commercialSalesResult.data), ...asNumber(adsRowsResult.data)]),
       bancos: asNumber(bancosResult.data) as FinBanco[],
       cartoes: asNumber(cartoesResult.data) as FinCartao[],
       centros: centrosResult.data ?? ([] as FinCentroResultado[]),
@@ -259,6 +274,8 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
       drePorCentro: asNumber(dreCentroResult.data) as FinDreCentro[],
       drePorCurso: asNumber(dreCursoResult.data) as FinDreCurso[],
       faturas: asNumber(faturasResult.data) as FinFaturaCartao[],
+      commercialSales: asNumber(commercialSalesResult.data),
+      adsRows: asNumber(adsRowsResult.data),
     };
   } catch (error) {
     if (
@@ -275,6 +292,7 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
     return {
       tenant: null,
       userEmail: null,
+      role: null,
       perfil: null,
       allowedModules: [],
       diagnostic: message,
@@ -291,6 +309,8 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
       drePorCentro: [],
       drePorCurso: [],
       faturas: [],
+      commercialSales: [],
+      adsRows: [],
     };
   }
 }
@@ -707,3 +727,4 @@ export async function deleteFinanceiroCadastro(input: Record<string, unknown>) {
 
   return { data: null, softDeleted: false, relatedCount: 0 };
 }
+

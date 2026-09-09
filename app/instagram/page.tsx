@@ -18,7 +18,7 @@ export default async function InstagramPage({
 
     if (!authorized) {
       return (
-        <AppShell activeItem="instagram" allowedItems={access.allowedModules}>
+        <AppShell activeItem="instagram" allowedItems={access.allowedModules} role={access.role}>
           <div className="rounded-lg border border-white/80 bg-white/[0.85] p-6 shadow-soft">
             <h1 className="text-xl font-semibold text-brand-teal">Acesso restrito</h1>
             <p className="mt-2 text-sm text-brand-teal/70">
@@ -34,7 +34,7 @@ export default async function InstagramPage({
   const editorialAuthorized = context.role === "ADMIN" || context.role === "SUPORTE";
 
   return (
-    <AppShell activeItem="instagram" allowedItems={context.allowedModules}>
+    <AppShell activeItem="instagram" allowedItems={context.allowedModules} role={"role" in context ? context.role : null}>
       <InstagramDashboard
         context={context}
         initialTab={requestedEditorial ? "editorial" : "insights"}
@@ -44,3 +44,5 @@ export default async function InstagramPage({
     </AppShell>
   );
 }
+
+

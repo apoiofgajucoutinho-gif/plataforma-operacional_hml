@@ -80,6 +80,7 @@ const templateLabels: Record<RelatorioTemplateKey, string> = {
   especialista_agenda: "Especialista - Agenda operacional",
   marketing_performance: "Marketing - Performance",
   lembrete_agenda: "Lembrete de agenda",
+  operacional_atividades: "Operacional - Atividades",
   personalizado: "Personalizado",
 };
 
@@ -564,6 +565,9 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                       if (templateKey === "lembrete_agenda") {
                         setScheduleForm((current) => ({ ...current, tipo_resumo: "lembrete_agendamento" }));
                       }
+                      if (templateKey === "operacional_atividades") {
+                        setScheduleForm((current) => ({ ...current, tipo_resumo: "resumo_suporte" }));
+                      }
                     }}
                   >
                     {Object.entries(templateLabels).map(([key, value]) => (
@@ -596,6 +600,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                       if (tipoResumo === "lembrete_agendamento") {
                         updateScheduleFilters((current) => ({ ...current, template_key: "lembrete_agenda", antecedencia_minutos: current.antecedencia_minutos ?? 60 }));
                       }
+
                     }}
                   >
                     {Object.entries(tipoLabels).map(([key, value]) => <option key={key} value={key}>{value}</option>)}

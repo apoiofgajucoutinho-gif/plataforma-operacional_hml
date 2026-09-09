@@ -41,22 +41,22 @@ import type {
   FinanceiroContext,
 } from "@/modules/financeiro/types";
 
-const tabs = ["inicio", "diagnostico", "lancar", "consultar", "dre", "marketing", "cadastro"] as const;
+const tabs = ["inicio", "consultar", "diagnostico", "lancar", "dre", "marketing", "cadastro"] as const;
 type Tab = (typeof tabs)[number];
 const FINANCEIRO_PAGE_SIZE = 20;
 const CENTRO_ORDER = ["Infoproduto", "Administrativo fixo", "Não operacional", "Clínica", "Palestras"];
 
 const tabLabels: Record<Tab, string> = {
-  inicio: "Início",
+  inicio: "Resumo",
   diagnostico: "Diagnóstico",
   lancar: "Lançar",
-  consultar: "Consultar",
+  consultar: "Geral",
   dre: "DRE",
   marketing: "Marketing",
   cadastro: "Cadastro",
 };
 
-type PeriodFilter = "hoje" | "7d" | "15d" | "30d" | "90d" | "mes" | "ano" | "tudo";
+type PeriodFilter = "hoje" | "7d" | "15d" | "30d" | "90d" | "mes" | "mes_anterior" | "ano" | "personalizado" | "tudo";
 type DiagnosticStatusFilter = "todos" | FinStatus;
 type CadastroKind = "centro" | "categoria" | "subcategoria" | "curso";
 
@@ -153,14 +153,20 @@ function periodStart(period: PeriodFilter) {
   if (period === "30d") date.setDate(now.getDate() - 30);
   if (period === "90d") date.setDate(now.getDate() - 90);
   if (period === "mes") return firstDayOfMonth(now);
+  if (period === "mes_anterior") return new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+  if (period === "personalizado") return "1900-01-01";
   if (period === "ano") return `${now.getFullYear()}-01-01`;
   if (period === "tudo") return "1900-01-01";
   return date.toISOString().slice(0, 10);
 }
 
 function periodEnd(period: PeriodFilter) {
-  if (period !== "tudo") return todayInput();
-  return null;
+  if (period === "mes_anterior") {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
+  }
+  if (period === "personalizado" || period === "tudo") return null;
+  return todayInput();
 }
 
 function periodLabel(period: PeriodFilter) {
@@ -170,8 +176,10 @@ function periodLabel(period: PeriodFilter) {
     "15d": "15 dias",
     "30d": "30 dias",
     "90d": "90 dias",
-    mes: "Mês",
-    ano: "Ano",
+    mes: "Este mês",
+    mes_anterior: "Mês anterior",
+    ano: "Este ano",
+    personalizado: "Personalizado",
     tudo: "Tudo",
   };
 
@@ -241,6 +249,8 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
   const [centroFilter, setCentroFilter] = useState("todos");
   const [statusFilter, setStatusFilter] = useState("todos");
   const [query, setQuery] = useState("");
+  const [customStart, setCustomStart] = useState(firstDayOfMonth());
+  const [customEnd, setCustomEnd] = useState(todayInput());
   const [consultarPage, setConsultarPage] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
   const [editingLancamento, setEditingLancamento] = useState<FinLancamento | null>(null);
@@ -250,6 +260,9 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
   const visibleTabs = useMemo(() => {
     if (context.perfil === "marketing") {
       return ["marketing"] as Tab[];
+    }
+    if (context.perfil === "especialista") {
+      return ["inicio", "consultar"] as Tab[];
     }
 
     return tabs.filter((tab) => tab !== "cadastro" || isAdmin);
@@ -263,8 +276,8 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
   const cursoById = useMemo(() => idMap(context.cursos), [context.cursos]);
 
   const filteredLancamentos = useMemo(() => {
-    const start = periodStart(period);
-    const end = periodEnd(period);
+    const start = period === "personalizado" ? customStart : periodStart(period);
+    const end = period === "personalizado" ? customEnd : periodEnd(period);
     const needle = query.trim().toLowerCase();
 
     return context.lancamentos.filter((row) => {
@@ -275,7 +288,7 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
       if (needle && !row.descricao.toLowerCase().includes(needle)) return false;
       return true;
     });
-  }, [centroFilter, context.lancamentos, period, query, statusFilter]);
+  }, [centroFilter, context.lancamentos, customEnd, customStart, period, query, statusFilter]);
 
   const metrics = useMemo(() => {
     const now = new Date();
@@ -315,6 +328,8 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
       ebitdaMes: context.dre[0]?.ebitda ?? 0,
     };
   }, [context.dre, context.lancamentos]);
+
+  const executiveFinance = useMemo(() => buildExecutiveFinance(context, period), [context, period]);
 
   useEffect(() => {
     const supabase = createClient() as any;
@@ -420,6 +435,8 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
         <div className="text-sm font-semibold text-brand-teal/60">{updatedAtLabel(context.updatedAt)}</div>
       </header>
 
+      <ExecutiveFinanceOverview summary={executiveFinance} period={period} />
+
       <nav className="flex flex-wrap gap-2 rounded-lg border border-white/70 bg-white/70 p-2 shadow-soft">
         {visibleTabs.map((tab) => (
             <button
@@ -477,6 +494,10 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
           setStatusFilter={setStatusFilter}
           query={query}
           setQuery={setQuery}
+          customStart={customStart}
+          setCustomStart={setCustomStart}
+          customEnd={customEnd}
+          setCustomEnd={setCustomEnd}
           page={consultarPage}
           setPage={setConsultarPage}
           maps={{ centroById, categoriaById, subcategoriaById, bancoById, cartaoById, cursoById }}
@@ -496,6 +517,150 @@ export function FinanceiroDashboard({ context }: { context: FinanceiroContext })
         />
       ) : null}
     </section>
+  );
+}
+
+function saleDateForFinance(row: FinanceiroContext["commercialSales"][number]) {
+  return row.data_aprovacao ?? row.data_compra ?? row.last_event_at ?? row.imported_at ?? null;
+}
+
+function isBrlSale(row: FinanceiroContext["commercialSales"][number]) {
+  return String(row.moeda ?? "BRL").trim().toUpperCase() === "BRL";
+}
+
+function isApprovedSale(row: FinanceiroContext["commercialSales"][number]) {
+  if (row.revenue_eligible !== null && row.revenue_eligible !== undefined) return row.revenue_eligible === true;
+  if (row.sale_confirmed !== null && row.sale_confirmed !== undefined) return row.sale_confirmed === true && isBrlSale(row);
+  const status = String(row.grupo_comercial ?? row.status_normalizado ?? row.status_original ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return isBrlSale(row) && ["CONFIRMED", "APPROVED", "COMPLETE", "COMPLETED", "PURCHASE_APPROVED", "PURCHASE_COMPLETE", "PURCHASE_COMPLETED"].includes(status);
+}
+
+function isRefundedSale(row: FinanceiroContext["commercialSales"][number]) {
+  const status = String(row.grupo_comercial ?? row.status_normalizado ?? row.status_original ?? "").toUpperCase();
+  return ["REFUNDED", "PARTIALLY_REFUNDED", "CHARGEBACK", "PURCHASE_REFUNDED", "PURCHASE_CHARGEBACK"].includes(status);
+}
+
+function filterSalesByPeriod(rows: FinanceiroContext["commercialSales"], period: PeriodFilter) {
+  const start = periodStart(period);
+  const end = periodEnd(period);
+  return rows.filter((row) => {
+    const date = saleDateForFinance(row);
+    if (!date) return false;
+    const key = date.slice(0, 10);
+    if (key < start) return false;
+    if (end && key > end) return false;
+    return true;
+  });
+}
+
+function filterAdsByPeriod(rows: FinanceiroContext["adsRows"], period: PeriodFilter) {
+  const start = periodStart(period);
+  const end = periodEnd(period);
+  return rows.filter((row) => {
+    if (row.data_referencia < start) return false;
+    if (end && row.data_referencia > end) return false;
+    return true;
+  });
+}
+
+function buildExecutiveFinance(context: FinanceiroContext, period: PeriodFilter) {
+  const sales = filterSalesByPeriod(context.commercialSales ?? [], period);
+  const brlSales = sales.filter(isBrlSale);
+  const nonBrl = sales.length - brlSales.length;
+  const approved = brlSales.filter(isApprovedSale);
+  const refunds = brlSales.filter(isRefundedSale);
+  const grossRevenue = approved.reduce((sum, row) => sum + Number(row.valor_bruto ?? 0), 0);
+  const refundValue = refunds.reduce((sum, row) => sum + Number(row.valor_bruto ?? 0), 0);
+  const adsCost = filterAdsByPeriod(context.adsRows ?? [], period).reduce((sum, row) => sum + Number(row.valor_gasto ?? 0), 0);
+  const realizedExpenses = filterLancamentosByPeriod(context.lancamentos, period)
+    .filter((row) => row.tipo === "saida" && row.status === "realizado")
+    .reduce((sum, row) => sum + row.valor, 0);
+  const averageTicket = approved.length ? grossRevenue / approved.length : 0;
+  const byProduct = new Map<string, { product: string; revenue: number; sales: number }>();
+  approved.forEach((row) => {
+    const key = row.produto_nome ?? "Produto não identificado";
+    const current = byProduct.get(key) ?? { product: key, revenue: 0, sales: 0 };
+    current.revenue += Number(row.valor_bruto ?? 0);
+    current.sales += 1;
+    byProduct.set(key, current);
+  });
+  const topProducts = [...byProduct.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 4);
+  const periodLancamentos = filterLancamentosByPeriod(context.lancamentos, period).filter((row) => row.status !== "cancelado");
+  const entradas = periodLancamentos.filter((row) => row.tipo === "entrada").reduce((sum, row) => sum + row.valor, 0);
+  const saidas = periodLancamentos.filter((row) => row.tipo === "saida").reduce((sum, row) => sum + row.valor, 0);
+  const today = todayInput();
+  const next7 = addDaysForFinance(7);
+  const nextMovements = context.lancamentos
+    .filter((row) => row.status !== "cancelado" && row.data_pagamento >= today)
+    .sort((a, b) => a.data_pagamento.localeCompare(b.data_pagamento))
+    .slice(0, 10);
+  const nextReceipts = context.lancamentos.filter((row) => row.tipo === "entrada" && row.status === "previsto" && row.data_pagamento >= today && row.data_pagamento <= next7);
+  const nextPayments = context.lancamentos.filter((row) => row.tipo === "saida" && row.status === "previsto" && row.data_pagamento >= today && row.data_pagamento <= next7);
+  const overdue = context.lancamentos.filter((row) => row.status === "previsto" && row.data_pagamento < today);
+  const estimatedResult = grossRevenue - refundValue - adsCost - realizedExpenses;
+  const sufficientForMargin = grossRevenue > 0 && (context.lancamentos.length > 0 || context.adsRows.length > 0);
+
+  return { entradas, saidas, grossRevenue, netRevenue: grossRevenue - refundValue, approvedSales: approved.length, refunds: refunds.length, refundValue, averageTicket, adsCost, realizedExpenses, estimatedResult, sufficientForMargin, nonBrl, topProducts, nextMovements, nextReceipts, nextPayments, overdue };
+}
+
+function addDaysForFinance(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function ExecutiveFinanceOverview({ summary, period }: { summary: ReturnType<typeof buildExecutiveFinance>; period: PeriodFilter }) {
+  return (
+    <Card className="space-y-5 border-brand-sand/80 bg-white/90 p-5 shadow-soft">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-brand-clay">Resumo</p>
+          <h2 className="mt-1 text-2xl font-black text-brand-teal">Financeiro do negócio</h2>
+          <p className="mt-1 text-sm font-semibold text-brand-teal/60">Vendas Hotmart/comercial, reembolsos, mídia paga e despesas registradas no período {periodLabel(period).toLowerCase()}.</p>
+        </div>
+        <span className={clsx("rounded-full px-3 py-1 text-xs font-black", summary.nonBrl ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700")}>
+          {summary.nonBrl ? summary.nonBrl + " venda(s) não-BRL fora da soma" : "Moeda BRL isolada"}
+        </span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Entradas no período" value={money(summary.entradas || summary.grossRevenue)} detail="Recebidas/registradas no recorte" icon={ArrowDownLeft} />
+        <MetricCard label="Saídas no período" value={money(summary.saidas)} detail="Despesas registradas no recorte" icon={ArrowUpRight} />
+        <MetricCard label="Resultado estimado" value={summary.sufficientForMargin ? money(summary.estimatedResult) : "Estimativa"} detail={summary.sufficientForMargin ? "Vendas - reembolsos - ads - despesas" : "Dados incompletos"} icon={WalletCards} />
+        <MetricCard label="Vencidos" value={money(summary.overdue.reduce((sum, row) => sum + row.valor, 0))} detail={summary.overdue.length + " lançamento(s) previsto(s)"} icon={CalendarClock} />
+        <MetricCard label="Próximos recebimentos" value={money(summary.nextReceipts.reduce((sum, row) => sum + row.valor, 0))} detail="Previstos nos próximos 7 dias" icon={BadgeDollarSign} />
+        <MetricCard label="Próximos pagamentos" value={money(summary.nextPayments.reduce((sum, row) => sum + row.valor, 0))} detail="Vencem nos próximos 7 dias" icon={ReceiptText} />
+        <MetricCard label="Reembolsos" value={money(summary.refundValue)} detail={summary.refunds + " reembolso(s)/chargeback"} icon={CreditCard} />
+        <MetricCard label="Investimento em Ads" value={money(summary.adsCost)} detail="Mídia paga carregada" icon={LineChart} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-[1fr_0.8fr]">
+        <div className="rounded-lg border border-brand-sand bg-white/70 p-4">
+          <h3 className="text-sm font-black uppercase text-brand-clay">Próximos movimentos</h3>
+          <div className="mt-3 divide-y divide-brand-sand/60">
+            {summary.nextMovements.map((row) => {
+              const visual = tipoVisual(row.tipo);
+              return (
+                <div key={row.id} className="grid gap-2 py-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+                  <span className={clsx("rounded-full border px-2 py-1 text-[10px] font-black uppercase", visual.badge)}>{row.status}</span>
+                  <div><p className="font-bold text-brand-teal">{row.descricao}</p><p className="text-xs text-brand-teal/60">{row.tipo === "entrada" ? "A receber" : "A pagar"} · {dateLabel(row.data_pagamento)}</p></div>
+                  <p className={clsx("font-black", visual.text)}>{decimalMoney(signedValue(row))}</p>
+                </div>
+              );
+            })}
+            {!summary.nextMovements.length ? <p className="py-4 text-sm font-semibold text-brand-teal/60">Sem próximos movimentos cadastrados.</p> : null}
+          </div>
+        </div>
+        <div className="grid gap-3">
+        {summary.topProducts.map((item) => (
+          <div key={item.product} className="rounded-md border border-brand-sand bg-white/70 p-3">
+            <p className="truncate text-sm font-black text-brand-teal">{item.product}</p>
+            <p className="mt-1 text-lg font-black text-brand-clay">{money(item.revenue)}</p>
+            <p className="text-xs font-semibold text-brand-teal/55">{item.sales} venda(s)</p>
+          </div>
+        ))}
+        {!summary.topProducts.length ? <p className="rounded-md border border-dashed border-brand-sand bg-white/70 p-4 text-sm font-semibold text-brand-teal/60">Sem produto vendido no período selecionado.</p> : null}
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -1278,6 +1443,10 @@ function ConsultarTab({
   setStatusFilter,
   query,
   setQuery,
+  customStart,
+  setCustomStart,
+  customEnd,
+  setCustomEnd,
   page,
   setPage,
   maps,
@@ -1295,6 +1464,10 @@ function ConsultarTab({
   setStatusFilter: (value: string) => void;
   query: string;
   setQuery: (value: string) => void;
+  customStart: string;
+  setCustomStart: (value: string) => void;
+  customEnd: string;
+  setCustomEnd: (value: string) => void;
   page: number;
   setPage: (value: number) => void;
   canEdit: boolean;
@@ -1331,12 +1504,13 @@ function ConsultarTab({
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 p-5">
         <div className="flex flex-wrap gap-2">
-          {(["hoje", "7d", "15d", "30d", "90d", "ano", "tudo"] as PeriodFilter[]).map((item) => (
+          {(["mes", "mes_anterior", "30d", "ano", "personalizado", "tudo"] as PeriodFilter[]).map((item) => (
             <button key={item} type="button" onClick={() => setPeriod(item)} className={clsx("rounded-full border px-4 py-2 text-sm font-bold", period === item ? "bg-brand-clay text-white" : "border-brand-sand bg-white/70 text-brand-teal")}>
               {periodLabel(item)}
             </button>
           ))}
         </div>
+        {period === "personalizado" ? <div className="grid min-w-[260px] grid-cols-2 gap-2"><input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="h-11 rounded-md border border-brand-sand bg-white/70 px-3 text-sm font-semibold text-brand-teal" /><input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="h-11 rounded-md border border-brand-sand bg-white/70 px-3 text-sm font-semibold text-brand-teal" /></div> : null}
         <Select compact value={centroFilter} onChange={setCentroFilter} options={[["todos", "Todos centros"], ...context.centros.map((item) => [item.id, item.nome] as [string, string])]} />
         <Select compact value={statusFilter} onChange={setStatusFilter} options={[["todos", "Todos status"], ["realizado", "Realizado"], ["previsto", "Previsto"], ["cancelado", "Cancelado"]]} />
         <label className="relative min-w-[240px] flex-1">

@@ -1,3 +1,5 @@
+import { validateTrackingUrl } from "@/modules/norwyn/services/tracking-hardening";
+
 type QASeverity = "info" | "warning" | "critical";
 type QAItemStatus = "passed" | "failed" | "not_applicable";
 type QAReviewStatus = "approved" | "approved_with_warnings" | "changes_required" | "blocked" | "failed";
@@ -70,6 +72,16 @@ function productLabel(context: MarketingQAContext) {
 
 function hasAny(content: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(content));
+}
+
+function contentUrls(content: string) {
+  return content.match(/https?:\/\/[^\s)\]}>"']+/gi) ?? [];
+}
+
+function campaignRequiresAttribution(context: MarketingQAContext) {
+  const plan = campaignPlan(context);
+  const value = `${text(context.campaign?.name)} ${text(context.campaign?.type)} ${text(context.material?.channel)} ${JSON.stringify(plan)}`.toLowerCase();
+  return /meta|ads|trafego|tr[aá]fego|paid|pago|campanha|landing|checkout/.test(value);
 }
 
 function makeItem(item: MarketingQAItem): MarketingQAItem {
@@ -184,6 +196,24 @@ export function buildDeterministicQAItems(context: MarketingQAContext): Marketin
       description: "Ha indicio de link, mas o formato nao parece uma URL completa.",
       suggested_fix: "Validar o link final do material.",
     }));
+  }
+
+  const urls = contentUrls(content);
+  const requireAttribution = campaignRequiresAttribution(context);
+  for (const url of urls) {
+    const trackingIssues = validateTrackingUrl(url, requireAttribution);
+    for (const issue of trackingIssues) {
+      items.push(makeItem({
+        category: "tracking",
+        severity: issue.severity,
+        status: "failed",
+        title: issue.title,
+        description: issue.detail,
+        evidence: url,
+        suggested_fix: "Gerar URL pelo padrao Norwyn: utm_source, utm_medium, utm_campaign, utm_content, utm_term e sck/source_sck preservados ate o checkout.",
+        field_reference: "campaign_material_versions.content",
+      }));
+    }
   }
 
   if (!product) {

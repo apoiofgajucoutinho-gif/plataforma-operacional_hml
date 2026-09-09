@@ -43,6 +43,36 @@ export type InstagramInteraction = {
 export type InstagramFollowerSnapshot = {
   snapshot_date: string;
   followers_total: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type InstagramFollowerGrowthSummary = {
+  tenant_id?: string | null;
+  account_id?: string | null;
+  latest_date: string | null;
+  followers_current: number | null;
+  net_growth_day: number | null;
+  net_growth_7d: number | null;
+  net_growth_30d: number | null;
+  gain_days_30d: number | null;
+  loss_days_30d: number | null;
+  max_gain_day_30d: number | null;
+  max_loss_day_30d: number | null;
+  trend_followers_per_day_30d: number | null;
+  trend_status: string | null;
+  updated_at: string | null;
+};
+
+export type InstagramFollowerDailyMetric = {
+  tenant_id?: string | null;
+  account_id?: string | null;
+  snapshot_date: string;
+  followers_total: number | null;
+  followers_previous_day: number | null;
+  net_change_day: number | null;
+  source: string | null;
+  updated_at: string | null;
 };
 
 export type InstagramContext = {
@@ -59,6 +89,8 @@ export type InstagramContext = {
   posts: InstagramPostMetric[];
   interactions: InstagramInteraction[];
   followerSnapshots: InstagramFollowerSnapshot[];
+  followerGrowthSummary: InstagramFollowerGrowthSummary | null;
+  followerDailyMetrics: InstagramFollowerDailyMetric[];
   importRun: {
     source: string;
     status: string;
@@ -69,3 +101,5 @@ export type InstagramContext = {
   diagnostic: string | null;
   allowedModules: string[];
 };
+
+

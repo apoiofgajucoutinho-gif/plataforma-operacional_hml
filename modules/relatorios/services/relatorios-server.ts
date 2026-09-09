@@ -63,6 +63,13 @@ const templateDefaults: Record<string, RelatorioFiltros> = {
       instagram: { enabled: true, periodo: "ultimos_7d" },
     },
   },
+  operacional_atividades: {
+    template_key: "operacional_atividades",
+    nivel_detalhe: "normal",
+    blocos: {
+      atividades: { enabled: true, periodo: "pendentes" },
+    },
+  },
   jeff_alertas_tecnicos: {
     template_key: "jeff_alertas_tecnicos",
     nivel_detalhe: "curto",
@@ -535,6 +542,162 @@ export async function updateRelatorioEnvioStatus(input: {
   return data as RelatorioEnvio;
 }
 
+
+async function buildOperationalActivitiesReport({
+  dataClient,
+  tenantId,
+  recipientName,
+  schedule,
+  filters,
+}: {
+  dataClient: SupabaseAny;
+  tenantId: string;
+  recipientName: string;
+  schedule: RelatorioAgendamento;
+  filters: ReturnType<typeof normalizeReportFilters>;
+}) {
+  const { data, error } = await dataClient
+    .from("atividades_tarefas")
+    .select("id, titulo, descricao, time_responsavel, responsavel_nome, status, prioridade, prazo, due_at, created_at, blocked_reason, waiting_on, source_module, source_event")
+    .eq("tenant_id", tenantId)
+    .not("status", "in", "(\"concluida\",\"concluido\",\"cancelada\",\"ignorada\",\"done\",\"closed\")")
+    .limit(200);
+
+  if (error) throw new Error(error.message);
+
+  const recipientNeedle = normalizeReportText(recipientName);
+  const allRows = (data ?? []) as Array<Record<string, any>>;
+  const rows = allRows.filter((item) => {
+    const owner = normalizeReportText(item.responsavel_nome);
+    return item.time_responsavel === "suporte" || (recipientNeedle && owner.includes(recipientNeedle));
+  }).sort(sortReportTask);
+
+  const groups = [
+    { key: "overdue", title: "VENCIDAS", rows: rows.filter((item) => taskReportGroup(item) === "overdue") },
+    { key: "today", title: "HOJE", rows: rows.filter((item) => taskReportGroup(item) === "today") },
+    { key: "next", title: "PROXIMAS", rows: rows.filter((item) => taskReportGroup(item) === "next") },
+    { key: "blocked", title: "BLOQUEADAS", rows: rows.filter((item) => taskReportGroup(item) === "blocked") },
+  ];
+  const hasAlert = groups[0].rows.length > 0 || groups[3].rows.length > 0;
+  const subject = "Atividades - Operacao";
+  const lines = [
+    "*ATIVIDADES - OPERACAO*",
+    "Destinatario: " + recipientName,
+    "Fonte: atividades_tarefas",
+    "Atualizado em " + new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: schedule.timezone || "America/Sao_Paulo" }).format(new Date()),
+    "",
+  ];
+
+  for (const group of groups) {
+    lines.push("*" + group.title + " - " + group.rows.length + "*");
+    if (!group.rows.length) {
+      lines.push(group.key === "overdue" ? "Nenhuma atividade vencida." : group.key === "today" ? "Nenhuma atividade com prazo hoje." : group.key === "blocked" ? "Nenhuma atividade bloqueada." : "Nenhuma próxima atividade aberta.");
+    } else {
+      group.rows.slice(0, filters.nivel_detalhe === "detalhado" ? 10 : 6).forEach((item, index) => {
+        const due = reportTaskDueLabel(item, schedule.timezone || "America/Sao_Paulo");
+        const context = [item.source_module, item.source_event].filter(Boolean).join(" / ");
+        const waiting = item.waiting_on || item.blocked_reason;
+        lines.push(String(index + 1) + ". " + item.titulo);
+        lines.push("   Prioridade: " + priorityReportLabel(item.prioridade));
+        lines.push("   " + (group.key === "overdue" ? "Venceu" : "Prazo") + ": " + due);
+        if (context) lines.push("   Contexto: " + context);
+        if (waiting) lines.push("   Aguardando: " + waiting);
+      });
+    }
+    lines.push("");
+  }
+
+  lines.push("Abrir atividades: https://plataf-op-hml.vercel.app/atividades");
+
+  return {
+    subject,
+    text: lines.join("\n"),
+    shouldSend: !filters.enviar_apenas_com_alerta || hasAlert || rows.length > 0,
+    metadata: {
+      templateKey: filters.template_key,
+      source: "atividades_tarefas",
+      noDuplicateTaskManager: true,
+      recipientName,
+      scheduleId: schedule.id,
+      total: rows.length,
+      overdue: groups[0].rows.length,
+      today: groups[1].rows.length,
+      next: groups[2].rows.length,
+      blocked: groups[3].rows.length,
+      taskIds: rows.map((item) => item.id).slice(0, 50),
+      assignmentBasis: "time_responsavel=suporte plus configured recipient name when present; atividades_tarefas has no assignee_user_id column in current HML schema",
+    },
+  };
+}
+
+function taskReportGroup(item: Record<string, any>) {
+  const status = normalizeReportText(item.status);
+  if (status.includes("bloque") || item.blocked_reason || item.waiting_on) return "blocked";
+  const due = reportTaskDate(item);
+  const today = reportToday();
+  if (due && due < today) return "overdue";
+  if (due && due === today) return "today";
+  return "next";
+}
+
+function sortReportTask(a: Record<string, any>, b: Record<string, any>) {
+  const groupOrder = { overdue: 1, today: 2, next: 3, blocked: 4 } as Record<string, number>;
+  const groupDiff = groupOrder[taskReportGroup(a)] - groupOrder[taskReportGroup(b)];
+  if (groupDiff !== 0) return groupDiff;
+  const priorityDiff = reportPriorityRank(a.prioridade) - reportPriorityRank(b.prioridade);
+  if (priorityDiff !== 0) return priorityDiff;
+  return reportDateTime(a.prazo ?? a.due_at ?? a.created_at) - reportDateTime(b.prazo ?? b.due_at ?? b.created_at);
+}
+
+function reportPriorityRank(value: unknown) {
+  const normalized = normalizeReportText(value);
+  if (normalized.includes("critica") || normalized.includes("urgente")) return 1;
+  if (normalized.includes("alta")) return 2;
+  if (normalized.includes("media")) return 3;
+  if (normalized.includes("baixa")) return 4;
+  return 5;
+}
+
+function priorityReportLabel(value: unknown) {
+  const normalized = normalizeReportText(value);
+  if (normalized.includes("critica") || normalized.includes("urgente")) return "Critica";
+  if (normalized.includes("alta")) return "Alta";
+  if (normalized.includes("media")) return "Media";
+  if (normalized.includes("baixa")) return "Baixa";
+  return "Padrao";
+}
+
+function reportTaskDate(item: Record<string, any>) {
+  const value = item.prazo ?? item.due_at;
+  if (!value) return null;
+  const date = new Date(String(value).includes("T") ? value : String(value) + "T12:00:00-03:00");
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(date);
+}
+
+function reportToday() {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
+}
+
+function reportDateTime(value: unknown) {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const stringValue = String(value);
+  const date = new Date(stringValue.includes("T") ? stringValue : stringValue + "T12:00:00-03:00");
+  return Number.isNaN(date.getTime()) ? Number.MAX_SAFE_INTEGER : date.getTime();
+}
+
+function reportTaskDueLabel(item: Record<string, any>, timezone: string) {
+  const value = item.prazo ?? item.due_at;
+  if (!value) return "sem prazo";
+  const stringValue = String(value);
+  const date = new Date(stringValue.includes("T") ? stringValue : stringValue + "T12:00:00-03:00");
+  if (Number.isNaN(date.getTime())) return stringValue;
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: timezone }).format(date);
+}
+
+function normalizeReportText(value: unknown) {
+  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
 export async function buildOperationalSummary({
   dataClient,
   tenantId,
@@ -550,6 +713,9 @@ export async function buildOperationalSummary({
 }) {
   const filters = normalizeReportFilters(schedule);
   const block = filters.blocos;
+  if (filters.template_key === "operacional_atividades") {
+    return buildOperationalActivitiesReport({ dataClient, tenantId, recipientName, schedule, filters });
+  }
   const agendaPeriod = getPeriodRange(block.agenda.periodo);
   const financialPeriod = getPeriodRange(block.financeiro.periodo);
   const interactionPeriod = getPeriodRange(block.instagram.periodo);

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
   BarChart3,
   CalendarDays,
   ExternalLink,
@@ -38,6 +40,7 @@ import type {
 
 type TabKey = "insights" | "results" | "directs" | "editorial";
 type PeriodFilter = "all" | "today" | "7d" | "15d" | "30d";
+type FollowerPeriod = "7d" | "30d" | "90d" | "all";
 type TypeFilter = "all" | InstagramPostType;
 type InteractionSourceFilter = "all" | InstagramInteractionSource;
 type InteractionStatusFilter = "all" | InstagramInteractionStatus;
@@ -898,10 +901,12 @@ export function InstagramDashboard({
   const directComments = filteredInteractions.filter((interaction) => interaction.source === "post_comment").length;
   const latestFollowerSnapshot = context.followerSnapshots.at(-1);
   const previousFollowerSnapshot = context.followerSnapshots.at(-2);
-  const followerGrowth =
-    latestFollowerSnapshot && previousFollowerSnapshot
-      ? latestFollowerSnapshot.followers_total - previousFollowerSnapshot.followers_total
-      : 0;
+  const followerSummary = context.followerGrowthSummary;
+  const followerFreshnessAt = followerSummary?.updated_at ?? followerSummary?.latest_date ?? latestFollowerSnapshot?.updated_at ?? latestFollowerSnapshot?.created_at ?? latestFollowerSnapshot?.snapshot_date ?? null;
+  const followerFreshnessDate = followerFreshnessAt ? new Date(followerFreshnessAt) : null;
+  const followerIsStale = !followerFreshnessDate || Number.isNaN(followerFreshnessDate.getTime()) || Date.now() - followerFreshnessDate.getTime() > 48 * 60 * 60 * 1000;
+  const followerTotal = followerSummary?.followers_current ?? latestFollowerSnapshot?.followers_total ?? null;
+  const followerGrowth = followerSummary?.net_growth_day ?? (latestFollowerSnapshot && previousFollowerSnapshot ? latestFollowerSnapshot.followers_total - previousFollowerSnapshot.followers_total : 0);
   const directHighPotential = filteredInteractions.filter((interaction) => interaction.potential === "alto").length;
   const directPending = filteredInteractions.filter((interaction) => interaction.status === "novo" || interaction.status === "analisado").length;
   const directHighPriorityOpen = filteredInteractions.filter((interaction) => interactionPriority(interaction) === "alta" && interaction.status !== "respondido" && interaction.status !== "arquivado").length;
@@ -1291,10 +1296,10 @@ export function InstagramDashboard({
             <Metric
               icon={<UserPlus className="h-5 w-5" />}
               label="Novos seguidores"
-              value={followerGrowth > 0 ? `+${numberFormat(followerGrowth)}` : numberFormat(followerGrowth)}
+              value={followerGrowth > 0 ? "+" + numberFormat(followerGrowth) : numberFormat(followerGrowth)}
               helper={
-                latestFollowerSnapshot
-                  ? `${numberFormat(latestFollowerSnapshot.followers_total)} seguidores totais`
+                followerTotal != null
+                  ? numberFormat(followerTotal) + " totais · " + (followerIsStale ? "dados desatualizados" : "atualizado") + " em " + (dateTimeFormat(followerFreshnessAt) ?? dateFormat(followerSummary?.latest_date ?? latestFollowerSnapshot?.snapshot_date ?? ""))
                   : "histórico ainda não disponível"
               }
             />
@@ -1373,6 +1378,99 @@ export function InstagramDashboard({
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+function signedNumber(value: number | null | undefined) {
+  const numeric = Number(value ?? 0);
+  return numeric > 0 ? "+" + numberFormat(numeric) : numberFormat(numeric);
+}
+
+function followerPeriodRows(rows: InstagramContext["followerDailyMetrics"], period: FollowerPeriod) {
+  const sorted = [...rows]
+    .filter((row) => row.snapshot_date && row.followers_total != null)
+    .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
+  if (period === "all") return sorted;
+  const days = period === "7d" ? 7 : period === "30d" ? 30 : 90;
+  return sorted.slice(Math.max(sorted.length - days, 0));
+}
+
+function FollowerGrowthPanel({ summary, rows, period, onPeriodChange, fallbackTotal, fallbackDate, stale }: {
+  summary: InstagramContext["followerGrowthSummary"];
+  rows: InstagramContext["followerDailyMetrics"];
+  period: FollowerPeriod;
+  onPeriodChange: (period: FollowerPeriod) => void;
+  fallbackTotal: number | null;
+  fallbackDate: string | null;
+  stale: boolean;
+}) {
+  const filteredRows = followerPeriodRows(rows, period);
+  const total = summary?.followers_current ?? fallbackTotal;
+  const freshness = summary?.latest_date ?? fallbackDate;
+  const trendLabel = summary?.trend_status === "growing" ? "Crescendo" : summary?.trend_status === "falling" ? "Caindo" : summary?.trend_status ?? "Sem dado";
+
+  return (
+    <Card className="border-[#E9CBD1] bg-white/95 p-5 shadow-sm">
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-brand-clay">Crescimento de seguidores</p>
+          <h2 className="mt-2 text-2xl font-black text-brand-teal">{total != null ? numberFormat(total) : "Sem dado"} seguidores</h2>
+          <p className="mt-1 text-sm font-semibold text-brand-teal/60">
+            {summary ? signedNumber(summary.net_growth_day) + " hoje · " + signedNumber(summary.net_growth_7d) + " em 7 dias · " + signedNumber(summary.net_growth_30d) + " em 30 dias" : "Aguardando summary normalizada do Instagram."}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {(["7d", "30d", "90d", "all"] as FollowerPeriod[]).map((item) => (
+            <FilterButton key={item} isActive={period === item} onClick={() => onPeriodChange(item)}>
+              {item === "all" ? "Tudo" : item.replace("d", " dias")}
+            </FilterButton>
+          ))}
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric icon={<UserPlus className="h-5 w-5" />} label="Hoje" value={signedNumber(summary?.net_growth_day)} helper={freshness ? (stale ? "Dados desatualizados" : "Atualizado") + " em " + dateFormat(freshness) : "sem data"} />
+        <Metric icon={<BarChart3 className="h-5 w-5" />} label="Tendência" value={trendLabel} helper={summary?.trend_followers_per_day_30d != null ? summary.trend_followers_per_day_30d.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + " seguidores/dia" : "sem tendência calculada"} />
+        <Metric icon={<ArrowUpRight className="h-5 w-5" />} label="Maior ganho" value={signedNumber(summary?.max_gain_day_30d)} helper={numberFormat(summary?.gain_days_30d ?? 0) + " dias de ganho em 30d"} />
+        <Metric icon={<ArrowDownRight className="h-5 w-5" />} label="Maior perda" value={signedNumber(summary?.max_loss_day_30d)} helper={numberFormat(summary?.loss_days_30d ?? 0) + " dias de perda em 30d"} />
+      </div>
+      <FollowerLineChart rows={filteredRows} />
+    </Card>
+  );
+}
+
+function FollowerLineChart({ rows }: { rows: InstagramContext["followerDailyMetrics"] }) {
+  if (!rows.length) return <p className="mt-5 rounded-md border border-dashed border-[#E9CBD1] bg-[#FFF7F8] px-4 py-6 text-sm font-semibold text-brand-teal/60">Ainda não há histórico diário suficiente para desenhar a curva.</p>;
+  const values = rows.map((row) => Number(row.followers_total ?? 0));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(max - min, 1);
+  const width = 720;
+  const height = 180;
+  const points = rows.map((row, index) => {
+    const x = rows.length === 1 ? width / 2 : (index / (rows.length - 1)) * width;
+    const y = height - ((Number(row.followers_total ?? 0) - min) / span) * (height - 22) - 10;
+    return { x, y, row };
+  });
+  const path = points.map((point, index) => (index === 0 ? "M" : "L") + point.x.toFixed(1) + "," + point.y.toFixed(1)).join(" ");
+  const first = rows[0];
+  const last = rows.at(-1);
+
+  return (
+    <div className="mt-5 overflow-x-auto">
+      <svg viewBox={"0 0 " + width + " " + (height + 34)} className="min-w-[640px] text-brand-teal" role="img" aria-label="Histórico de seguidores por data">
+        <line x1="0" x2={width} y1={height - 10} y2={height - 10} stroke="#EFDDE1" />
+        <path d={path} fill="none" stroke="#9D6F4E" strokeWidth="4" strokeLinecap="round" />
+        {points.map((point, index) => (
+          <circle key={point.row.snapshot_date + "-" + index} cx={point.x} cy={point.y} r="4" fill="#0F4D4A">
+            <title>{dateFormat(point.row.snapshot_date) + " · " + numberFormat(point.row.followers_total ?? 0) + " seguidores · variação " + signedNumber(point.row.net_change_day)}</title>
+          </circle>
+        ))}
+        <text x="0" y={height + 22} className="fill-current text-[11px] font-bold">{dateFormat(first.snapshot_date)}</text>
+        <text x={width} y={height + 22} textAnchor="end" className="fill-current text-[11px] font-bold">{dateFormat(last?.snapshot_date ?? "")}</text>
+        <text x="0" y="14" className="fill-current text-[11px] font-bold">{numberFormat(max)}</text>
+        <text x="0" y={height - 18} className="fill-current text-[11px] font-bold">{numberFormat(min)}</text>
+      </svg>
     </div>
   );
 }
@@ -2074,3 +2172,4 @@ function InteractionStatusBadge({ value }: { value: InstagramInteractionStatus }
 function EmptyState() {
   return <p className="px-5 py-8 text-sm text-brand-teal/70">Nenhum post encontrado para os filtros.</p>;
 }
+

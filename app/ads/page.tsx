@@ -8,8 +8,9 @@ export default async function AdsPage() {
   const context = await getAdsContext();
 
   return (
-    <AppShell activeItem="ads" allowedItems={context.allowedModules}>
+    <AppShell activeItem="ads" allowedItems={context.allowedModules} role={context.role}>
       <AdsDashboard context={context} />
     </AppShell>
   );
 }
+

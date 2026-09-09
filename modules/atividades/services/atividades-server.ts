@@ -19,6 +19,7 @@ function latestDate(rows: Array<{ updated_at?: string | null; created_at?: strin
 function allowedTeamsForRole(role: string | null): AtividadeTime[] {
   if (role === "MARKETING_PARTNER") return ["marketing"];
   if (role === "CLINICA") return ["especialista"];
+  if (role === "OPERACIONAL") return ["suporte"];
   return ["marketing", "suporte", "especialista", "gestao_dados"];
 }
 
@@ -108,7 +109,7 @@ export async function getAtividadesContext(): Promise<AtividadesContext> {
 
   const teams = allowedTeamsForRole(membership.role);
   const canAdmin = membership.role === "ADMIN" || membership.role === "SUPORTE";
-  const canWrite = Boolean(permission?.can_write);
+  const canWrite = membership.role === "ADMIN" || membership.role === "ESPECIALISTA" || membership.role === "OPERACIONAL" || Boolean(permission?.can_write);
   const [tenantResult, projetosResult, tarefasResult, templatesResult, templateTarefasResult, recorrenciasResult, logsResult] =
     await Promise.all([
       dataClient.from("tenants").select("id, nome").eq("id", membership.tenant_id).maybeSingle(),

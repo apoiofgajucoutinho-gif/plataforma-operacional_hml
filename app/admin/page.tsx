@@ -8,8 +8,10 @@ export default async function AdminPage() {
   const context = await getAdminContext();
 
   return (
-    <AppShell activeItem="admin" allowedItems={context.allowedModules}>
+    <AppShell activeItem="admin" allowedItems={context.allowedModules} role={"role" in context ? context.role : null}>
       <AdminDashboard context={context} />
     </AppShell>
   );
 }
+
+

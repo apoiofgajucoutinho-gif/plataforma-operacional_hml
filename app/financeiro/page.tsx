@@ -8,8 +8,9 @@ export default async function FinanceiroPage() {
   const context = await getFinanceiroContext();
 
   return (
-    <AppShell activeItem="financeiro" allowedItems={context.allowedModules}>
+    <AppShell activeItem="financeiro" allowedItems={context.allowedModules} role={context.role}>
       <FinanceiroDashboard context={context} />
     </AppShell>
   );
 }
+

@@ -41,14 +41,17 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Nao foi possivel enviar o codigo.";
     const isFetchFailure = message.toLowerCase().includes("fetch failed");
+    const isAdminConfigFailure = message.toLowerCase().includes("supabase admin client indisponivel");
 
     return NextResponse.json(
       {
-        error: isFetchFailure
+        error: isAdminConfigFailure
+          ? "Nao foi possivel validar permissoes neste ambiente. Verifique SUPABASE_SERVICE_ROLE_KEY no servidor local."
+          : isFetchFailure
           ? "Nao foi possivel conectar ao Supabase neste ambiente. Verifique a rede/local e tente novamente."
           : message,
       },
-      { status: isFetchFailure ? 503 : 400 },
+      { status: isFetchFailure || isAdminConfigFailure ? 503 : 400 },
     );
   }
 }

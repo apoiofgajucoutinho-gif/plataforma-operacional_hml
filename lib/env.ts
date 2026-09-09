@@ -19,6 +19,12 @@ export const env = {
     "",
   n8nIngestToken: process.env.N8N_INGEST_TOKEN,
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+  instagramDefaultTenantName: process.env.INSTAGRAM_DEFAULT_TENANT_NAME ?? "Juliana Coutinho",
+  norwynFunnelLabTenantId: process.env.NORWYN_FUNNEL_LAB_TENANT_ID,
+  activeCampaignBaseUrl: process.env.ACTIVE_CAMPAIGN_BASE_URL,
+  activeCampaignApiKey: process.env.ACTIVE_CAMPAIGN_API_KEY,
+  activeCampaignWebhookSecret: process.env.ACTIVE_CAMPAIGN_WEBHOOK_SECRET,
+  activeCampaignSendEnabled: process.env.ACTIVE_CAMPAIGN_SEND_ENABLED === "true",
 };
 
 export function hasPublicSupabaseEnv() {

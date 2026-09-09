@@ -1,4 +1,6 @@
-export type AdminRole = "ADMIN" | "SUPORTE" | "MARKETING_PARTNER" | "CLINICA" | "USER";
+import type { AppRole } from "@/lib/auth/roles";
+
+export type AdminRole = AppRole;
 
 export type AdminUserRow = {
   id: string;
@@ -23,9 +25,13 @@ export type AdminProfileAccess = {
 };
 
 export type AdminContext = {
+  role: AdminRole | null;
   allowedModules: string[];
   tenant: { id: string; nome: string } | null;
   users: AdminUserRow[];
   profiles: AdminProfileAccess[];
   diagnostic: string | null;
 };
+
+
+

@@ -41,14 +41,30 @@ export type AtividadeTarefa = {
   prioridade: AtividadePrioridade;
   data_inicio: string | null;
   prazo: string | null;
-  concluida_at: string | null;
+  concluida_em: string | null;
+  concluida_at?: string | null;
   validacao_obrigatoria: boolean;
-  ignorada_motivo: string | null;
+  validada_em?: string | null;
+  motivo_ignorado: string | null;
+  ignorada_motivo?: string | null;
   recorrencia_id: string | null;
   ordem: number;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  campaign_id?: string | null;
+  source_module?: string | null;
+  source_event?: string | null;
+  product_id?: string | null;
+  person_id?: string | null;
+  student_id?: string | null;
+  content_id?: string | null;
+  incident_id?: string | null;
+  due_at?: string | null;
+  approval_required?: boolean | null;
+  blocked_reason?: string | null;
+  waiting_on?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 export type AtividadeTemplate = {

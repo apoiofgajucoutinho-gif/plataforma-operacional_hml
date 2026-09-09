@@ -8,3 +8,11 @@ coverage
 *.tsbuildinfo
 .vercel
 Insight.xlsx
+
+tmp/hotmart-validation/
+tmp/hotmart-validation-*.json
+test-results/
+output/
+tmp/
+.codex/
+supabase/.temp/

@@ -5,6 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type {
   InstagramContext,
+  InstagramFollowerDailyMetric,
+  InstagramFollowerGrowthSummary,
   InstagramFollowerSnapshot,
   InstagramInteraction,
   InstagramPostMetric,
@@ -95,6 +97,10 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       posts: [],
       interactions: [],
       followerSnapshots: [],
+
+      followerGrowthSummary: null,
+
+      followerDailyMetrics: [],
       importRun: null,
       updatedAt: null,
       diagnostic: `${source}: ${membershipError.message}`,
@@ -109,6 +115,10 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       posts: [],
       interactions: [],
       followerSnapshots: [],
+
+      followerGrowthSummary: null,
+
+      followerDailyMetrics: [],
       importRun: null,
       updatedAt: null,
       diagnostic: "Nenhum tenant ativo encontrado para este usuario.",
@@ -125,6 +135,10 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       posts: [],
       interactions: [],
       followerSnapshots: [],
+
+      followerGrowthSummary: null,
+
+      followerDailyMetrics: [],
       importRun: null,
       updatedAt: null,
       diagnostic: "Seu perfil nao possui acesso ao modulo Instagram.",
@@ -153,6 +167,10 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       posts: [],
       interactions: [],
       followerSnapshots: [],
+
+      followerGrowthSummary: null,
+
+      followerDailyMetrics: [],
       importRun: null,
       updatedAt: null,
       diagnostic: accountError.message,
@@ -167,6 +185,10 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       posts: [],
       interactions: [],
       followerSnapshots: [],
+
+      followerGrowthSummary: null,
+
+      followerDailyMetrics: [],
       importRun: null,
       updatedAt: null,
       diagnostic:
@@ -189,6 +211,10 @@ export async function getInstagramContext(): Promise<InstagramContext> {
       posts: [],
       interactions: [],
       followerSnapshots: [],
+
+      followerGrowthSummary: null,
+
+      followerDailyMetrics: [],
       importRun: null,
       updatedAt: null,
       diagnostic: postsError.message,
@@ -253,9 +279,25 @@ export async function getInstagramContext(): Promise<InstagramContext> {
     .order("interaction_at", { ascending: false })
     .limit(500);
 
+  const { data: followerGrowthSummary } = await dataClient
+    .from("instagram_follower_growth_summary")
+    .select("tenant_id, account_id, latest_date, followers_current, net_growth_day, net_growth_7d, net_growth_30d, gain_days_30d, loss_days_30d, max_gain_day_30d, max_loss_day_30d, trend_followers_per_day_30d, trend_status, updated_at")
+    .eq("tenant_id", membership.tenant_id)
+    .eq("account_id", account.id)
+    .limit(1)
+    .maybeSingle();
+
+  const { data: followerDailyMetrics } = await dataClient
+    .from("instagram_follower_daily_metrics")
+    .select("tenant_id, account_id, snapshot_date, followers_total, followers_previous_day, net_change_day, source, updated_at")
+    .eq("tenant_id", membership.tenant_id)
+    .eq("account_id", account.id)
+    .order("snapshot_date", { ascending: true })
+    .limit(1000);
+
   const { data: followerSnapshots } = await dataClient
     .from("instagram_follower_snapshots")
-    .select("snapshot_date, followers_total")
+    .select("snapshot_date, followers_total, created_at, updated_at")
     .eq("tenant_id", membership.tenant_id)
     .eq("account_id", account.id)
     .order("snapshot_date", { ascending: true });
@@ -267,9 +309,12 @@ export async function getInstagramContext(): Promise<InstagramContext> {
     posts: combined,
     interactions: (interactions ?? []) as InstagramInteraction[],
     followerSnapshots: (followerSnapshots ?? []) as InstagramFollowerSnapshot[],
+    followerGrowthSummary: (followerGrowthSummary ?? null) as InstagramFollowerGrowthSummary | null,
+    followerDailyMetrics: (followerDailyMetrics ?? []) as InstagramFollowerDailyMetric[],
     importRun: importRun ?? null,
-    updatedAt,
+    updatedAt: followerGrowthSummary?.updated_at ?? updatedAt,
     diagnostic: null,
     allowedModules,
   };
 }
+

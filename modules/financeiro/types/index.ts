@@ -6,7 +6,7 @@ export type FinFormaPagamento =
   | "pix"
   | "boleto"
   | "dinheiro";
-export type FinPerfil = "admin" | "suporte" | "marketing";
+export type FinPerfil = "admin" | "suporte" | "marketing" | "especialista";
 
 export type FinTenant = {
   id: string;
@@ -161,9 +161,46 @@ export type FinFaturaCartao = {
   qtd_lancamentos: number;
 };
 
+export type FinanceiroCommercialSale = {
+  id: string;
+  transaction_id: string | null;
+  produto_id: string | null;
+  produto_nome: string | null;
+  comprador_email: string | null;
+  status_original: string | null;
+  status_normalizado: string | null;
+  grupo_comercial: string | null;
+  commercial_transaction?: boolean | null;
+  sale_confirmed?: boolean | null;
+  revenue_eligible?: boolean | null;
+  student_eligible?: boolean | null;
+  sale_comparable?: boolean | null;
+  event_class?: string | null;
+  eligibility_reason?: string | null;
+  moeda: string | null;
+  valor_bruto: number | null;
+  data_compra: string | null;
+  data_aprovacao: string | null;
+  data_reembolso: string | null;
+  imported_at: string | null;
+  last_event_at: string | null;
+};
+
+export type FinanceiroAdsRow = {
+  id: string;
+  data_referencia: string;
+  campanha: string | null;
+  valor_gasto: number | null;
+  meta_purchases?: number | null;
+  meta_purchase_value?: number | null;
+  updated_at?: string | null;
+  imported_at?: string | null;
+};
+
 export type FinanceiroContext = {
   tenant: FinTenant | null;
   userEmail: string | null;
+  role: string | null;
   perfil: FinPerfil | null;
   allowedModules: string[];
   diagnostic: string | null;
@@ -180,6 +217,8 @@ export type FinanceiroContext = {
   drePorCentro: FinDreCentro[];
   drePorCurso: FinDreCurso[];
   faturas: FinFaturaCartao[];
+  commercialSales: FinanceiroCommercialSale[];
+  adsRows: FinanceiroAdsRow[];
 };
 
 export type CreateLancamentoPayload = {
@@ -199,3 +238,4 @@ export type CreateLancamentoPayload = {
   valor: number;
   observacao?: string | null;
 };
+

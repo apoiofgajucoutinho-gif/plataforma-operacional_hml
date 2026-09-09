@@ -8,8 +8,10 @@ export default async function AtividadesPage() {
   const context = await getAtividadesContext();
 
   return (
-    <AppShell activeItem="atividades" allowedItems={context.allowedModules}>
+    <AppShell activeItem="atividades" allowedItems={context.allowedModules} role={"role" in context ? context.role : null}>
       <AtividadesDashboard context={context} />
     </AppShell>
   );
 }
+
+

@@ -153,6 +153,21 @@ function saleDate(sale: NorwynCommercialSale) {
   return sale.data_aprovacao ?? sale.data_compra;
 }
 
+function normalizedCommercialStatus(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+function isConfirmedCommercialSale(sale: NorwynCommercialSale) {
+  if (sale.sale_confirmed !== null && sale.sale_confirmed !== undefined) return sale.sale_confirmed === true;
+  const value = normalizedCommercialStatus(sale.grupo_comercial ?? sale.status_normalizado ?? sale.status_original);
+  return ["CONFIRMED", "APPROVED", "COMPLETE", "COMPLETED", "PURCHASE_APPROVED", "PURCHASE_COMPLETE", "PURCHASE_COMPLETED"].includes(value);
+}
+
+function isRevenueEligibleCommercialSale(sale: NorwynCommercialSale) {
+  if (sale.revenue_eligible !== null && sale.revenue_eligible !== undefined) return sale.revenue_eligible === true && normalizedCommercialStatus(sale.moeda ?? "BRL") === "BRL";
+  return isConfirmedCommercialSale(sale) && normalizedCommercialStatus(sale.moeda ?? "BRL") === "BRL";
+}
+
 function detectOperationalContext(
   agendaEvents: StrategyAgendaEvent[],
   confirmedSales: NorwynCommercialSale[],
@@ -247,13 +262,13 @@ function buildPlanner(
   const criticalIncidents = openIncidents.filter((item) => ["alto", "critico", "urgente", "alta"].includes(String(item.impacto_cliente)) || ["alta", "urgente"].includes(String(item.prioridade)));
   const offTrackGoals = objetivos.filter((goal) => Number(goal.percentual_atingido ?? 100) < 80 || ["fora", "risco", "atencao"].includes(String(goal.status).toLowerCase()));
 
-  const confirmedSales = recentSales.filter((sale) => sale.grupo_comercial === "confirmed");
+  const confirmedSales = recentSales.filter(isRevenueEligibleCommercialSale);
   const pendingSales = recentSales.filter((sale) => sale.grupo_comercial === "pending");
   const lostSales = recentSales.filter((sale) => ["lost", "refunded", "chargeback"].includes(String(sale.grupo_comercial)));
   const revenue = confirmedSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
-  const confirmedDaySales = daySales.filter((sale) => sale.grupo_comercial === "confirmed");
-  const confirmedWeekSales = weekSales.filter((sale) => sale.grupo_comercial === "confirmed");
-  const confirmedFifteenDaySales = fifteenDaySales.filter((sale) => sale.grupo_comercial === "confirmed");
+  const confirmedDaySales = daySales.filter(isRevenueEligibleCommercialSale);
+  const confirmedWeekSales = weekSales.filter(isRevenueEligibleCommercialSale);
+  const confirmedFifteenDaySales = fifteenDaySales.filter(isRevenueEligibleCommercialSale);
   const topTheme = groupCount(recentInteractions, (item) => item.product_topic)[0];
   const topProduct24h = groupCount(confirmedDaySales, (sale) => sale.produto_nome)[0];
   const topProduct7d = groupCount(confirmedWeekSales, (sale) => sale.produto_nome)[0];

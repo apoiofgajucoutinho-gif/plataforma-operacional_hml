@@ -15,6 +15,7 @@ import {
   Flag,
   Home,
   Layers3,
+  LineChart,
   Link2,
   Mic,
   Package,
@@ -27,13 +28,18 @@ import {
   Video,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { canAccessMissionFeature, functionalRoleFor } from "@/lib/auth/roles";
 import { FinancialConfig } from "@/lib/financial-config";
+import { GrowthIntelligence } from "@/modules/norwyn/components/GrowthIntelligence";
+import { OperationalOsHome } from "@/modules/norwyn/components/OperationalOsHome";
 import { StrategyPlanner } from "@/modules/norwyn/components/StrategyPlanner";
 import { buildEvidenceEngine, evidenceRecommendationToBriefingSeed } from "@/modules/norwyn/services/evidence-engine";
+import { buildGrowthAnalysis } from "@/modules/norwyn/services/growth-intelligence";
+import { listCanonicalProductOptions } from "@/modules/norwyn/services/product-identity";
 import type { InstagramPostMetric } from "@/modules/instagram/types";
 import type { NorwynBusinessProfile, NorwynBusinessTaxRule, NorwynCampaign, NorwynCampaignApproval, NorwynCampaignMaterial, NorwynCampaignMaterialVersion, NorwynCommercialSale, NorwynContentCapture, NorwynContext, NorwynEvidenceRecommendation, NorwynLaunchPattern, NorwynMarketingQAReview, NorwynMarketingQAReviewItem, NorwynProduct, NorwynSignal, NorwynSignalPriority, NorwynSignalProvider, NorwynSignalStatus, StrategyAtividadeTask } from "@/modules/norwyn/types";
 
-type NorwynTab = "home" | "business" | "mission" | "products" | "campaigns" | "capture" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
+type NorwynTab = "home" | "business" | "mission" | "products" | "campaigns" | "capture" | "growth" | "intelligence" | "evidence" | "strategy" | "briefing" | "studio" | "shadow" | "knowledge" | "guide";
 type MissionPriority = "Principal" | "Estrategica" | "Continua";
 type MissionStatus = "Planejada" | "Ativa" | "Pausada" | "Encerrada" | "Arquivada";
 type BusinessObjectiveHorizon = "Trimestral" | "Semestral" | "Anual" | "Continuo";
@@ -128,6 +134,20 @@ type BriefingSeed = {
   engineKey?: string;
 };
 
+function normalizedCommercialStatus(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+function isConfirmedCommercialSale(sale: NorwynCommercialSale) {
+  if (sale.sale_confirmed !== null && sale.sale_confirmed !== undefined) return sale.sale_confirmed === true;
+  const value = normalizedCommercialStatus(sale.grupo_comercial ?? sale.status_normalizado ?? sale.status_original);
+  return ["CONFIRMED", "APPROVED", "COMPLETE", "COMPLETED", "PURCHASE_APPROVED", "PURCHASE_COMPLETE", "PURCHASE_COMPLETED"].includes(value);
+}
+
+function isRevenueEligibleBrlSale(sale: NorwynCommercialSale) {
+  if (sale.revenue_eligible !== null && sale.revenue_eligible !== undefined) return sale.revenue_eligible === true && String(sale.moeda ?? "BRL").trim().toUpperCase() === "BRL";
+  return isConfirmedCommercialSale(sale) && String(sale.moeda ?? "BRL").trim().toUpperCase() === "BRL";
+}
 type NorwynBriefing = {
   id: string;
   title: string;
@@ -1045,7 +1065,7 @@ function briefingEngineKey(seed: BriefingSeed, missionId: string, date = todayIn
 
 function buildMissionSignals(context: NorwynContext, mission: NorwynMission | null = null) {
   const confirmedSales = context.commercialSales.filter(
-    (sale) => sale.grupo_comercial === "confirmed" && inLastDays(sale.data_aprovacao ?? sale.data_compra, 7),
+    (sale) => isConfirmedCommercialSale(sale) && inLastDays(sale.data_aprovacao ?? sale.data_compra, 7),
   ).filter((sale) => productFitsMission(sale.produto_nome, mission));
   const activeAds = context.adsRows.filter((row) => Number(row.valor_gasto ?? 0) > 0 && inLastDays(row.data_referencia, 7));
   const pendingInteractions = context.interactions.filter((item) => item.status !== "respondido" && item.status !== "arquivado");
@@ -1161,10 +1181,10 @@ function missionKpis(mission: NorwynMission, context: NorwynContext) {
     return date >= start && date <= end;
   };
   const sales = context.commercialSales.filter((sale) => inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission));
-  const confirmed = sales.filter((sale) => sale.grupo_comercial === "confirmed");
+  const confirmed = sales.filter(isConfirmedCommercialSale);
   const pending = sales.filter((sale) => sale.grupo_comercial === "pending");
   const lost = sales.filter((sale) => ["lost", "refunded", "chargeback"].includes(String(sale.grupo_comercial)));
-  const revenue = confirmed.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
+  const revenue = sales.filter(isRevenueEligibleBrlSale).reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
   const interactions = context.interactions.filter((item) => inPeriod(item.interaction_at));
   const ads = context.adsRows.filter((row) => inPeriod(row.data_referencia));
   const spend = ads.reduce((sum, row) => sum + Number(row.valor_gasto ?? 0), 0);
@@ -1207,11 +1227,11 @@ function missionActualValue(mission: NorwynMission, context: NorwynContext) {
   const unit = normalizeKey(`${mission.goalUnit} ${mission.mainGoal}`);
   if (unit.includes("receita") || unit.includes("faturamento")) {
     return context.commercialSales
-      .filter((sale) => sale.grupo_comercial === "confirmed" && inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission))
+      .filter((sale) => isConfirmedCommercialSale(sale) && inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission))
       .reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
   }
   if (unit.includes("venda")) {
-    return context.commercialSales.filter((sale) => sale.grupo_comercial === "confirmed" && inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission)).length;
+    return context.commercialSales.filter((sale) => isConfirmedCommercialSale(sale) && inPeriod(sale.data_aprovacao ?? sale.data_compra) && productFitsMission(sale.produto_nome, mission)).length;
   }
   if (unit.includes("interacao") || unit.includes("sinal")) {
     return context.interactions.filter((item) => inPeriod(item.interaction_at)).length;
@@ -1626,6 +1646,11 @@ function buildTodayPriorities({
   const upcomingEvent = context.agendaEvents.find((event) => dueSoon(event.inicio, 2) && openStatus(event.status));
   const pendingInteraction = context.interactions.find((item) => item.status !== "respondido" && item.status !== "arquivado");
   const firstOpportunity = opportunities[0];
+  const growth = buildGrowthAnalysis(context);
+  const trackingTarget = Number((growth.campaign?.plan_json as Record<string, any> | undefined)?.tracking_coverage_target ?? (growth.campaign?.plan_json as Record<string, any> | undefined)?.growth_config?.tracking_coverage_target ?? NaN);
+  const trackingCoverage = growth.attribution.coverage.coveragePercent;
+  const trackingSpend = growth.metrics.media.find((metric) => metric.key === "spend")?.value ?? 0;
+  const trackingSales = growth.attribution.coverage.totalSales;
 
   if (blockedReview) {
     items.push({
@@ -1648,6 +1673,18 @@ function buildTodayPriorities({
       evidenceKind: "Dado real",
       source: "Meta Ads",
       action: "Gerar briefing de criativo alternativo e validar promessa, link, publico e oferta.",
+    });
+  }
+
+  if (trackingSpend > 0 && trackingSales > 0 && trackingCoverage !== null && (Number.isFinite(trackingTarget) ? trackingCoverage < trackingTarget : trackingCoverage === 0)) {
+    items.push({
+      id: `tracking-coverage-${growth.campaign?.id ?? "growth"}`,
+      title: "Critico - atribuicao insuficiente",
+      priority: trackingCoverage === 0 ? "critica" : "alta",
+      reason: `Campanha com ${trackingSpend.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} de gasto e ${trackingSales} vendas. Tracking coverage: ${trackingCoverage.toFixed(1).replace(".", ",")}%.${Number.isFinite(trackingTarget) ? ` Meta interna: ${trackingTarget}%.` : " Meta interna ainda nao configurada."}`,
+      evidenceKind: "Dado real",
+      source: "Growth Intelligence",
+      action: "Corrigir UTMs/source_sck e validar preservacao landing -> checkout antes de decidir criativo ou orcamento.",
     });
   }
 
@@ -1955,6 +1992,11 @@ function TabButton({
 
 export function NorwynDashboard({ context }: { context: NorwynContext }) {
   const [activeTab, setActiveTab] = useState<NorwynTab>("home");
+  const functionalRole = functionalRoleFor(context.role);
+  const canOpenMission = canAccessMissionFeature(context.role);
+  const isAdminExperience = functionalRole === "ADMIN";
+  const isSpecialistExperience = functionalRole === "ESPECIALISTA";
+  const operationalOsV2Enabled = process.env.NEXT_PUBLIC_NORWYN_OS_V2 !== "false";
   const [products, setProducts] = useState<NorwynProduct[]>(context.products);
   const [productsMessage, setProductsMessage] = useState<string | null>(null);
   const [businessProfile, setBusinessProfile] = useState<NorwynBusinessProfile | null>(context.businessProfile);
@@ -1987,10 +2029,21 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab") as NorwynTab | null;
-    if (tab && ["home", "business", "mission", "products", "campaigns", "capture", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"].includes(tab)) {
+    if (tab && ["home", "business", "mission", "products", "campaigns", "capture", "growth", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"].includes(tab)) {
+      if (tab === "mission" && !canOpenMission) {
+        setActiveTab("home");
+        setEngineMessage("Missões não estão disponíveis para o perfil operacional.");
+        return;
+      }
+      const technicalTabs: NorwynTab[] = ["business", "intelligence", "evidence", "strategy", "briefing", "studio", "shadow", "knowledge", "guide"];
+      if (technicalTabs.includes(tab) && !isAdminExperience) {
+        setActiveTab("home");
+        setEngineMessage("Área técnica disponível apenas para Admin.");
+        return;
+      }
       setActiveTab(tab);
     }
-  }, []);
+  }, [canOpenMission, isAdminExperience]);
 
   const suggestions = useMemo(() => buildSuggestedMissions(context), [context]);
   const activeObjectives = businessObjectives.filter((objective) => objective.status !== "Arquivado");
@@ -2014,6 +2067,37 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
       }),
     [context, products, signals, activeMission],
   );
+  const visibleTabs = useMemo(() => {
+    const baseTabs: Array<{ key: NorwynTab; label: string; icon: ReactNode }> = [
+      { key: "home", label: "Início", icon: <Home className="h-4 w-4" /> },
+      { key: "mission", label: "Missões", icon: <Flag className="h-4 w-4" /> },
+      { key: "campaigns", label: "Marketing", icon: <Send className="h-4 w-4" /> },
+      { key: "capture", label: "Conteúdo", icon: <Video className="h-4 w-4" /> },
+      { key: "growth", label: "Resultados", icon: <LineChart className="h-4 w-4" /> },
+      { key: "products", label: "Produtos & Alunos", icon: <Package className="h-4 w-4" /> },
+    ];
+    const operationalTabs: NorwynTab[] = ["home", "products", "campaigns", "growth"];
+    const adminTabs: Array<{ key: NorwynTab; label: string; icon: ReactNode }> = [
+      { key: "home", label: "Executive Home", icon: <Home className="h-4 w-4" /> },
+      { key: "business", label: "Business Strategy", icon: <BriefcaseBusiness className="h-4 w-4" /> },
+      { key: "mission", label: "Mission Center", icon: <Flag className="h-4 w-4" /> },
+      { key: "products", label: "Produtos", icon: <Package className="h-4 w-4" /> },
+      { key: "campaigns", label: "Campanhas", icon: <Send className="h-4 w-4" /> },
+      { key: "capture", label: "Content Capture", icon: <Video className="h-4 w-4" /> },
+      { key: "growth", label: "Growth", icon: <LineChart className="h-4 w-4" /> },
+      { key: "intelligence", label: "Intelligence", icon: <Layers3 className="h-4 w-4" /> },
+      { key: "evidence", label: "Evidence", icon: <CheckCircle2 className="h-4 w-4" /> },
+      { key: "strategy", label: "Strategy", icon: <Compass className="h-4 w-4" /> },
+      { key: "briefing", label: "Briefing Center", icon: <ClipboardList className="h-4 w-4" /> },
+      { key: "studio", label: "Studio Draft", icon: <Sparkles className="h-4 w-4" /> },
+      { key: "shadow", label: "Shadow Mode", icon: <Eye className="h-4 w-4" /> },
+      { key: "knowledge", label: "Knowledge", icon: <BookOpen className="h-4 w-4" /> },
+      { key: "guide", label: "Como funciona", icon: <Bot className="h-4 w-4" /> },
+    ];
+    if (isAdminExperience) return adminTabs;
+    if (isSpecialistExperience) return baseTabs;
+    return baseTabs.filter((tab) => operationalTabs.includes(tab.key));
+  }, [isAdminExperience, isSpecialistExperience]);
   const evidenceOpportunities = useMemo(
     () =>
       evidenceEngine.recommendations
@@ -2713,75 +2797,43 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         </Card>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <TabButton active={activeTab === "home"} onClick={() => setActiveTab("home")}>
-          <Home className="h-4 w-4" /> Executive Home
-        </TabButton>
-        <TabButton active={activeTab === "business"} onClick={() => setActiveTab("business")}>
-          <BriefcaseBusiness className="h-4 w-4" /> Business Strategy
-        </TabButton>
-        <TabButton active={activeTab === "mission"} onClick={() => setActiveTab("mission")}>
-          <Flag className="h-4 w-4" /> Mission Center
-        </TabButton>
-        <TabButton active={activeTab === "products"} onClick={() => setActiveTab("products")}>
-          <Package className="h-4 w-4" /> Produtos
-        </TabButton>
-        <TabButton active={activeTab === "campaigns"} onClick={() => setActiveTab("campaigns")}>
-          <Send className="h-4 w-4" /> Campanhas
-        </TabButton>
-        <TabButton active={activeTab === "capture"} onClick={() => setActiveTab("capture")}>
-          <Video className="h-4 w-4" /> Content Capture
-        </TabButton>
-        <TabButton active={activeTab === "intelligence"} onClick={() => setActiveTab("intelligence")}>
-          <Layers3 className="h-4 w-4" /> Intelligence
-        </TabButton>
-        <TabButton active={activeTab === "evidence"} onClick={() => setActiveTab("evidence")}>
-          <CheckCircle2 className="h-4 w-4" /> Evidence
-        </TabButton>
-        <TabButton active={activeTab === "strategy"} onClick={() => setActiveTab("strategy")}>
-          <Compass className="h-4 w-4" /> Strategy
-        </TabButton>
-        <TabButton active={activeTab === "briefing"} onClick={() => setActiveTab("briefing")}>
-          <ClipboardList className="h-4 w-4" /> Briefing Center
-        </TabButton>
-        <TabButton active={activeTab === "studio"} onClick={() => setActiveTab("studio")}>
-          <Sparkles className="h-4 w-4" /> Studio Draft
-        </TabButton>
-        <TabButton active={activeTab === "shadow"} onClick={() => setActiveTab("shadow")}>
-          <Eye className="h-4 w-4" /> Shadow Mode
-        </TabButton>
-        <TabButton active={activeTab === "knowledge"} onClick={() => setActiveTab("knowledge")}>
-          <BookOpen className="h-4 w-4" /> Knowledge
-        </TabButton>
-        <TabButton active={activeTab === "guide"} onClick={() => setActiveTab("guide")}>
-          <Bot className="h-4 w-4" /> Como funciona
-        </TabButton>
-      </div>
-
+      {activeTab !== "home" && isAdminExperience ? (
+        <div className="flex flex-wrap gap-2">
+          {visibleTabs.map((tab) => (
+            <TabButton key={tab.key} active={activeTab === tab.key} onClick={() => setActiveTab(tab.key)}>
+              {tab.icon} {tab.label}
+            </TabButton>
+          ))}
+        </div>
+      ) : null}
       {activeTab === "home" ? (
-        <ExecutiveHomeView
-          context={context}
-          businessObjectives={businessObjectives}
-          primaryObjective={primaryObjective}
-          missions={missions}
-          activeMission={activeMission}
-          opportunities={opportunities}
-          evidenceEngine={evidenceEngine}
-          knowledgeEvents={knowledgeEvents}
-          campaigns={campaigns}
-          campaignMaterials={campaignMaterials}
-          campaignApprovals={campaignApprovals}
-          marketingQAReviews={marketingQAReviews}
-          openMission={(id) => {
-            setDetailMissionId(id);
-            setActiveTab("mission");
-          }}
-          openBriefing={(seed) => openBriefing(seed)}
-          goTo={(tab) => setActiveTab(tab)}
-        />
+        operationalOsV2Enabled ? (
+          <OperationalOsHome context={{ ...context, products, campaigns, signals }} goTo={(tab) => setActiveTab(tab)} />
+        ) : (
+          <ExecutiveHomeView
+            context={context}
+            businessObjectives={businessObjectives}
+            primaryObjective={primaryObjective}
+            missions={missions}
+            activeMission={activeMission}
+            opportunities={opportunities}
+            evidenceEngine={evidenceEngine}
+            knowledgeEvents={knowledgeEvents}
+            campaigns={campaigns}
+            campaignMaterials={campaignMaterials}
+            campaignApprovals={campaignApprovals}
+            marketingQAReviews={marketingQAReviews}
+            openMission={(id) => {
+              setDetailMissionId(id);
+              setActiveTab("mission");
+            }}
+            openBriefing={(seed) => openBriefing(seed)}
+            goTo={(tab) => setActiveTab(tab)}
+          />
+        )
       ) : null}
 
-      {activeTab === "business" ? (
+      {activeTab === "business" && isAdminExperience ? (
         <BusinessStrategyView
           objectives={businessObjectives}
           missions={missions}
@@ -2793,7 +2845,7 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         />
       ) : null}
 
-      {activeTab === "mission" ? (
+      {activeTab === "mission" && canOpenMission ? (
         <MissionCenterView
           context={context}
           businessObjectives={businessObjectives}
@@ -2818,7 +2870,7 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         />
       ) : null}
 
-      {activeTab === "strategy" ? (
+      {activeTab === "strategy" && isAdminExperience ? (
         <StrategyPlanner
           posts={context.posts}
           interactions={context.interactions}
@@ -2880,7 +2932,7 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         />
       ) : null}
 
-      {activeTab === "briefing" ? (
+      {activeTab === "briefing" && isAdminExperience ? (
         <BriefingCenterView
           briefings={briefings}
           drafts={drafts}
@@ -2893,7 +2945,7 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         />
       ) : null}
 
-      {activeTab === "studio" ? (
+      {activeTab === "studio" && isAdminExperience ? (
         <StudioDraftView
           drafts={drafts}
           briefings={briefings}
@@ -2915,7 +2967,7 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         />
       ) : null}
 
-      {activeTab === "shadow" ? (
+      {activeTab === "shadow" && isAdminExperience ? (
         <ShadowModeView
           actions={shadowActions}
           briefings={briefings}
@@ -2927,8 +2979,9 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
         />
       ) : null}
 
+      {activeTab === "growth" ? <GrowthIntelligence context={{ ...context, products, campaigns, signals }} /> : null}
       {activeTab === "intelligence" ? <IntelligenceView missions={missions} /> : null}
-      {activeTab === "evidence" ? (
+      {activeTab === "evidence" && isAdminExperience ? (
         <EvidenceEngineView
           evidenceEngine={evidenceEngine}
           openBriefing={(recommendation) => openBriefing(evidenceRecommendationToBriefingSeed(recommendation, activeMission?.id) as BriefingSeed)}
@@ -6815,7 +6868,7 @@ function buildTaxForecast({
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const confirmedSales = commercialSales.filter((sale) => sale.grupo_comercial === "confirmed");
+  const confirmedSales = commercialSales.filter(isConfirmedCommercialSale);
   const previousMonthSales = confirmedSales.filter((sale) => {
     const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
     return Number.isFinite(date.getTime()) && date >= previousMonthStart && date < monthStart;
@@ -6894,7 +6947,7 @@ function buildFinancialPeriodEstimate({
 }) {
   const normalizedProfile = FinancialConfig.normalizeBusinessProfile(profile);
   const confirmedSales = commercialSales.filter((sale) => {
-    if (sale.grupo_comercial !== "confirmed") return false;
+    if (!isRevenueEligibleBrlSale(sale)) return false;
     const date = new Date(sale.data_aprovacao ?? sale.data_compra ?? "");
     return Number.isFinite(date.getTime()) && date >= start && date <= end;
   });
@@ -7087,6 +7140,10 @@ function ProductIntelligenceView({
   const [selectedId, setSelectedId] = useState(products[0]?.id ?? "");
   const selectedProduct = products.find((product) => product.id === selectedId) ?? products[0] ?? null;
   const [productDraft, setProductDraft] = useState(productToDraft(selectedProduct));
+  const inferredHotmartProducts = useMemo(
+    () => listCanonicalProductOptions({ products, sales: commercialSales }).filter((product) => !product.productId),
+    [commercialSales, products],
+  );
   const [saving, setSaving] = useState(false);
   const [savingBusinessProfile, setSavingBusinessProfile] = useState(false);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
@@ -7301,6 +7358,32 @@ function ProductIntelligenceView({
           <MissionMeta label="Componentes" value={String(products.reduce((sum, product) => sum + (product.product_components?.filter((component) => component.ativo !== false).length ?? 0), 0))} />
           <MissionMeta label="Turmas" value={String(products.reduce((sum, product) => sum + (product.product_batches?.filter((batch) => batch.ativo !== false).length ?? 0), 0))} />
         </div>
+        {inferredHotmartProducts.length ? (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs font-black uppercase text-amber-900">Hotmart sem produto formal</p>
+            <p className="mt-1 text-xs font-semibold text-amber-900/80">
+              Detectado em vendas/landing, mas ainda sem vinculo claro no catalogo products. Growth e Comercial conseguem filtrar por Hotmart; para fechar financeiro/cadastro, crie produto ou alias.
+            </p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {inferredHotmartProducts.slice(0, 8).map((product) => (
+                <div key={product.id} className="rounded-md border border-amber-200 bg-white/80 p-2">
+                  <p className="text-sm font-bold text-brand-teal">{product.label}</p>
+                  <p className="mt-1 text-xs text-brand-teal/60">Hotmart ID: {product.hotmartProductId ?? "-"} · {product.evidence}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedId("");
+                      setProductDraft({ ...emptyProductDraft, nome_oficial: product.label, produto_base: product.label, hotmart_product_id: product.hotmartProductId ?? "" });
+                    }}
+                    className="mt-2 h-7 rounded-md border border-brand-sand px-2 text-[11px] font-black uppercase text-brand-teal"
+                  >
+                    Preparar cadastro
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
@@ -7965,3 +8048,12 @@ function IconButton({ title, onClick, children }: { title: string; onClick: () =
 function EmptyState({ children }: { children: ReactNode }) {
   return <p className="rounded-md border border-dashed border-brand-sand p-4 text-sm text-brand-teal/60">{children}</p>;
 }
+
+
+
+
+
+
+
+
+

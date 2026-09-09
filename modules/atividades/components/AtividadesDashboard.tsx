@@ -169,7 +169,7 @@ function emptyTask(team: AtividadeTime = "suporte") {
     titulo: "",
     descricao: "",
     time_responsavel: team,
-    responsavel_nome: "",
+    responsavel_nome: "Ryan",
     prioridade: "media" as AtividadePrioridade,
     status: "backlog" as AtividadeStatus,
     data_inicio: todayIso(),
@@ -195,6 +195,7 @@ export function AtividadesDashboard({ context }: { context: AtividadesContext })
   const allowedTeams = useMemo(() => {
     if (context.role === "MARKETING_PARTNER") return ["marketing"] as AtividadeTime[];
     if (context.role === "CLINICA") return ["especialista"] as AtividadeTime[];
+    if (context.role === "OPERACIONAL") return ["suporte"] as AtividadeTime[];
     return teams.map(([team]) => team);
   }, [context.role]);
 
@@ -225,7 +226,7 @@ export function AtividadesDashboard({ context }: { context: AtividadesContext })
       const date = task.prazo ?? task.data_inicio;
       return date && date >= today && date <= week;
     });
-    const onTimeDone = done.filter((task) => !task.prazo || !task.concluida_at || task.concluida_at.slice(0, 10) <= task.prazo);
+    const onTimeDone = done.filter((task) => !task.prazo || !task.concluida_em || task.concluida_em.slice(0, 10) <= task.prazo);
     return {
       active,
       late,
@@ -301,7 +302,7 @@ export function AtividadesDashboard({ context }: { context: AtividadesContext })
             entity: "tarefa",
             action: "update",
             id: task.id,
-            payload: { status: "ignorada", ignorada_motivo: "Ignorada manualmente pelo usuário." },
+            payload: { status: "ignorada", motivo_ignorado: "Ignorada manualmente pelo usuário." },
           },
           "Atividade de projeto ignorada com histórico preservado.",
         );
@@ -348,7 +349,7 @@ export function AtividadesDashboard({ context }: { context: AtividadesContext })
             Projetos, rotinas, tarefas e gestão à vista para acompanhar execução, atrasos, validações e responsabilidades.
           </p>
         </div>
-        <div className="text-sm font-semibold text-brand-teal/60">{updatedAtLabel(context.updatedAt)}</div>
+        <div className="flex flex-wrap items-center gap-2"><div className="text-sm font-semibold text-brand-teal/60">{updatedAtLabel(context.updatedAt)}</div>{context.canWrite ? <Button type="button" onClick={() => setActiveTab("atividades")}><Plus className="h-4 w-4" />Nova atividade</Button> : null}</div>
       </header>
 
       <nav className="flex flex-wrap gap-2 rounded-lg border border-white/70 bg-white/70 p-2 shadow-soft">
@@ -611,13 +612,12 @@ function ProjectsTab({
             <Select label="Template" value={form.template_id} onChange={(value) => setForm({ ...form, template_id: value })} options={[["", "Sem template"], ...context.templates.filter((item) => item.ativo).map((item) => [item.id, `${item.nome} · ${item.duracao_dias} dias`] as [string, string])]} />
             <div className="grid gap-3 sm:grid-cols-2">
               <Select label="Time" value={form.time_responsavel} onChange={(value) => setForm({ ...form, time_responsavel: value as AtividadeTime })} options={teams} />
-              <Field label="Responsável" value={form.responsavel_nome} onChange={(value) => setForm({ ...form, responsavel_nome: value })} placeholder="Ju, Jeff, Ryan..." />
+              <Field label="Responsável" value={form.responsavel_nome} onChange={(value) => setForm({ ...form, responsavel_nome: value })} placeholder="Especialista, Admin, Operacional..." />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Início" type="date" value={form.data_inicio} onChange={(value) => setForm({ ...form, data_inicio: value })} />
               <Field label="Fim planejado" type="date" value={form.data_fim} onChange={(value) => setForm({ ...form, data_fim: value })} />
-            </div>
-            <TextArea label="Descrição" value={form.descricao} onChange={(value) => setForm({ ...form, descricao: value })} />
+            </div>            <TextArea label="Descrição" value={form.descricao} onChange={(value) => setForm({ ...form, descricao: value })} />
             <Button
               disabled={isPending || !form.nome.trim()}
               onClick={() =>
@@ -766,6 +766,21 @@ function ActivitiesTab(props: {
                 <Field label="Início" type="date" value={form.data_inicio} onChange={(value) => setForm({ ...form, data_inicio: value })} />
                 <Field label="Prazo" type="date" value={form.prazo} onChange={(value) => setForm({ ...form, prazo: value })} />
               </div>
+              <Select
+                label="Contexto"
+                value={(form as any).source_module ?? "Atividades"}
+                onChange={(value) => setForm({ ...form, source_module: value } as any)}
+                options={[
+                  ["Atividades", "Atividades"],
+                  ["Financeiro", "Financeiro"],
+                  ["Automação", "Automação"],
+                  ["Suporte", "Suporte"],
+                  ["Missões", "Missões"],
+                  ["Campanha", "Campanha"],
+                  ["Produto", "Produto"],
+                  ["Aluno", "Aluno"],
+                ]}
+              />
               <label className="flex items-center gap-2 text-sm font-bold text-brand-teal">
                 <input type="checkbox" checked={form.validacao_obrigatoria} onChange={(event) => setForm({ ...form, validacao_obrigatoria: event.target.checked })} />
                 Exigir validação final
@@ -778,10 +793,10 @@ function ActivitiesTab(props: {
                     {
                       entity: "tarefa",
                       action: "create",
-                      payload: { ...form, projeto_id: form.projeto_id || null, responsavel_nome: form.responsavel_nome || null },
+                      payload: { ...form, projeto_id: form.projeto_id || null, responsavel_nome: form.responsavel_nome || null, source_event: (form as any).source_module ? "DEMANDA_CRIADA" : null, metadata: { createdFrom: "norwyn_atividades" } },
                     },
                     "Atividade criada.",
-                  )
+                  ).then(() => setForm(emptyTask(props.allowedTeams[0] ?? "suporte")))
                 }
               >
                 Criar atividade
@@ -985,7 +1000,7 @@ function StatusSelect({
           task,
           {
             status,
-            concluida_at: status === "concluida" ? new Date().toISOString() : null,
+            concluida_em: status === "concluida" ? new Date().toISOString() : null,
           },
           "Status atualizado.",
         );
@@ -1016,7 +1031,7 @@ function RecurrencesTab({
     titulo: "",
     descricao: "",
     time_responsavel: "suporte" as AtividadeTime,
-    responsavel_nome: "Ryan",
+    responsavel_nome: "OPERACIONAL",
     prioridade: "media" as AtividadePrioridade,
     frequencia: "diaria" as AtividadeRecorrenciaFrequencia,
     dias_semana: [1, 2, 3, 4, 5],
@@ -1264,7 +1279,7 @@ function MeetingColumn({
             <p className="text-xs font-semibold text-brand-teal/55">Prazo {dateLabel(task.prazo)} · {task.responsavel_nome ?? "sem responsável"}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button className="h-9 px-3 text-xs" variant="secondary" onClick={() => updateTask(task, { status: "aguardando_validacao" })}>Validar</Button>
-              <Button className="h-9 px-3 text-xs" variant="secondary" onClick={() => updateTask(task, { status: "concluida", concluida_at: new Date().toISOString() })}>Concluir</Button>
+              <Button className="h-9 px-3 text-xs" variant="secondary" onClick={() => updateTask(task, { status: "concluida", concluida_em: new Date().toISOString() })}>Concluir</Button>
             </div>
           </div>
         )) : <p className="text-sm text-brand-teal/55">Nada para tratar.</p>}
@@ -1378,3 +1393,4 @@ function Select({
     </label>
   );
 }
+

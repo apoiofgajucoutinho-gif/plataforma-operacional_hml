@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function findAuthUserByEmail(email: string) {
   const admin = createAdminClient();
-  if (!admin) return null;
+  if (!admin) throw new Error("Supabase admin client indisponivel: SUPABASE_SERVICE_ROLE_KEY ausente no servidor.");
 
   const normalizedEmail = email.trim().toLowerCase();
   let page = 1;
@@ -31,7 +31,7 @@ export async function findAuthUserByEmail(email: string) {
 
 export async function userHasActiveMembership(userId: string) {
   const admin = createAdminClient();
-  if (!admin) return false;
+  if (!admin) throw new Error("Supabase admin client indisponivel: SUPABASE_SERVICE_ROLE_KEY ausente no servidor.");
 
   const { data } = await admin
     .from("tenant_members")

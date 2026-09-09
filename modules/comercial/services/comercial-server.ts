@@ -226,6 +226,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
 
     return {
       tenant: tenantResult.data,
+      role: membership.role,
       allowedModules,
       diagnostic: null,
       updatedAt: latestDate([...vendas, ...recebiveis, ...alunos, ...produtos, ...rawImports]),
@@ -251,6 +252,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
 function emptyContext(diagnostic: string): ComercialContext {
   return {
     tenant: null,
+    role: null,
     allowedModules: [],
     diagnostic,
     updatedAt: null,
@@ -265,3 +267,6 @@ function emptyContext(diagnostic: string): ComercialContext {
     rawImports: [],
   };
 }
+
+
+

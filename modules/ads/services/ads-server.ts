@@ -3,6 +3,7 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
 import type { AdsContext, AdsDailyRow } from "@/modules/ads/types";
 
 async function getMembershipByUserId(userId: string) {
@@ -66,6 +67,7 @@ export async function getAdsContext(): Promise<AdsContext> {
       tenant: null,
       rows: [],
       updatedAt: null,
+      role: null,
       diagnostic: `${source}: ${membershipError.message}`,
       allowedModules: [],
     };
@@ -76,6 +78,7 @@ export async function getAdsContext(): Promise<AdsContext> {
       tenant: null,
       rows: [],
       updatedAt: null,
+      role: null,
       diagnostic: "Nenhum tenant ativo encontrado para este usuario.",
       allowedModules: [],
     };
@@ -88,6 +91,7 @@ export async function getAdsContext(): Promise<AdsContext> {
       tenant: null,
       rows: [],
       updatedAt: null,
+      role: membership.role,
       diagnostic: "Seu perfil nao possui acesso ao modulo Ads.",
       allowedModules,
     };
@@ -101,9 +105,7 @@ export async function getAdsContext(): Promise<AdsContext> {
 
   const { data, error } = await dataClient
     .from("instagram_ads_daily")
-    .select(
-      "id, data_referencia, campanha, conjunto, anuncio, status, objetivo, alcance, impressoes, cliques, ctr, cpc, cpm, frequencia, valor_gasto, conversoes, leads, performance_status, performance_score, imported_at",
-    )
+    .select(adsAnalyticsSelect)
     .eq("tenant_id", membership.tenant_id)
     .order("data_referencia", { ascending: false })
     .limit(5000);
@@ -113,31 +115,21 @@ export async function getAdsContext(): Promise<AdsContext> {
       tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
       rows: [],
       updatedAt: null,
+      role: membership.role,
       diagnostic: error.message,
       allowedModules,
     };
   }
 
-  const rows = (data ?? []).map((row) => ({
-    ...row,
-    alcance: Number(row.alcance ?? 0),
-    impressoes: Number(row.impressoes ?? 0),
-    cliques: Number(row.cliques ?? 0),
-    ctr: Number(row.ctr ?? 0),
-    cpc: Number(row.cpc ?? 0),
-    cpm: Number(row.cpm ?? 0),
-    frequencia: Number(row.frequencia ?? 0),
-    valor_gasto: Number(row.valor_gasto ?? 0),
-    conversoes: Number(row.conversoes ?? 0),
-    leads: Number(row.leads ?? 0),
-    performance_score: Number(row.performance_score ?? 0),
-  })) as AdsDailyRow[];
+  const rows = (data ?? []).map((row) => normalizeAdsDailyRow(row as unknown as Record<string, unknown>)) as AdsDailyRow[];
 
   return {
     tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
     rows,
     updatedAt: rows.map((row) => row.imported_at).filter(Boolean).sort().at(-1) ?? null,
+    role: membership.role,
     diagnostic: null,
     allowedModules,
   };
 }
+

@@ -7,15 +7,23 @@ import { Edit3, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { clsx } from "clsx";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { labelForRole } from "@/lib/auth/roles";
 import type { AdminContext, AdminRole, AdminUserRow } from "@/modules/admin/types";
 
-const roles: Array<{ value: AdminRole; label: string }> = [
+const primaryRoles: Array<{ value: AdminRole; label: string }> = [
   { value: "ADMIN", label: "Admin" },
-  { value: "SUPORTE", label: "Suporte" },
-  { value: "MARKETING_PARTNER", label: "Marketing" },
-  { value: "CLINICA", label: "Clínica" },
-  { value: "USER", label: "User" },
+  { value: "ESPECIALISTA", label: "Especialista" },
+  { value: "OPERACIONAL", label: "Operacional" },
+  { value: "USER", label: "Usuario" },
 ];
+
+const legacyRoles: Array<{ value: AdminRole; label: string }> = [
+  { value: "SUPORTE", label: "Suporte legado" },
+  { value: "MARKETING_PARTNER", label: "Marketing legado" },
+  { value: "CLINICA", label: "Clinica legado" },
+];
+
+const roles = [...primaryRoles, ...legacyRoles];
 
 function dateLabel(value: string | null) {
   if (!value) return "-";
@@ -195,11 +203,20 @@ export function AdminDashboard({ context }: { context: AdminContext }) {
                   onChange={(event) => setForm((current) => ({ ...current, role: event.target.value as AdminRole }))}
                   className="h-10 w-full rounded-md border border-brand-sand bg-white px-3 text-sm font-semibold text-brand-teal outline-none"
                 >
-                  {roles.map((role) => (
-                    <option key={role.value} value={role.value}>
-                      {role.label}
-                    </option>
-                  ))}
+                  <optgroup label="Perfis principais">
+                    {primaryRoles.map((role) => (
+                      <option key={role.value} value={role.value}>
+                        {role.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Legados / compatibilidade">
+                    {legacyRoles.map((role) => (
+                      <option key={role.value} value={role.value}>
+                        {role.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </Field>
               <label className="flex items-center gap-2 text-sm font-bold text-brand-teal">
@@ -250,8 +267,8 @@ export function AdminDashboard({ context }: { context: AdminContext }) {
                       <td className="px-4 py-3 font-semibold text-brand-teal">{user.nome || "-"}</td>
                       <td className="px-4 py-3 text-brand-teal/75">{user.email}</td>
                       <td className="px-4 py-3">
-                        <span className="rounded-full bg-brand-cream px-3 py-1 text-xs font-bold text-brand-teal">
-                          {roles.find((role) => role.value === user.role)?.label ?? user.role}
+                        <span className={clsx("rounded-full px-3 py-1 text-xs font-bold", legacyRoles.some((role) => role.value === user.role) ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200" : "bg-brand-cream text-brand-teal")}>
+                          {labelForRole(user.role)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-brand-teal/75">{user.ativo ? "Ativo" : "Inativo"}</td>
@@ -349,3 +366,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </label>
   );
 }
+
+
+
+
+
+
