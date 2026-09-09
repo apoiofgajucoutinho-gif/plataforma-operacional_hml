@@ -334,3 +334,71 @@ a {
 ::selection {
   background: rgba(157, 111, 78, 0.24);
 }
+
+:root {
+  --ds-bg: #f6f4ef;
+  --ds-bg-soft: #fbfaf7;
+  --ds-surface: rgba(255, 255, 255, 0.88);
+  --ds-surface-solid: #ffffff;
+  --ds-surface-elevated: #fffdf9;
+  --ds-border: rgba(13, 58, 78, 0.1);
+  --ds-border-strong: rgba(13, 58, 78, 0.18);
+  --ds-text: #0d3a4e;
+  --ds-text-secondary: rgba(13, 58, 78, 0.72);
+  --ds-text-muted: rgba(13, 58, 78, 0.52);
+  --ds-primary: #0d3a4e;
+  --ds-primary-soft: #e7f1f5;
+  --ds-accent: #9d6f4e;
+  --ds-accent-soft: #f3e7dc;
+  --ds-success: #177a5b;
+  --ds-success-soft: #e7f6ef;
+  --ds-warning: #a5661f;
+  --ds-warning-soft: #fff3df;
+  --ds-danger: #a93e4a;
+  --ds-danger-soft: #fdecef;
+  --ds-info: #2c75a8;
+  --ds-info-soft: #e8f3fb;
+  --ds-radius-sm: 10px;
+  --ds-radius-md: 14px;
+  --ds-radius-lg: 20px;
+  --ds-shadow-sm: 0 8px 22px rgba(13, 58, 78, 0.06);
+  --ds-shadow-md: 0 18px 44px rgba(13, 58, 78, 0.1);
+}
+
+html[data-theme="dark"] {
+  --ds-bg: #0b1820;
+  --ds-bg-soft: #102631;
+  --ds-surface: rgba(18, 39, 51, 0.9);
+  --ds-surface-solid: #122733;
+  --ds-surface-elevated: #173342;
+  --ds-border: rgba(226, 208, 184, 0.18);
+  --ds-border-strong: rgba(226, 208, 184, 0.28);
+  --ds-text: #f4f1ea;
+  --ds-text-secondary: rgba(244, 241, 234, 0.74);
+  --ds-text-muted: rgba(244, 241, 234, 0.52);
+  --ds-primary: #d9edf5;
+  --ds-primary-soft: rgba(116, 185, 230, 0.13);
+  --ds-accent: #e2d0b8;
+  --ds-accent-soft: rgba(226, 208, 184, 0.13);
+  --ds-success: #7be0bd;
+  --ds-success-soft: rgba(123, 224, 189, 0.14);
+  --ds-warning: #f1c27d;
+  --ds-warning-soft: rgba(241, 194, 125, 0.14);
+  --ds-danger: #f0a3ad;
+  --ds-danger-soft: rgba(240, 163, 173, 0.14);
+  --ds-info: #8fc7ee;
+  --ds-info-soft: rgba(143, 199, 238, 0.14);
+}
+
+.norwyn-ds-page {
+  color: var(--ds-text);
+}
+
+.norwyn-ds-page button:focus-visible,
+.norwyn-ds-page a:focus-visible,
+.norwyn-ds-page input:focus-visible,
+.norwyn-ds-page select:focus-visible,
+.norwyn-ds-page textarea:focus-visible {
+  outline: 2px solid var(--ds-info);
+  outline-offset: 2px;
+}
