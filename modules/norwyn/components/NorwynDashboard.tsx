@@ -2773,21 +2773,25 @@ export function NorwynDashboard({ context }: { context: NorwynContext }) {
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-black uppercase tracking-wide text-brand-clay">Norwyn OS V1</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-brand-teal sm:text-4xl">Executive Home</h1>
+          <p className="text-xs font-black uppercase tracking-wide text-brand-clay">{isAdminExperience ? "Norwyn OS V1" : "Norwyn"}</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-brand-teal sm:text-4xl">{isAdminExperience ? "Executive Home" : "Início"}</h1>
           <p className="mt-3 max-w-4xl text-sm leading-6 text-brand-teal/70">
-            Business Strategy orienta as missoes, os dados operacionais viram evidencias e a Norwyn transforma sinais em decisoes claras para o dia.
+            {isAdminExperience
+              ? "Business Strategy orienta as missoes, os dados operacionais viram evidencias e a Norwyn transforma sinais em decisoes claras para o dia."
+              : "Sua visão do dia: acompanhe alunos, agenda, marketing, financeiro e o que precisa da sua decisão."}
           </p>
         </div>
         <div className="flex flex-col items-start gap-2 sm:items-end">
           <p className="text-sm font-semibold text-brand-teal/55">{formatUpdatedAt(context.updatedAt)}</p>
-          <button
-            type="button"
-            onClick={runMissionEngine}
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-teal px-3 text-sm font-bold text-white shadow-sm transition hover:bg-brand-teal/90"
-          >
-            <Sparkles className="h-4 w-4" /> Rodar Mission Engine
-          </button>
+          {isAdminExperience ? (
+            <button
+              type="button"
+              onClick={runMissionEngine}
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-teal px-3 text-sm font-bold text-white shadow-sm transition hover:bg-brand-teal/90"
+            >
+              <Sparkles className="h-4 w-4" /> Rodar Mission Engine
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -8048,12 +8052,3 @@ function IconButton({ title, onClick, children }: { title: string; onClick: () =
 function EmptyState({ children }: { children: ReactNode }) {
   return <p className="rounded-md border border-dashed border-brand-sand p-4 text-sm text-brand-teal/60">{children}</p>;
 }
-
-
-
-
-
-
-
-
-

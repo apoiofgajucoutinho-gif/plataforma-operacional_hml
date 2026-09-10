@@ -423,6 +423,8 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
   const nextMissionStep = mission.phases[0]?.focus ?? "Sem próximo passo registrado.";
   const instagram = instagramSummary(context, periodRange);
   const finance = financeSummary(context, periodRange);
+  const productsStudents = productsStudentsSummary(context, snapshot);
+  const digitalHealth = digitalHealthSummary(context);
   const nextAgendaEvents = (context.agendaEvents ?? [])
     .filter((event) => new Date(event.inicio).getTime() >= Date.now())
     .sort((a, b) => a.inicio.localeCompare(b.inicio))
@@ -430,7 +432,8 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
   const operationSummary = summarizeOperation(context);
   const teamDemandSummary = summarizeTeamDemand(context);
   const automations = summarizeAutomations(context);
-  const insight = buildHumanInsight(context, periodRange);
+  const attention = operationalAttentionSummary(context, operationSummary, digitalHealth, automations);
+  const canCreateActivity = canCreateActivityFromHome(context);
 
   return (
     <div className="space-y-7">
@@ -439,21 +442,20 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
           <div className="px-6 py-5 sm:px-8">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[color:var(--ds-accent)]">Norwyn</p>
             <h2 className="mt-2 text-2xl font-semibold text-[color:var(--ds-text)] sm:text-3xl">Visão executiva</h2>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-[color:var(--ds-text-secondary)]">Foco, consistência e direção. Uma leitura rápida do que merece sua atenção agora.</p>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-[color:var(--ds-text-secondary)]">Sua visão do dia: acompanhe alunos, agenda, marketing, financeiro e o que precisa da sua decisão.</p>
           </div>
           <div className="flex items-center justify-between gap-4 bg-[color:var(--ds-bg-soft)] px-6 py-5 sm:px-8 lg:justify-end">
             <div>
               <p className="text-xs font-semibold uppercase text-[color:var(--ds-text-muted)]">Período</p>
               <p className="mt-1 text-lg font-semibold text-[color:var(--ds-text)]">{periodRange.label}</p>
             </div>
-            <ActionButton onClick={() => window.location.assign("/atividades")}>Nova atividade</ActionButton>
           </div>
         </div>
       </Surface>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <ExecutiveNumber icon={ShoppingCart} tone="green" label="Vendas do período" value={money(business.salesValue)} meta={business.salesCount ? business.salesCount + " venda(s)" : "Sem vendas"} period={periodRange.label} />
-        <ExecutiveNumber icon={GraduationCap} tone="purple" label="Novas alunas" value={String(business.students)} meta={business.students ? "Identificadas" : "Sem novas"} period={periodRange.label} />
+        <ExecutiveNumber icon={GraduationCap} tone="purple" label="Novos alunos" value={String(business.students)} meta={business.students ? "Identificados" : "Sem novos"} period={periodRange.label} />
         <ExecutiveNumber icon={Megaphone} tone="coral" label="Investimento em Ads" value={money(business.adsSpend)} meta={business.adsRows ? business.adsRows + " registro(s)" : "Sem gasto"} period={periodRange.label} />
         <ExecutiveNumber icon={WalletCards} tone="gold" label="Resultado estimado" value={finance.estimated == null ? "Dados incompletos" : money(finance.estimated)} meta={finance.estimated == null ? "comparação indisponível" : "estimativa do período"} period={periodRange.label} />
       </section>
@@ -461,7 +463,7 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <InstagramSpotlight instagram={instagram} />
         <Surface className="space-y-4 p-5 sm:p-6">
-          <DsSectionHeader eyebrow="Precisa de você" title="Decisões e demandas" description="Até cinco itens relevantes para ação ou acompanhamento." />
+          <DsSectionHeader eyebrow="Precisa de você" title="Decisões e aprovações" description="Itens que pedem uma decisão, resposta ou aprovação humana." />
           <div className="space-y-3">
             {snapshot.specialist.decisions.slice(0, 5).map((item) => <DecisionRow key={item.id} item={item} />)}
             {!snapshot.specialist.decisions.length ? <EmptyState title="Nada crítico agora">Sem decisão urgente com os dados atuais.</EmptyState> : null}
@@ -470,28 +472,62 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
         </Surface>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Surface className="space-y-5 p-5 sm:p-6">
-          <DsSectionHeader title="Financeiro e operação" description="Entradas, saídas e próximos movimentos." action={<ActionLink onClick={() => window.location.assign("/financeiro")}>Ver financeiro</ActionLink>} />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <DsSectionHeader title="Financeiro" description="Entradas, saídas e próximos movimentos." action={<ActionLink onClick={() => window.location.assign("/financeiro")}>Ver financeiro</ActionLink>} />
+          <div className="grid gap-3 sm:grid-cols-2">
             <MiniDomainCard icon={WalletCards} tone="green" label="Entradas" value={money(finance.entries)} detail={periodRange.label} />
             <MiniDomainCard icon={CircleDollarSign} tone="coral" label="Saídas" value={money(finance.expenses)} detail={periodRange.label} />
             <MiniDomainCard icon={CalendarClock} tone="gold" label="A receber" value={money(finance.nextReceipts)} detail="próximos movimentos" />
             <MiniDomainCard icon={AlertTriangle} tone="purple" label="A pagar" value={money(finance.nextPayments)} detail="próximos movimentos" />
           </div>
+        </Surface>
+
+        <Surface className="space-y-5 p-5 sm:p-6">
+          <DsSectionHeader title="Operação" description="Atividades, pendências e acompanhamento da equipe." action={<ActionLink onClick={() => window.location.assign("/atividades")}>Ver atividades</ActionLink>} />
           <div className="grid gap-3 sm:grid-cols-3">
-            <ActionCard icon={ClipboardList} title="Operação" meta={operationSummary.inProgress + " em andamento"} description={operationSummary.overdue + " atrasada(s) · " + operationSummary.approval + " em aprovação"} tone={operationSummary.overdue ? "warning" : "neutral"} />
+            <ActionCard icon={ClipboardList} title="Atividades" meta={operationSummary.inProgress + " em andamento"} description={operationSummary.overdue + " atrasada(s) · " + operationSummary.approval + " em aprovação"} tone={operationSummary.overdue ? "warning" : "neutral"} />
             {teamDemandSummary.slice(0, 2).map((item) => <ActionCard key={item.label} icon={UsersRound} title={item.label} meta={item.meta} description={item.description} tone={item.overdue ? "warning" : "neutral"} />)}
+          </div>
+          {canCreateActivity ? <ActionButton onClick={() => window.location.assign("/atividades?new=1")}>Nova atividade</ActionButton> : null}
+        </Surface>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Surface className="space-y-5 p-5 sm:p-6">
+          <DsSectionHeader title="Produtos & Alunos" description="Base canônica de produtos, alunos, LTV e recompra." action={<ActionLink onClick={() => window.location.assign("/produtos-alunos?view=students")}>Ver Produtos & Alunos</ActionLink>} />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MiniDomainCard icon={Package} tone="teal" label="Produtos ativos" value={numberLabel(productsStudents.activeProducts)} detail="cadastro canônico" />
+            <MiniDomainCard icon={GraduationCap} tone="purple" label="Alunos" value={numberLabel(productsStudents.students)} detail="matrículas canônicas" />
+            <MiniDomainCard icon={WalletCards} tone="gold" label="LTV médio BRL" value={money(productsStudents.averageLtv)} detail="vendas elegíveis BRL" />
+            <MiniDomainCard icon={UsersRound} tone="green" label="Recompra" value={productsStudents.repurchaseLabel} detail="compradores com 2+ compras" />
           </div>
         </Surface>
 
+        <Surface className="space-y-5 p-5 sm:p-6">
+          <DsSectionHeader title="Saúde Digital" description="Resumo de sites, LPs e monitoramento Presence." action={<ActionLink onClick={() => window.location.assign("/presence")}>Ver Saúde Digital</ActionLink>} />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MiniDomainCard icon={ShieldCheck} tone={digitalHealth.tone} label="Saúde geral" value={digitalHealth.healthLabel} detail={digitalHealth.detail} />
+            <MiniDomainCard icon={LineChart} tone="blue" label="Sites ativos" value={String(digitalHealth.activeSites)} detail="monitorados" />
+            <MiniDomainCard icon={Package} tone="gold" label="LPs ativas" value={String(digitalHealth.activeLandings)} detail="HML/ativos digitais" />
+          </div>
+        </Surface>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
         <Surface className="space-y-4 p-5 sm:p-6">
-          <DsSectionHeader title="Agenda de hoje" description="Próximos compromissos sem transformar agenda em tabela." action={<ActionLink onClick={() => window.location.assign("/agenda")}>Ver agenda</ActionLink>} />
+          <DsSectionHeader title="Agenda de hoje" description="Compromissos, horários e preparação." action={<ActionLink onClick={() => window.location.assign("/agenda")}>Ver agenda</ActionLink>} />
           <div className="space-y-3">
             {nextAgendaEvents.map((event) => <AgendaRow key={event.id} title={event.titulo} type={event.tipo ?? "Agenda"} startsAt={event.inicio} />)}
             {!nextAgendaEvents.length ? <EmptyState title="Sem próximos compromissos">Nada futuro encontrado na agenda carregada.</EmptyState> : null}
           </div>
-          <InsightCard title="Insight Norwyn" tone={insight.tone}>{insight.text}</InsightCard>
+        </Surface>
+
+        <Surface className="space-y-4 p-5 sm:p-6">
+          <DsSectionHeader title="Atenção operacional" description="Sinais detectados pelo sistema para acompanhamento, sem misturar com decisões." />
+          <div className="grid gap-3 sm:grid-cols-2">
+            {attention.map((item) => <ActionCard key={item.title} icon={item.icon} title={item.title} meta={item.meta} description={item.description} tone={item.tone} />)}
+          </div>
         </Surface>
       </section>
 
@@ -510,8 +546,8 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
         <Surface className="space-y-4 p-5 sm:p-6">
           <DsSectionHeader title="Marketing e resultados" description="Caminhos rápidos para aprofundar sem pesar a Home." />
           <div className="flex flex-wrap gap-2">
-            <ActionButton onClick={() => window.location.assign("/marketing?view=instagram")}>Instagram</ActionButton>
-            <ActionButton onClick={() => window.location.assign("/marketing?view=ads&period=30d&granularity=day")}>Ads</ActionButton>
+            <ActionButton onClick={() => window.location.assign("/marketing?view=instagram")}>Ver Instagram</ActionButton>
+            <ActionButton onClick={() => window.location.assign("/marketing?view=ads&period=30d&granularity=day")}>Ver Ads</ActionButton>
             <ActionButton onClick={() => goTo("growth")}>Resultados</ActionButton>
           </div>
         </Surface>
@@ -782,7 +818,10 @@ function InstagramSpotlight({ instagram }: { instagram: ReturnType<typeof instag
             <p className="mt-2 max-w-xl text-sm leading-6 text-[color:var(--ds-text-secondary)]">{instagram.insight}</p>
           </div>
         </div>
-        <DataFreshness label={instagram.freshness} stale={instagram.stale} />
+        <div className="flex flex-col items-start gap-3 sm:items-end">
+          <DataFreshness label={instagram.freshness} stale={instagram.stale} />
+          <ActionLink onClick={() => window.location.assign("/marketing?view=instagram")}>Ver Instagram</ActionLink>
+        </div>
       </div>
       <div className="relative mt-7 grid gap-5 lg:grid-cols-[0.78fr_1.22fr]">
         <div className="rounded-3xl bg-[color:var(--ds-bg-soft)] p-5">
@@ -812,6 +851,10 @@ function InstagramSpotlight({ instagram }: { instagram: ReturnType<typeof instag
         <MiniDomainCard icon={CheckCircle2} tone="gold" label="Salvos" value={numberLabel(instagram.saves)} detail={instagram.period} />
       </div>
       {instagram.highlight ? <div className="relative mt-5"><ActionCard icon={Instagram} title="Destaque da semana" meta={instagram.highlight.meta} description={instagram.highlight.description} tone="primary" /></div> : null}
+      {instagram.association ? <InsightCard title="Possível associação" tone="info">{instagram.association}</InsightCard> : null}
+      <div className="relative mt-5 grid gap-3 md:grid-cols-3">
+        {instagram.monthInsights.map((item) => <MiniDomainCard key={item.label} icon={item.icon} tone={item.tone} label={item.label} value={item.value} detail={item.detail} />)}
+      </div>
     </Surface>
   );
 }
@@ -856,13 +899,37 @@ function MiniDomainCard({ icon: Icon, tone, label, value, detail }: { icon: type
 }
 
 function DecisionRow({ item }: { item: OsActivity }) {
-  return <div className="group flex items-center gap-3 rounded-3xl border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-3 shadow-[var(--ds-shadow-sm)]"><span className={"h-2.5 w-2.5 shrink-0 rounded-full " + (item.priority === "critical" ? "bg-rose-500" : item.priority === "high" ? "bg-amber-500" : "bg-[color:var(--ds-accent)]")} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[color:var(--ds-text)]">{item.title}</p><p className="truncate text-xs text-[color:var(--ds-text-muted)]">{item.sourceModule} · {formatDue(item.dueAt)}</p></div><ArrowRight className="h-4 w-4 text-[color:var(--ds-text-muted)] transition group-hover:translate-x-0.5" /></div>;
+  const details = [
+    ["Motivo", item.evidence[0]],
+    ["Responsável", item.owner],
+    ["Prazo", formatDue(item.dueAt)],
+    ["Próxima ação", item.approvalRequired ? "Validar ou aprovar" : "Acompanhar pelo módulo de origem"],
+    ["Origem", item.sourceModule],
+    ["Status", item.status],
+  ].filter(([, value]) => Boolean(value));
+  return (
+    <details className="group rounded-3xl border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-3 shadow-[var(--ds-shadow-sm)] open:rounded-[1.5rem]">
+      <summary className="flex cursor-pointer list-none items-center gap-3 [&::-webkit-details-marker]:hidden">
+        <span className={"h-2.5 w-2.5 shrink-0 rounded-full " + (item.priority === "critical" ? "bg-rose-500" : item.priority === "high" ? "bg-amber-500" : "bg-[color:var(--ds-accent)]")} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-[color:var(--ds-text)]">{item.title}</p>
+          <p className="truncate text-xs text-[color:var(--ds-text-muted)]">{item.sourceModule} · {formatDue(item.dueAt)}</p>
+        </div>
+        <ArrowRight className="h-4 w-4 text-[color:var(--ds-text-muted)] transition group-open:rotate-90" />
+      </summary>
+      <div className="mt-3 grid gap-2 rounded-2xl bg-[color:var(--ds-bg-soft)] p-3 text-xs text-[color:var(--ds-text-secondary)] sm:grid-cols-2">
+        {details.map(([label, value]) => <p key={label}><span className="font-semibold text-[color:var(--ds-text)]">{label}:</span> {value}</p>)}
+      </div>
+    </details>
+  );
 }
 
 function AgendaRow({ title, type, startsAt }: { title: string; type: string; startsAt: string }) {
   const date = new Date(startsAt);
-  const time = Number.isNaN(date.getTime()) ? "--:--" : new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(date);
-  return <div className="flex items-center gap-4 rounded-3xl border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]"><span className="flex h-12 w-14 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-sm font-semibold text-amber-800">{time}</span><div className="min-w-0"><p className="truncate text-sm font-semibold text-[color:var(--ds-text)]">{title}</p><p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">{type}</p></div></div>;
+  const label = Number.isNaN(date.getTime())
+    ? "Sem data"
+    : new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date).replace(".", "").toUpperCase();
+  return <div className="flex items-center gap-4 rounded-3xl border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]"><span className="flex h-14 w-20 shrink-0 items-center justify-center rounded-2xl bg-amber-100 px-2 text-center text-xs font-semibold leading-4 text-amber-800">{label}</span><div className="min-w-0"><p className="truncate text-sm font-semibold text-[color:var(--ds-text)]">{title}</p><p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">{type}</p></div></div>;
 }
 
 function ActionLink({ onClick, children }: { onClick: () => void; children: ReactNode }) {
@@ -907,10 +974,81 @@ function dateInRange(value: string | null | undefined, range: DateRange) {
   return date >= range.start && date <= range.end;
 }
 
+function isConfirmedCommercialSale(sale: NorwynContext["commercialSales"][number]) {
+  return sale.commercial_transaction !== false && sale.sale_confirmed === true;
+}
+
+function isRevenueEligibleBrlSale(sale: NorwynContext["commercialSales"][number]) {
+  return isConfirmedCommercialSale(sale) && sale.revenue_eligible === true && isBrlSaleForUi(sale);
+}
+
+function isStudentEligibleBrlSale(sale: NorwynContext["commercialSales"][number]) {
+  return isConfirmedCommercialSale(sale) && sale.student_eligible === true && isBrlSaleForUi(sale);
+}
+
+function isRefundOrChargeback(sale: NorwynContext["commercialSales"][number]) {
+  const status = normalizeStatusForUi(sale.status_normalizado ?? sale.status_original);
+  return status.includes("reembolso") || status.includes("chargeback");
+}
+
+function productsStudentsSummary(context: NorwynContext, snapshot: ReturnType<typeof buildOperationalOs>) {
+  const revenueSales = context.commercialSales.filter(isRevenueEligibleBrlSale);
+  const studentSales = context.commercialSales.filter(isStudentEligibleBrlSale);
+  const byBuyer = new Map<string, NorwynContext["commercialSales"]>();
+  for (const sale of studentSales) {
+    const key = String(sale.comprador_email ?? "").trim().toLowerCase();
+    if (!key) continue;
+    const list = byBuyer.get(key) ?? [];
+    list.push(sale);
+    byBuyer.set(key, list);
+  }
+  const ltvValues = [...byBuyer.values()].map((sales) => sales.filter((sale) => sale.revenue_eligible === true).reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0)).filter((value) => value > 0);
+  const repurchase = [...byBuyer.values()].filter((sales) => new Set(sales.map((sale) => sale.transaction_id ?? sale.id)).size >= 2).length;
+  const activeProducts = context.products.filter((product) => product.ativo !== false && !isTestRecordForHome([product.nome_oficial, product.produto_base, product.status])).length || snapshot.productOptions.length;
+  const students = snapshot.students.length || byBuyer.size;
+  const averageLtv = ltvValues.length ? ltvValues.reduce((sum, value) => sum + value, 0) / ltvValues.length : 0;
+  const repurchaseLabel = byBuyer.size ? `${numberLabel(repurchase)} / ${new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 1 }).format(repurchase / byBuyer.size)}` : "Sem dados";
+  return { activeProducts, students, averageLtv, repurchaseLabel, revenue: revenueSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0) };
+}
+
+function digitalHealthSummary(context: NorwynContext) {
+  const activeLandings = context.landingRegistry.filter((landing) => landing.status !== "archived" && landing.status !== "inactive").length;
+  const activeSites = new Set(context.landingRegistry.filter((landing) => landing.status !== "archived" && landing.url).map((landing) => safeHostname(landing.url))).size;
+  const openIncidents = context.growthIncidents.filter((incident) => !["resolved", "closed", "ignored"].includes(String(incident.status ?? "").toLowerCase()));
+  const blockers = openIncidents.filter((incident) => incident.severity === "BLOCKER" || incident.severity === "CRITICAL").length;
+  const healthLabel = blockers ? "Atenção" : openIncidents.length ? "Acompanhar" : "Saudável";
+  const tone: DomainTone = blockers ? "coral" : openIncidents.length ? "gold" : "green";
+  const detail = openIncidents.length ? `${openIncidents.length} incidente(s) aberto(s)` : "sem alerta real aberto";
+  return { activeLandings, activeSites, openIncidents: openIncidents.length, healthLabel, tone, detail };
+}
+
+function operationalAttentionSummary(context: NorwynContext, operation: ReturnType<typeof summarizeOperation>, digitalHealth: ReturnType<typeof digitalHealthSummary>, automations: ReturnType<typeof summarizeAutomations>) {
+  const items: Array<{ icon: typeof AlertTriangle; title: string; meta: string; description: string; tone: "neutral" | "warning" | "success" | "info" | "danger" }> = [];
+  if (operation.overdue > 0) items.push({ icon: ClipboardList, title: "Atividades vencidas", meta: `${operation.overdue} pendência(s)`, description: "Acompanhamento operacional, sem duplicar o módulo Atividades.", tone: "warning" });
+  if (digitalHealth.openIncidents > 0) items.push({ icon: ShieldCheck, title: "Saúde Digital", meta: digitalHealth.healthLabel, description: digitalHealth.detail, tone: digitalHealth.healthLabel === "Atenção" ? "warning" : "info" });
+  if (automations.attention) items.push({ icon: Bot, title: "Automações", meta: "Acompanhar", description: automations.attention, tone: "warning" });
+  if (!items.length) items.push({ icon: CheckCircle2, title: "Operação sem alerta crítico", meta: "Tudo em acompanhamento", description: "Nenhum incidente real ou atividade vencida apareceu no contexto carregado.", tone: "success" });
+  return items.slice(0, 4);
+}
+
+function canCreateActivityFromHome(context: NorwynContext) {
+  const role = functionalRoleFor(context.role);
+  if (isAdminRole(context.role) || role === "ESPECIALISTA") return true;
+  return context.allowedModules.includes("atividades") || context.allowedModules.includes("norwyn");
+}
+
+function safeHostname(value: string | null | undefined) {
+  if (!value) return "";
+  try { return new URL(value).hostname; } catch { return String(value).split("/")[0] ?? value; }
+}
+
+function isTestRecordForHome(values: Array<string | null | undefined>) {
+  return values.some((value) => /\b(test|qa|demo|sandbox)\b/i.test(String(value ?? "")));
+}
 function executiveBusinessSummary(context: NorwynContext, range: DateRange) {
-  const sales = context.commercialSales.filter((sale) => isBrlSaleForUi(sale) && dateInRange(sale.data_aprovacao ?? sale.data_compra ?? sale.last_event_at, range));
-  const confirmedSales = sales.filter((sale) => !normalizeStatusForUi(sale.status_normalizado ?? sale.status_original).includes("reembolso"));
-  const students = new Set(confirmedSales.map((sale) => sale.comprador_email).filter(Boolean));
+  const confirmedSales = context.commercialSales.filter((sale) => isRevenueEligibleBrlSale(sale) && dateInRange(sale.data_aprovacao ?? sale.data_compra ?? sale.last_event_at, range));
+  const studentSales = context.commercialSales.filter((sale) => isStudentEligibleBrlSale(sale) && dateInRange(sale.data_aprovacao ?? sale.data_compra ?? sale.last_event_at, range));
+  const students = new Set(studentSales.map((sale) => sale.comprador_email).filter(Boolean));
   const campaigns = context.campaigns.filter((campaign) => {
     const status = normalizeStatusForUi(campaign.status);
     return !status.includes("arquivado") && !status.includes("encerrado") && (dateInRange(campaign.starts_at ?? campaign.updated_at, range) || dateInRange(campaign.ends_at ?? campaign.updated_at, range));
@@ -927,9 +1065,8 @@ function executiveBusinessSummary(context: NorwynContext, range: DateRange) {
 }
 
 function financeSummary(context: NorwynContext, range: DateRange) {
-  const sales = context.commercialSales.filter((sale) => isBrlSaleForUi(sale) && dateInRange(sale.data_aprovacao ?? sale.data_compra ?? sale.last_event_at, range));
-  const refunds = sales.filter((sale) => normalizeStatusForUi(sale.status_normalizado ?? sale.status_original).includes("reembolso"));
-  const confirmedSales = sales.filter((sale) => !refunds.includes(sale));
+  const revenueSales = context.commercialSales.filter((sale) => isRevenueEligibleBrlSale(sale) && dateInRange(sale.data_aprovacao ?? sale.data_compra ?? sale.last_event_at, range));
+  const refunds = context.commercialSales.filter((sale) => isBrlSaleForUi(sale) && isRefundOrChargeback(sale) && dateInRange(sale.data_reembolso ?? sale.data_aprovacao ?? sale.data_compra ?? sale.last_event_at, range));
   const adsRows = context.adsRows.filter((row) => dateInRange(row.data_referencia ?? row.imported_at, range));
   const financeRows = context.financeLancamentos.filter((entry) => entry.status !== "cancelado");
   const entries = financeRows
@@ -947,22 +1084,12 @@ function financeSummary(context: NorwynContext, range: DateRange) {
   const nextPayments = financeRows
     .filter((entry) => entry.tipo === "saida" && ["previsto", "pendente", "aberto"].includes(normalizeStatusForUi(entry.status)) && dateBetweenLoose((entry as any).vencimento ?? entry.data_pagamento ?? entry.mes_competencia, now, nextLimit))
     .reduce((sum, entry) => sum + Number(entry.valor ?? 0), 0);
-  const salesValue = confirmedSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
+  const salesValue = revenueSales.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
   const refundValue = refunds.reduce((sum, sale) => sum + Number(sale.valor_bruto ?? 0), 0);
   const adsSpend = adsRows.reduce((sum, row) => sum + Number(row.valor_gasto ?? 0), 0);
-  const hasAnyData = sales.length || adsRows.length || expenses || entries || nextReceipts || nextPayments;
+  const hasAnyData = revenueSales.length || adsRows.length || expenses || entries || nextReceipts || nextPayments || refunds.length;
   return { sales: salesValue, refunds: refundValue, adsSpend, expenses, entries, nextReceipts, nextPayments, estimated: hasAnyData ? salesValue + entries - refundValue - adsSpend - expenses : null };
 }
-function buildHumanInsight(context: NorwynContext, range: DateRange): { text: string; tone: "info" | "warning" | "success" } {
-  const adsSpend = context.adsRows.filter((row) => dateInRange(row.data_referencia ?? row.imported_at, range)).reduce((sum, row) => sum + Number(row.valor_gasto ?? 0), 0);
-  const sales = context.commercialSales.filter((sale) => isBrlSaleForUi(sale) && dateInRange(sale.data_aprovacao ?? sale.data_compra ?? sale.last_event_at, range));
-  const posts = context.posts.filter((post) => dateInRange(post.data_postagem, range));
-  const reach = posts.reduce((sum, post) => sum + Number(post.alcance ?? 0), 0);
-  if (adsSpend > 0 && !sales.length) return { tone: "warning", text: "Existe investimento em Ads no período, mas nenhuma venda comercial confirmada no mesmo recorte. Vale validar campanha, checkout e rastreamento antes de aumentar verba." };
-  if (reach > 0) return { tone: "success", text: `Instagram gerou ${numberLabel(reach)} de alcance em ${range.label}. Use os conteúdos mais fortes como ponto de partida para próximas decisões.` };
-  return { tone: "info", text: "Ainda não há um sinal forte e confiável para destacar neste período. O melhor próximo passo é acompanhar Agenda, Instagram e vendas antes de decidir uma nova ação." };
-}
-
 function isBrlSaleForUi(sale: NorwynContext["commercialSales"][number]) {
   return String(sale.moeda ?? "BRL").toUpperCase() === "BRL";
 }
@@ -1064,6 +1191,8 @@ function instagramSummary(context: NorwynContext, range: DateRange) {
   const has30 = Boolean(summary?.net_growth_30d != null || daily.length >= 30);
   const health = instagramAudienceHealth({ netDay, net7, net30, has7, has30, lossDays30, gainDays30, negativeStreak, reach, interactions });
   const highlight = topInstagramPost(posts);
+  const association = instagramTemporalAssociation(posts, daily);
+  const monthInsights = instagramMonthInsights(posts);
   return {
     posts: posts.length,
     reach,
@@ -1086,6 +1215,8 @@ function instagramSummary(context: NorwynContext, range: DateRange) {
     audienceTitle: health.title,
     insight: instagramInsight({ netDay, net7, net30, has7, has30, negativeStreak, reach, interactions }),
     highlight,
+    association,
+    monthInsights,
   };
 }
 function deltaFromDaily(rows: any[], days: number) {
@@ -1130,6 +1261,80 @@ function topInstagramPost(posts: NorwynContext["posts"]) {
   };
 }
 
+function instagramTemporalAssociation(posts: NorwynContext["posts"], daily: any[]) {
+  if (posts.length < 3 || daily.length < 7) return null;
+  const gains = daily
+    .map((row: any) => ({ date: String(row.snapshot_date), gain: Number(row.net_change_day ?? 0) }))
+    .filter((row) => row.gain > 0)
+    .sort((a, b) => b.gain - a.gain);
+  const bestGain = gains[0];
+  if (!bestGain) return null;
+  const related = posts
+    .filter((post) => {
+      const postDate = parseDateOnly(post.data_postagem);
+      const gainDate = parseDateOnly(bestGain.date);
+      if (!postDate || !gainDate) return false;
+      const diffDays = Math.abs((gainDate.getTime() - postDate.getTime()) / 86400000);
+      return diffDays <= 2;
+    })
+    .sort((a, b) => Number(b.alcance ?? 0) - Number(a.alcance ?? 0))[0];
+  if (!related) return null;
+  return `Dado observado: o maior crescimento diário foi ${signedNumberLabel(bestGain.gain)} em ${formatShortDate(bestGain.date)}. Possível associação: aconteceu próximo de ${related.tipo ?? "um conteúdo"} publicado em ${formatShortDate(related.data_postagem)}, sem afirmar causalidade.`;
+}
+
+function instagramMonthInsights(posts: NorwynContext["posts"]) {
+  if (posts.length < 5) {
+    return [
+      { icon: CalendarClock, tone: "blue" as DomainTone, label: "Insights do mês", value: "Sinal atual", detail: "amostra ainda pequena" },
+      { icon: Megaphone, tone: "coral" as DomainTone, label: "Formato", value: "A confirmar", detail: "não há base suficiente" },
+      { icon: Sparkles, tone: "purple" as DomainTone, label: "Horário", value: "A confirmar", detail: "aguardando mais publicações" },
+    ];
+  }
+  const byDay = bestGroup(posts, (post) => dayNameFromDate(post.data_postagem), (post) => Number(post.alcance ?? 0));
+  const byHour = bestGroup(posts.filter((post) => post.hora_postagem), (post) => hourLabel(post.hora_postagem), (post) => Number(post.likes ?? 0) + Number(post.comentarios ?? 0) + Number(post.compartilhamentos ?? 0));
+  const byFormat = bestGroup(posts, (post) => post.tipo ?? "Outro", (post) => Number(post.alcance ?? 0));
+  return [
+    { icon: CalendarClock, tone: "blue" as DomainTone, label: "Melhor dia por alcance", value: byDay?.label ?? "A confirmar", detail: byDay ? `${numberLabel(Math.round(byDay.average))} de alcance médio` : "sem amostra suficiente" },
+    { icon: Sparkles, tone: "purple" as DomainTone, label: "Melhor horário por interação", value: byHour?.label ?? "A confirmar", detail: byHour ? `${numberLabel(Math.round(byHour.average))} interações médias` : "sem horário suficiente" },
+    { icon: Megaphone, tone: "coral" as DomainTone, label: "Melhor formato por alcance", value: byFormat?.label ?? "A confirmar", detail: byFormat ? `${numberLabel(Math.round(byFormat.average))} de alcance médio` : "sem amostra suficiente" },
+  ];
+}
+
+function bestGroup<T>(items: T[], groupBy: (item: T) => string, valueOf: (item: T) => number) {
+  const groups = new Map<string, { total: number; count: number }>();
+  for (const item of items) {
+    const label = groupBy(item);
+    if (!label) continue;
+    const current = groups.get(label) ?? { total: 0, count: 0 };
+    current.total += valueOf(item);
+    current.count += 1;
+    groups.set(label, current);
+  }
+  return [...groups.entries()]
+    .filter(([, value]) => value.count >= 2)
+    .map(([label, value]) => ({ label, average: value.total / value.count, count: value.count }))
+    .sort((a, b) => b.average - a.average)[0] ?? null;
+}
+
+function dayNameFromDate(value: string | null | undefined) {
+  const date = parseDateOnly(value);
+  if (!date) return "";
+  const label = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(date);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function hourLabel(value: string | null | undefined) {
+  if (!value) return "";
+  const match = String(value).match(/(\d{1,2})/);
+  if (!match) return "";
+  return `${match[1].padStart(2, "0")}h`;
+}
+
+function parseDateOnly(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(String(value).includes("T") ? value : `${value}T12:00:00-03:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 function freshnessLabelFromDate(value: string, stale: boolean) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return stale ? "Dados desatualizados" : "Atualizado recentemente";
@@ -1305,35 +1510,3 @@ function percent(value: number | null) {
 
 const activePill = "h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white";
 const idlePill = "h-8 rounded-md px-3 text-xs font-bold text-brand-teal hover:bg-brand-cream";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
