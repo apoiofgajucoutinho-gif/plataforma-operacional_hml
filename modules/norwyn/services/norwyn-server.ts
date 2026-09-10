@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
 import type { NorwynContext } from "@/modules/norwyn/types";
+import { getSpecialistLandingApprovalsForHome } from "@/modules/landing-pages/services/landing-pages-server";
 const commercialSalesSelect = "id, transaction_id, produto_id, hotmart_product_id, produto_nome, comprador_nome, comprador_email, status_original, status_normalizado, grupo_comercial, commercial_transaction, sale_confirmed, revenue_eligible, student_eligible, sale_comparable, event_class, forma_pagamento, moeda, valor_bruto, data_compra, data_aprovacao, data_reembolso, source_sck, imported_at, last_event_at, metadata";
 
 type SupabaseResult<T = any> = { data: T[] | null; error: any; pagination?: { pageSize: number; pages: number; rows: number } };
@@ -86,6 +87,7 @@ function emptyContext(partial?: Partial<NorwynContext>): NorwynContext {
     signals: [],
     campaigns: [],
     landingRegistry: [],
+    landingApprovals: [],
     growthIncidents: [],
     growthPlaybookRules: [],
     campaignMaterials: [],
@@ -582,6 +584,8 @@ export async function getNorwynContext(): Promise<NorwynContext> {
         .limit(1000)
     : { data: [] };
 
+  const landingApprovals = await getSpecialistLandingApprovalsForHome(dataClient, membership.tenant_id);
+
   const updatedAt = [
     instagramFollowerGrowthSummary?.updated_at,
     instagramFollowerGrowthSummary?.latest_date,
@@ -670,6 +674,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     signals: signalsResult.data ?? [],
     campaigns: campaignsResult.data ?? [],
     landingRegistry: landingRegistryResult.data ?? [],
+    landingApprovals,
     growthIncidents: growthIncidentsResult.data ?? [],
     growthPlaybookRules: growthPlaybookRulesResult.data ?? [],
     campaignMaterials: campaignMaterialsResult.data ?? [],
@@ -762,6 +767,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     lifecycleInternalTestContacts: lifecycleInternalTestContactsResult.data ?? [],
   };
 }
+
 
 
 

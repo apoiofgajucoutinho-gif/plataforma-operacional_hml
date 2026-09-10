@@ -57,6 +57,7 @@ const defaultNavigation: NavigationItem[] = [
   { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Negócio" },
   { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Negócio" },
   { label: "Presença", href: "/presence", icon: MonitorSmartphone, key: "presence", module: "norwyn", group: "Avançado" },
+  { label: "Landing Pages", href: "/landing-pages", icon: LayoutDashboard, key: "landing-pages", module: "landing-pages", group: "Administração" },
   { label: "Suporte", href: "/ocorrencias", icon: AlertTriangle, key: "suporte", module: "ocorrencias", group: "Operação" },
   { label: "Alunos", href: "/produtos-alunos?view=students", icon: UsersRound, key: "alunos", module: "norwyn", group: "Operação" },
   { label: "Usuários", href: "/admin", icon: Settings, key: "admin", module: "admin", group: "Administração" },
@@ -325,6 +326,7 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     </div>
   );
 }
+
 
 
 

@@ -13,6 +13,7 @@ export const readyModules = [
   "automacoes",
   "validacao",
   "presence",
+  "landing-pages",
   "ocorrencias",
   "adocao",
   "atividades",
@@ -34,9 +35,11 @@ export const allModules = [
   "automacoes",
   "validacao",
   "presence",
+  "landing-pages",
   "ocorrencias",
   "adocao",
   "atividades",
   "relatorios",
   "admin",
 ];
+

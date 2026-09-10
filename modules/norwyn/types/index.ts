@@ -1,5 +1,6 @@
 import type { InstagramFollowerDailyMetric, InstagramFollowerGrowthSummary, InstagramInteraction, InstagramPostMetric } from "@/modules/instagram/types";
 import type { ContentCaptureStatus } from "./content-capture-status";
+import type { LandingApprovalSummary } from "@/modules/landing-pages/types";
 
 export type NorwynCommercialSale = {
   id: string;
@@ -1101,6 +1102,7 @@ export type NorwynContext = {
   signals: NorwynSignal[];
   campaigns: NorwynCampaign[];
   landingRegistry: NorwynLandingRegistry[];
+  landingApprovals: LandingApprovalSummary[];
   growthIncidents: NorwynGrowthIncident[];
   growthPlaybookRules: NorwynGrowthPlaybookRule[];
   campaignMaterials: NorwynCampaignMaterial[];
@@ -1135,6 +1137,7 @@ export type NorwynContext = {
   telegramSchedules: Array<Record<string, any>>;
   telegramSends: Array<Record<string, any>>;
 };
+
 
 
 

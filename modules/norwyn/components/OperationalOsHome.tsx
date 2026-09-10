@@ -19,6 +19,7 @@ import {
 import { functionalRoleFor, isAdminRole } from "@/lib/auth/roles";
 import { buildOperationalOs, type FunnelBlueprint, type OsActivity, type Product360, type Student360 } from "@/modules/norwyn/services/operational-os";
 import type { NorwynContext } from "@/modules/norwyn/types";
+import { SpecialistLandingApprovals } from "@/modules/landing-pages/components/SpecialistLandingApprovals";
 
 type ExecutivePeriod = "month" | "previousMonth" | "last30" | "year" | "all";
 
@@ -84,6 +85,8 @@ export function OperationalOsHome({ context, goTo }: { context: NorwynContext; g
           </div>
         }
       />
+
+      {visibleProfile === "specialist" ? <SpecialistLandingApprovals items={context.landingApprovals ?? []} /> : null}
 
       {visibleProfile === "specialist" ? <JulianaHome snapshot={snapshot} context={context} periodRange={periodRange} goTo={goTo} /> : <RyanHome snapshot={snapshot} />}
 
@@ -1302,6 +1305,7 @@ function percent(value: number | null) {
 
 const activePill = "h-8 rounded-md bg-brand-teal px-3 text-xs font-bold text-white";
 const idlePill = "h-8 rounded-md px-3 text-xs font-bold text-brand-teal hover:bg-brand-cream";
+
 
 
 

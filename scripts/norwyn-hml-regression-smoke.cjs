@@ -28,7 +28,9 @@ async function checkHttp(baseUrl) {
     { path: "/automacoes", allowRedirectToLogin: true },
     { path: "/validacao", allowRedirectToLogin: true },
     { path: "/presence", allowRedirectToLogin: true },
+    { path: "/landing-pages", allowRedirectToLogin: true },
     { path: "/hml/lp/aasi-premium?debug=1&utm_source=regression&utm_medium=hml&sck=regression_smoke", requireOk: true },
+    { path: "/hml/lp/aasi-premium-v2?utm_source=regression&utm_medium=hml&sck=regression_smoke", requireOk: true },
   ];
 
   for (const route of routes) {
@@ -43,13 +45,16 @@ async function checkHttp(baseUrl) {
       const html = await response.text();
       assert.match(html, /noindex/i, "AASI HML page must remain noindex");
       assert.match(html, /nofollow/i, "AASI HML page must remain nofollow");
+      if (route.path.includes("aasi-premium-v2")) {
+        assert.match(html, /Forma(c|ç)(a|ã)o AASI Premium/i, "AASI V2 should render the configured landing content");
+      }
     }
   }
 
   const tracking = await fetch(`${normalizedBase}/api/norwyn/lp-events`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "landing_view", environment: "hml", landing_key: "aasi-premium", sck: "regression_smoke" }),
+    body: JSON.stringify({ name: "landing_view", environment: "hml", landing_key: "aasi-premium-v2", landing_version: "v0.2", sck: "regression_smoke" }),
   });
   const payload = await tracking.json().catch(() => null);
   assert.equal(tracking.status, 200, "LP tracking endpoint should accept HML event");
@@ -64,4 +69,3 @@ async function checkHttp(baseUrl) {
   console.error(error);
   process.exit(1);
 });
-
