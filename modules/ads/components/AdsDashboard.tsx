@@ -23,10 +23,11 @@ import { clsx } from "clsx";
 import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
 import type { ExportColumn } from "@/lib/client/table-export";
-import type { AdsContext, AdsDailyRow, AdsPerformanceStatus } from "@/modules/ads/types";
+import type { AdsContext, AdsDailyRow, AdsGranularity, AdsPerformanceStatus } from "@/modules/ads/types";
 
 type TabKey = "overview" | "performance" | "details" | "glossary" | "analysis";
-type PeriodFilter = "today" | "7d" | "15d" | "30d" | "all";
+type PeriodFilter = "30d" | "90d" | "6m" | "12m" | "custom";
+type SearchLike = Record<string, string | string[] | undefined>;
 type SortKey =
   | "data_referencia"
   | "campanha"
@@ -44,11 +45,17 @@ type SortKey =
 const DETAILS_PAGE_SIZE = 20;
 
 const periodFilters: Array<{ value: PeriodFilter; label: string }> = [
-  { value: "today", label: "Hoje" },
-  { value: "7d", label: "7 dias" },
-  { value: "15d", label: "15 dias" },
   { value: "30d", label: "30 dias" },
-  { value: "all", label: "Tudo" },
+  { value: "90d", label: "90 dias" },
+  { value: "6m", label: "6 meses" },
+  { value: "12m", label: "12 meses" },
+  { value: "custom", label: "Personalizado" },
+];
+
+const granularityOptions: Array<{ value: AdsGranularity; label: string }> = [
+  { value: "day", label: "Dia" },
+  { value: "week", label: "Semana" },
+  { value: "month", label: "Mês" },
 ];
 
 const tabs: Array<{ value: TabKey; label: string; icon: typeof BarChart3 }> = [
@@ -167,27 +174,6 @@ function truncate(value: string | null | undefined, size: number) {
   return text.length > size ? `${text.slice(0, size)}...` : text;
 }
 
-function applyPeriod(rows: AdsDailyRow[], period: PeriodFilter) {
-  if (period === "all") return rows;
-
-  const end = new Date();
-  end.setHours(23, 59, 59, 999);
-  const start = new Date(end);
-
-  if (period === "today") {
-    start.setHours(0, 0, 0, 0);
-  } else {
-    const days = period === "7d" ? 7 : period === "15d" ? 15 : 30;
-    start.setDate(end.getDate() - days);
-    start.setHours(0, 0, 0, 0);
-  }
-
-  return rows.filter((row) => {
-    const date = parseDate(row.data_referencia);
-    return date >= start && date <= end;
-  });
-}
-
 function aggregate(rows: AdsDailyRow[]) {
   const totSpend = rows.reduce((sum, row) => sum + row.valor_gasto, 0);
   const totImp = rows.reduce((sum, row) => sum + row.impressoes, 0);
@@ -227,20 +213,63 @@ function groupSum<T extends string>(
   return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
 }
 
-function groupByDay(rows: AdsDailyRow[]) {
-  const map = new Map<string, { spend: number; reach: number; imp: number; clicks: number }>();
+function startOfWeek(date: Date) {
+  const copy = new Date(date);
+  const day = copy.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  copy.setDate(copy.getDate() + diff);
+  return copy;
+}
+
+function groupByPeriod(rows: AdsDailyRow[], granularity: AdsGranularity) {
+  const map = new Map<string, { label: string; spend: number; reach: number; imp: number; clicks: number }>();
   rows.forEach((row) => {
-    const item = map.get(row.data_referencia) ?? { spend: 0, reach: 0, imp: 0, clicks: 0 };
+    const date = parseDate(row.data_referencia);
+    let key = row.data_referencia;
+    let label = formatDate(row.data_referencia).slice(0, 5);
+
+    if (granularity === "week") {
+      const week = startOfWeek(date);
+      key = toIsoDate(week);
+      label = `Sem. ${formatDate(key).slice(0, 5)}`;
+    } else if (granularity === "month") {
+      key = row.data_referencia.slice(0, 7);
+      label = formatMonthKeyOption(key);
+    }
+
+    const item = map.get(key) ?? { label, spend: 0, reach: 0, imp: 0, clicks: 0 };
     item.spend += row.valor_gasto;
     item.reach += row.alcance;
     item.imp += row.impressoes;
     item.clicks += row.cliques;
-    map.set(row.data_referencia, item);
+    map.set(key, item);
   });
 
   return [...map.entries()]
-    .map(([date, item]) => ({ date, ...item, ctr: item.imp > 0 ? (item.clicks / item.imp) * 100 : 0 }))
-    .sort((left, right) => left.date.localeCompare(right.date));
+    .map(([key, item]) => ({ key, ...item, ctr: item.imp > 0 ? (item.clicks / item.imp) * 100 : 0 }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function toIsoDate(date: Date) {
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+
+function granularityLabel(value: AdsGranularity) {
+  return value === "day" ? "Dia" : value === "week" ? "Semana" : "Mês";
+}
+
+function adsHref(basePath: string, changes: Record<string, string | null | undefined>, current?: SearchLike) {
+  const params = new URLSearchParams();
+  Object.entries(current ?? {}).forEach(([key, value]) => {
+    const first = Array.isArray(value) ? value[0] : value;
+    if (first) params.set(key, first);
+  });
+  if (basePath === "/marketing") params.set("view", "ads");
+  Object.entries(changes).forEach(([key, value]) => {
+    if (value == null || value === "") params.delete(key);
+    else params.set(key, value);
+  });
+  return `${basePath}?${params.toString()}`;
 }
 
 function statusTone(status: string) {
@@ -251,57 +280,29 @@ function statusTone(status: string) {
   return "bg-brand-cream text-brand-teal/70 border-brand-sand";
 }
 
-export function AdsDashboard({ context }: { context: AdsContext }) {
+export function AdsDashboard({ context, basePath = "/ads", searchParams }: { context: AdsContext; basePath?: string; searchParams?: SearchLike }) {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
-  const [period, setPeriod] = useState<PeriodFilter>("7d");
-  const [year, setYear] = useState("");
-  const [month, setMonth] = useState("");
   const [campaign, setCampaign] = useState("");
   const [status, setStatus] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("data_referencia");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
+  const period = context.period.key;
+  const granularity = context.period.granularity;
 
   const campaigns = useMemo(
     () => [...new Set(context.rows.map((row) => row.campanha).filter(Boolean))].sort(),
     [context.rows],
   );
 
-  const years = useMemo(
-    () => [...new Set(context.rows.map((row) => parseDate(row.data_referencia).getFullYear().toString()))].sort().reverse(),
-    [context.rows],
-  );
-
-  const months = useMemo(() => {
-    const available = context.rows
-      .filter((row) => !year || parseDate(row.data_referencia).getFullYear().toString() === year)
-      .map((row) => {
-        const date = parseDate(row.data_referencia);
-        const itemYear = date.getFullYear().toString();
-        const itemMonth = String(date.getMonth() + 1).padStart(2, "0");
-        return { value: `${itemYear}-${itemMonth}`, year: itemYear, month: itemMonth };
-      });
-    const unique = new Map<string, { value: string; year: string; month: string }>();
-    available.forEach((item) => unique.set(item.value, item));
-
-    return [...unique.values()].sort((left, right) => left.value.localeCompare(right.value));
-  }, [context.rows, year]);
-
   const filteredRows = useMemo(() => {
-    const periodRows = applyPeriod(context.rows, period);
-
-    return periodRows.filter((row) => {
-      const date = parseDate(row.data_referencia);
-      const rowYear = date.getFullYear().toString();
-      const rowMonth = String(date.getMonth() + 1).padStart(2, "0");
-      const yearMatch = !year || rowYear === year;
-      const monthMatch = !month || `${rowYear}-${rowMonth}` === month;
+    return context.rows.filter((row) => {
       const campaignMatch = !campaign || row.campanha === campaign;
       const statusMatch = !status || row.performance_status === status;
 
-      return yearMatch && monthMatch && campaignMatch && statusMatch;
+      return campaignMatch && statusMatch;
     });
-  }, [campaign, context.rows, month, period, status, year]);
+  }, [campaign, context.rows, status]);
 
   const uniqueDates = new Set(context.rows.map((row) => row.data_referencia));
   const hasAccumulatedWarning = context.rows.length > 0 && uniqueDates.size <= 1;
@@ -314,12 +315,12 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         module: "ads",
-        pagePath: "/ads",
+        pagePath: basePath === "/marketing" ? "/marketing?view=ads" : "/ads",
         pageLabel: `Ads: ${label}`,
       }),
       keepalive: true,
     });
-  }, [activeTab]);
+  }, [activeTab, basePath]);
 
   if (context.diagnostic) {
     return (
@@ -363,26 +364,14 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
 
       <Filters
         period={period}
-        year={year}
-        month={month}
+        granularity={granularity}
+        basePath={basePath}
+        searchParams={searchParams}
+        start={context.period.start}
+        end={context.period.end}
         campaign={campaign}
         status={status}
-        years={years}
-        months={months}
         campaigns={campaigns}
-        onPeriod={(next) => {
-          setPeriod(next);
-          setPage(1);
-        }}
-        onYear={(next) => {
-          setYear(next);
-          setMonth("");
-          setPage(1);
-        }}
-        onMonth={(next) => {
-          setMonth(next);
-          setPage(1);
-        }}
         onCampaign={(next) => {
           setCampaign(next);
           setPage(1);
@@ -403,9 +392,9 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
         </Card>
       ) : null}
 
-      <PeriodSummary rows={filteredRows} totalRows={context.rows.length} period={period} year={year} month={month} />
+      <PeriodSummary rows={filteredRows} totalRows={context.rows.length} period={context.period} />
 
-      {activeTab === "overview" ? <OverviewTab rows={filteredRows} /> : null}
+      {activeTab === "overview" ? <OverviewTab rows={filteredRows} granularity={granularity} /> : null}
       {activeTab === "performance" ? <PerformanceTab rows={filteredRows} /> : null}
       {activeTab === "details" ? (
         <DetailsTab
@@ -429,7 +418,6 @@ export function AdsDashboard({ context }: { context: AdsContext }) {
     </section>
   );
 }
-
 function Header({ updatedAt }: { updatedAt: string | null }) {
   return (
     <header className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -440,146 +428,139 @@ function Header({ updatedAt }: { updatedAt: string | null }) {
           KPIs, performance, detalhamento e análise de anúncios pagos migrados da aba Ads para o Supabase.
         </p>
       </div>
-      <div className="text-sm font-semibold text-brand-teal/55">Base atualizada em {formatDateTime(updatedAt)}</div>
+      <div className="text-sm font-semibold text-brand-teal/55">Dados atualizados em {formatDateTime(updatedAt)}</div>
     </header>
   );
 }
 
 function Filters({
   period,
-  year,
-  month,
+  granularity,
+  basePath,
+  searchParams,
+  start,
+  end,
   campaign,
   status,
-  years,
-  months,
   campaigns,
-  onPeriod,
-  onYear,
-  onMonth,
   onCampaign,
   onStatus,
 }: {
   period: PeriodFilter;
-  year: string;
-  month: string;
+  granularity: AdsGranularity;
+  basePath: string;
+  searchParams?: SearchLike;
+  start: string;
+  end: string;
   campaign: string;
   status: string;
-  years: string[];
-  months: Array<{ value: string; year: string; month: string }>;
   campaigns: string[];
-  onPeriod: (value: PeriodFilter) => void;
-  onYear: (value: string) => void;
-  onMonth: (value: string) => void;
   onCampaign: (value: string) => void;
   onStatus: (value: string) => void;
 }) {
   return (
-    <Card className="flex flex-wrap items-center gap-2 p-4">
-      <span className="mr-1 text-xs font-bold uppercase text-brand-clay">Período</span>
-      {periodFilters.map((filter) => (
-        <button
-          key={filter.value}
-          type="button"
-          onClick={() => onPeriod(filter.value)}
-          className={clsx(
-            "h-9 rounded-full border px-4 text-sm font-bold transition",
-            period === filter.value
-              ? "border-brand-clay bg-brand-clay text-white"
-              : "border-[#E9CBD1] bg-white text-brand-teal hover:bg-[#FFF7F8]",
-          )}
-        >
-          {filter.label}
+    <Card className="space-y-4 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="mr-1 text-xs font-bold uppercase text-brand-clay">Período</span>
+        {periodFilters.map((filter) => (
+          <a
+            key={filter.value}
+            href={adsHref(basePath, { period: filter.value, granularity: filter.value === "30d" ? "day" : "month", start: null, end: null }, searchParams)}
+            className={clsx(
+              "inline-flex h-9 items-center rounded-full border px-4 text-sm font-bold transition",
+              period === filter.value
+                ? "border-brand-clay bg-brand-clay text-white"
+                : "border-[#E9CBD1] bg-white text-brand-teal hover:bg-[#FFF7F8]",
+            )}
+          >
+            {filter.label}
+          </a>
+        ))}
+
+        <span className="mx-2 hidden h-8 w-px bg-[#E9CBD1] md:block" />
+        <span className="mr-1 text-xs font-bold uppercase text-brand-clay">Agrupar por</span>
+        {granularityOptions.map((option) => (
+          <a
+            key={option.value}
+            href={adsHref(basePath, { granularity: option.value }, searchParams)}
+            className={clsx(
+              "inline-flex h-9 items-center rounded-full border px-4 text-sm font-bold transition",
+              granularity === option.value
+                ? "border-brand-teal bg-brand-teal text-white"
+                : "border-[#E9CBD1] bg-white text-brand-teal hover:bg-[#FFF7F8]",
+            )}
+          >
+            {option.label}
+          </a>
+        ))}
+      </div>
+
+      <form action={basePath} method="get" className="flex flex-wrap items-end gap-2">
+        {basePath === "/marketing" ? <input type="hidden" name="view" value="ads" /> : null}
+        <input type="hidden" name="period" value="custom" />
+        <input type="hidden" name="granularity" value={granularity} />
+        <label className="grid gap-1 text-xs font-bold uppercase text-brand-clay">
+          Data inicial
+          <input name="start" type="date" defaultValue={start} className="h-10 rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal" />
+        </label>
+        <label className="grid gap-1 text-xs font-bold uppercase text-brand-clay">
+          Data final
+          <input name="end" type="date" defaultValue={end} className="h-10 rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal" />
+        </label>
+        <button type="submit" className="h-10 rounded-md border border-brand-clay bg-white px-4 text-sm font-bold text-brand-clay hover:bg-[#FFF7F8]">
+          Aplicar personalizado
         </button>
-      ))}
 
-      <span className="mx-2 hidden h-8 w-px bg-[#E9CBD1] md:block" />
+        <span className="mx-2 hidden h-8 w-px bg-[#E9CBD1] md:block" />
 
-      <select
-        value={year}
-        onChange={(event) => onYear(event.target.value)}
-        className="h-10 min-w-[150px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
-      >
-        <option value="">Todos os Anos</option>
-        {years.map((item) => (
-          <option key={item} value={item}>
-            {item}
-          </option>
-        ))}
-      </select>
+        <select
+          value={campaign}
+          onChange={(event) => onCampaign(event.target.value)}
+          className="h-10 min-w-[220px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
+        >
+          <option value="">Todas as Campanhas</option>
+          {campaigns.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
 
-      <select
-        value={month}
-        onChange={(event) => onMonth(event.target.value)}
-        className="h-10 min-w-[160px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
-      >
-        <option value="">Todos os Meses</option>
-        {months.map((item) => (
-          <option key={item.value} value={item.value}>
-            {formatMonthOption(item.year, item.month)}
-          </option>
-        ))}
-      </select>
-
-      <select
-        value={campaign}
-        onChange={(event) => onCampaign(event.target.value)}
-        className="h-10 min-w-[220px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
-      >
-        <option value="">Todas as Campanhas</option>
-        {campaigns.map((item) => (
-          <option key={item} value={item}>
-            {item}
-          </option>
-        ))}
-      </select>
-
-      <select
-        value={status}
-        onChange={(event) => onStatus(event.target.value)}
-        className="h-10 min-w-[180px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
-      >
-        {statusOptions.map((item) => (
-          <option key={item.value || "all"} value={item.value}>
-            {item.label}
-          </option>
-        ))}
-      </select>
+        <select
+          value={status}
+          onChange={(event) => onStatus(event.target.value)}
+          className="h-10 min-w-[180px] rounded-md border border-[#E9CBD1] bg-white px-3 text-sm font-bold text-brand-teal"
+        >
+          {statusOptions.map((item) => (
+            <option key={item.value || "all"} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </form>
     </Card>
   );
 }
-
 function PeriodSummary({
   rows,
   totalRows,
   period,
-  year,
-  month,
 }: {
   rows: AdsDailyRow[];
   totalRows: number;
-  period: PeriodFilter;
-  year: string;
-  month: string;
+  period: AdsContext["period"];
 }) {
-  const label = periodFilters.find((filter) => filter.value === period)?.label ?? "Tudo";
-  const calendarLabel = year || month ? `, ${month ? formatMonthKeyOption(month) : `ano ${year}`}` : "";
-  const dates = rows.map((row) => row.data_referencia).sort();
-
   return (
     <p className="text-sm font-semibold text-brand-teal/60">
-      {rows.length} de {totalRows} registros no filtro {label}
-      {calendarLabel}
-      {dates.length ? `, de ${formatDate(dates[0])} a ${formatDate(dates.at(-1) ?? dates[0])}` : ""}.
+      Período analisado: {formatDate(period.start)} a {formatDate(period.end)} · {rows.length} de {totalRows} registros no intervalo · agrupado por {granularityLabel(period.granularity)}.
     </p>
   );
 }
-
-function OverviewTab({ rows }: { rows: AdsDailyRow[] }) {
+function OverviewTab({ rows, granularity }: { rows: AdsDailyRow[]; granularity: AdsGranularity }) {
   const metrics = aggregate(rows);
   const statusCount = groupSum(rows, (row) => row.performance_status, () => 1);
   const spendByCampaign = groupSum(rows, (row) => row.campanha, (row) => row.valor_gasto).slice(0, 8);
-  const daily = groupByDay(rows);
+  const grouped = groupByPeriod(rows, granularity);
 
   return (
     <div className="space-y-5">
@@ -608,18 +589,18 @@ function OverviewTab({ rows }: { rows: AdsDailyRow[] }) {
         <DonutChart title="Status de Performance" items={statusCount} formatter={(value) => `${formatNumber(value)} registros`} />
       </div>
 
-      <SectionTitle icon={<LineChart className="h-4 w-4" />} title="Evolução Diária" />
-      <VerticalBarChart title="Investimento Diário" items={daily.map((day) => ({ label: formatDate(day.date).slice(0, 5), value: day.spend }))} formatter={formatMoney} tall />
+      <SectionTitle icon={<LineChart className="h-4 w-4" />} title={`Evolução por ${granularityLabel(granularity)}`} />
+      <VerticalBarChart title={`Investimento por ${granularityLabel(granularity)}`} items={grouped.map((item) => ({ label: item.label, value: item.spend }))} formatter={formatMoney} tall />
       <div className="grid gap-4 xl:grid-cols-2">
         <TwoMetricBars
-          title="Alcance vs Impressões (Diário)"
-          items={daily.map((day) => ({ label: formatDate(day.date).slice(0, 5), valueA: day.reach, valueB: day.imp }))}
+          title={`Alcance vs Impressões (${granularityLabel(granularity)})`}
+          items={grouped.map((item) => ({ label: item.label, valueA: item.reach, valueB: item.imp }))}
           labelA="Alcance"
           labelB="Impressões"
         />
         <VerticalBarChart
-          title="CTR Diário"
-          items={daily.map((day) => ({ label: formatDate(day.date).slice(0, 5), value: day.ctr }))}
+          title={`CTR por ${granularityLabel(granularity)}`}
+          items={grouped.map((item) => ({ label: item.label, value: item.ctr }))}
           formatter={(value) => formatPct(value)}
         />
       </div>

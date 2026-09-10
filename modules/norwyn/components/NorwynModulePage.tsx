@@ -5,6 +5,8 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, BarChart3, Bot, CheckCircle2, CircleDollarSign, Clock3, ExternalLink, Package, Search, Sparkles, Target, UsersRound } from "lucide-react";
 import { ActionCard, DataFreshness, EmptyState, IconPill, InsightCard, MetricCard, PageHeader, SectionHeader, StatusBadge, Surface, TaskCard } from "@/components/ui/norwyn-design-system";
 import { CustomerStudent360 } from "@/modules/norwyn/components/CustomerStudent360";
+import { AdsDashboard } from "@/modules/ads/components/AdsDashboard";
+import type { AdsContext } from "@/modules/ads/types";
 import { canAccessMissionFeature, functionalRoleFor } from "@/lib/auth/roles";
 import type { NorwynModuleContext } from "@/modules/norwyn/services/norwyn-module-server";
 
@@ -92,13 +94,13 @@ function Freshness({ context, label = "Atualizado" }: { context: NorwynModuleCon
   return <DataFreshness label={`${label} em ${dateTime(context.updatedAt)}`} stale={stale(context.updatedAt)} />;
 }
 
-export function NorwynModulePage({ context, searchParams }: { context: NorwynModuleContext; searchParams?: SearchLike }) {
+export function NorwynModulePage({ context, searchParams, adsContext }: { context: NorwynModuleContext; searchParams?: SearchLike; adsContext?: AdsContext | null }) {
   if (context.diagnostic) {
     return <AccessState context={context} />;
   }
 
   if (context.module === "missoes") return <MissionsModule context={context} />;
-  if (context.module === "marketing") return <MarketingModule context={context} />;
+  if (context.module === "marketing") return <MarketingModule context={context} searchParams={searchParams} adsContext={adsContext} />;
   if (context.module === "resultados") return <ResultsModule context={context} />;
   if (context.module === "produtos-alunos") return <ProductsStudentsModule context={context} searchParams={searchParams} />;
   return <AutomationsModule context={context} />;
@@ -169,7 +171,9 @@ function MissionsModule({ context }: { context: NorwynModuleContext }) {
   );
 }
 
-function MarketingModule({ context }: { context: NorwynModuleContext }) {
+function MarketingModule({ context, searchParams, adsContext }: { context: NorwynModuleContext; searchParams?: SearchLike; adsContext?: AdsContext | null }) {
+  const requestedView = getParam(searchParams, "view");
+  const view = requestedView === "instagram" || requestedView === "ads" || requestedView === "content" ? requestedView : "overview";
   const followerSummary = context.followerGrowthSummary;
   const latestFollower = context.followerSnapshots.at(-1);
   const followerFreshness = followerSummary?.updated_at ?? followerSummary?.latest_date ?? latestFollower?.updated_at ?? latestFollower?.created_at ?? latestFollower?.snapshot_date ?? null;
@@ -177,10 +181,31 @@ function MarketingModule({ context }: { context: NorwynModuleContext }) {
   const adsSpend = context.adsRows.reduce((sum, row) => sum + Number(row.valor_gasto ?? 0), 0);
   const reach = context.posts.reduce((sum, post) => sum + Number(post.alcance ?? 0), 0);
   const pendingContent = context.contentCaptures.filter((item) => !["concluido", "concluido_parcialmente"].includes(String(item.status ?? "").toLowerCase()));
+  const tabs = [
+    { key: "overview", label: "Visão geral", href: "/marketing?view=overview" },
+    { key: "instagram", label: "Instagram", href: "/marketing?view=instagram" },
+    { key: "ads", label: "Ads", href: "/marketing?view=ads&period=30d&granularity=day" },
+    { key: "content", label: "Conteúdo", href: "/marketing?view=content" },
+  ];
 
   return (
     <div className="mx-auto max-w-[1440px] space-y-6">
       <PageHeader eyebrow="Marketing" title="Instagram, Ads, campanhas e conteúdo" description="A leitura começa pelo que está atualizado e pelo que precisa de atenção, sem misturar com Produtos, Financeiro ou Missões." aside={<Freshness context={context} />} />
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Marketing">
+        {tabs.map((tab) => <Link key={tab.key} role="tab" aria-selected={view === tab.key} href={tab.href} className={moduleTabClass(view === tab.key)}>{tab.label}</Link>)}
+      </div>
+      {view === "overview" ? <MarketingOverview context={context} followerTotal={followerTotal} followerFreshness={followerFreshness} adsSpend={adsSpend} reach={reach} pendingContent={pendingContent} /> : null}
+      {view === "instagram" ? <MarketingInstagramPanel context={context} followerTotal={followerTotal} followerFreshness={followerFreshness} /> : null}
+      {view === "ads" ? (adsContext ? <AdsDashboard context={adsContext} basePath="/marketing" searchParams={searchParams} /> : <EmptyState title="Ads indisponível">Não foi possível carregar Ads dentro de Marketing.</EmptyState>) : null}
+      {view === "content" ? <MarketingContentPanel context={context} pendingContent={pendingContent} /> : null}
+      {stale(followerFreshness, 48) ? <InsightCard title="Seguidores podem estar defasados" tone="warning">A tela evidencia a data do último snapshot. O número depende da próxima coleta/importação do Instagram.</InsightCard> : null}
+    </div>
+  );
+}
+
+function MarketingOverview({ context, followerTotal, followerFreshness, adsSpend, reach, pendingContent }: { context: NorwynModuleContext; followerTotal: number | null | undefined; followerFreshness: string | null; adsSpend: number; reach: number; pendingContent: any[] }) {
+  return (
+    <>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Seguidores" value={followerTotal != null ? number(Number(followerTotal)) : "Sem dado"} period={followerFreshness ? "Dados até " + dateTime(followerFreshness) : "Histórico não disponível"} status={stale(followerFreshness, 48) ? "Desatualizado" : "Atualizado"} tone={stale(followerFreshness, 48) ? "warning" : "success"} />
         <MetricCard label="Alcance recente" value={number(reach)} period={`${number(context.posts.length)} posts carregados`} />
@@ -189,25 +214,57 @@ function MarketingModule({ context }: { context: NorwynModuleContext }) {
       </section>
       <div className="grid gap-4 lg:grid-cols-2">
         <Surface>
-          <SectionHeader title="Instagram continua como referência" description="A experiência completa permanece no módulo próprio; aqui fica o resumo executivo." action={<Link className="text-sm font-semibold text-[color:var(--ds-primary)]" href="/instagram">Abrir Instagram</Link>} />
+          <SectionHeader title="Instagram continua como referência" description="Resumo executivo com acesso direto ao drill-down." action={<Link className="text-sm font-semibold text-[color:var(--ds-primary)]" href="/marketing?view=instagram">Abrir Instagram</Link>} />
           <div className="mt-4 grid gap-3">
             {context.posts.slice(0, 5).map((post) => <ActionCard key={post.id} title={post.legenda || post.tipo || "Post"} meta={dateOnly(post.data_postagem)} description={`Alcance ${number(post.alcance)} · curtidas ${number(post.likes)} · comentários ${number(post.comentarios)}`} />)}
             {!context.posts.length ? <EmptyState title="Sem posts carregados" /> : null}
           </div>
         </Surface>
         <Surface>
-          <SectionHeader title="Ads e campanhas" description="Primeira camada: gasto, alcance e campanhas; métricas avançadas seguem no drill-down." action={<Link className="text-sm font-semibold text-[color:var(--ds-primary)]" href="/ads">Abrir Ads</Link>} />
+          <SectionHeader title="Ads e campanhas" description="Gasto, alcance e campanhas; métricas avançadas ficam no drill-down." action={<Link className="text-sm font-semibold text-[color:var(--ds-primary)]" href="/marketing?view=ads&period=30d&granularity=day">Abrir Ads</Link>} />
           <div className="mt-4 grid gap-3">
             {context.campaigns.slice(0, 5).map((campaign) => <ActionCard key={campaign.id} title={campaign.name ?? "Campanha"} meta={campaign.status ?? "Sem status"} description={`${dateOnly(campaign.starts_at)} até ${dateOnly(campaign.ends_at)}.`} />)}
             {!context.campaigns.length ? <EmptyState title="Sem campanhas cadastradas" /> : null}
           </div>
         </Surface>
       </div>
-      {stale(followerFreshness, 48) ? <InsightCard title="Seguidores podem estar defasados" tone="warning">A tela agora evidencia a data do último snapshot. O número não é corrigido manualmente; ele depende da próxima coleta/importação do Instagram.</InsightCard> : null}
-    </div>
+    </>
   );
 }
 
+function MarketingInstagramPanel({ context, followerTotal, followerFreshness }: { context: NorwynModuleContext; followerTotal: number | null | undefined; followerFreshness: string | null }) {
+  return (
+    <Surface>
+      <SectionHeader title="Instagram" description="Conteúdos e sinais recentes do Instagram em um clique dentro de Marketing." action={<Link className="text-sm font-semibold text-[color:var(--ds-primary)]" href="/instagram">Abrir dashboard completo</Link>} />
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <MetricCard label="Seguidores atuais" value={followerTotal != null ? number(Number(followerTotal)) : "Sem dado"} period={followerFreshness ? "Atualizado em " + dateTime(followerFreshness) : "Sem atualização"} tone={stale(followerFreshness, 48) ? "warning" : "success"} />
+        <MetricCard label="Posts carregados" value={number(context.posts.length)} period="Fonte Instagram" />
+        <MetricCard label="Interações" value={number(context.interactions.length)} period="Histórico recente" />
+      </div>
+      <div className="mt-5 grid gap-3">
+        {context.posts.slice(0, 8).map((post) => <ActionCard key={post.id} title={post.legenda || post.tipo || "Post"} meta={dateOnly(post.data_postagem)} description={`Alcance ${number(post.alcance)} · salvos ${number(post.salvos)} · comentários ${number(post.comentarios)}`} />)}
+        {!context.posts.length ? <EmptyState title="Sem posts carregados" /> : null}
+      </div>
+    </Surface>
+  );
+}
+
+function MarketingContentPanel({ context, pendingContent }: { context: NorwynModuleContext; pendingContent: any[] }) {
+  return (
+    <Surface>
+      <SectionHeader title="Conteúdo" description="Demandas e capturas de conteúdo já existentes, sem criar um studio novo nesta etapa." />
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <MetricCard label="Capturas" value={number(context.contentCaptures.length)} period="Base real" />
+        <MetricCard label="Pendentes" value={number(pendingContent.length)} period="Aguardando ação" tone={pendingContent.length ? "warning" : "success"} />
+        <MetricCard label="Campanhas" value={number(context.campaigns.length)} period="Relacionadas a Marketing" />
+      </div>
+      <div className="mt-5 grid gap-3">
+        {context.contentCaptures.slice(0, 10).map((item: any) => <ActionCard key={item.id} title={item.title ?? item.titulo ?? "Conteúdo"} meta={item.status ?? "Sem status"} description={item.description ?? item.descricao ?? item.contexto ?? "Sem descrição adicional."} />)}
+        {!context.contentCaptures.length ? <EmptyState title="Sem conteúdos carregados" /> : null}
+      </div>
+    </Surface>
+  );
+}
 function ResultsModule({ context }: { context: NorwynModuleContext }) {
   const monthSales = recentThisMonth(context.commercialSales).filter(isBrl);
   const confirmed = monthSales.filter(isConfirmed);

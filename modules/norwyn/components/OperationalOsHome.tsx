@@ -510,8 +510,8 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
         <Surface className="space-y-4 p-5 sm:p-6">
           <DsSectionHeader title="Marketing e resultados" description="Caminhos rápidos para aprofundar sem pesar a Home." />
           <div className="flex flex-wrap gap-2">
-            <ActionButton onClick={() => window.location.assign("/instagram")}>Instagram</ActionButton>
-            <ActionButton onClick={() => goTo("campaigns")}>Marketing</ActionButton>
+            <ActionButton onClick={() => window.location.assign("/marketing?view=instagram")}>Instagram</ActionButton>
+            <ActionButton onClick={() => window.location.assign("/marketing?view=ads&period=30d&granularity=day")}>Ads</ActionButton>
             <ActionButton onClick={() => goTo("growth")}>Resultados</ActionButton>
           </div>
         </Surface>

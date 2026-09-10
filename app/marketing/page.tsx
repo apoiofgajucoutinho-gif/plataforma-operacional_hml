@@ -1,19 +1,32 @@
 import { AppShell } from "@/components/layout/AppShell";
+import { getAdsContext } from "@/modules/ads/services/ads-server";
 import { NorwynModulePage } from "@/modules/norwyn/components/NorwynModulePage";
 import { getNorwynModuleContext } from "@/modules/norwyn/services/norwyn-module-server";
 
 export const dynamic = "force-dynamic";
 
+type SearchParams = Record<string, string | string[] | undefined>;
+
 type PageProps = {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<SearchParams>;
 };
 
+function firstParam(searchParams: SearchParams | undefined, key: string) {
+  const value = searchParams?.[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
 export default async function NorwynStandaloneModulePage({ searchParams }: PageProps) {
-  const context = await getNorwynModuleContext("marketing");
+  const resolvedSearchParams = await searchParams;
+  const view = firstParam(resolvedSearchParams, "view") ?? "overview";
+  const [context, adsContext] = await Promise.all([
+    getNorwynModuleContext("marketing"),
+    view === "ads" ? getAdsContext(resolvedSearchParams) : Promise.resolve(null),
+  ]);
 
   return (
     <AppShell activeItem="marketing" allowedItems={context.allowedModules} role={context.role}>
-      <NorwynModulePage context={context} searchParams={searchParams} />
+      <NorwynModulePage context={context} searchParams={resolvedSearchParams} adsContext={adsContext} />
     </AppShell>
   );
 }

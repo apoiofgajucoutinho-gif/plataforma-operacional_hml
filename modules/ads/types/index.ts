@@ -1,5 +1,17 @@
 export type AdsPerformanceStatus = "OK" | "CTR BAIXO" | "SATURADO" | "PUBLICO RUIM" | "UNKNOWN";
 
+export type AdsPeriodKey = "30d" | "90d" | "6m" | "12m" | "custom";
+export type AdsGranularity = "day" | "week" | "month";
+
+export type AdsPeriodContext = {
+  key: AdsPeriodKey;
+  start: string;
+  end: string;
+  label: string;
+  granularity: AdsGranularity;
+  isCustom: boolean;
+};
+
 export type AdsDailyRow = {
   id: string;
   data_referencia: string;
@@ -62,5 +74,5 @@ export type AdsContext = {
   role: string | null;
   diagnostic: string | null;
   allowedModules: string[];
+  period: AdsPeriodContext;
 };
-
