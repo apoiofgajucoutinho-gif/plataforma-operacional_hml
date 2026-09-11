@@ -285,7 +285,7 @@ function lancamentoPayload(input: CreateLancamentoPayload, tenantId?: string, us
 }
 
 function assertCanWriteLancamentos(auth: FinanceiroAuth) {
-  if (auth.perfil !== "admin" && auth.perfil !== "suporte") {
+  if (auth.perfil !== "admin" && auth.perfil !== "suporte" && auth.perfil !== "especialista") {
     throw new Error("Seu perfil financeiro nao pode alterar lancamentos.");
   }
 }

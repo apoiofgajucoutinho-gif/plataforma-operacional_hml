@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { AlertTriangle, ArrowRight, Bot, CalendarClock, CheckCircle2, CircleDollarSign, ClipboardList, GraduationCap, Instagram, Layers3, LineChart, Megaphone, Package, ShieldCheck, ShoppingCart, Sparkles, Target, UserRound, UsersRound, WalletCards } from "lucide-react";
@@ -468,13 +469,13 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
             {snapshot.specialist.decisions.slice(0, 5).map((item) => <DecisionRow key={item.id} item={item} />)}
             {!snapshot.specialist.decisions.length ? <EmptyState title="Nada crítico agora">Sem decisão urgente com os dados atuais.</EmptyState> : null}
           </div>
-          <ActionLink onClick={() => window.location.assign("/atividades")}>Ver atividades</ActionLink>
+          <ActionLink href="/atividades">Ver atividades</ActionLink>
         </Surface>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Surface className="space-y-5 p-5 sm:p-6">
-          <DsSectionHeader title="Financeiro" description="Entradas, saídas e próximos movimentos." action={<ActionLink onClick={() => window.location.assign("/financeiro")}>Ver financeiro</ActionLink>} />
+          <DsSectionHeader title="Financeiro" description="Entradas, saídas e próximos movimentos." action={<ActionLink href="/financeiro">Ver financeiro</ActionLink>} />
           <div className="grid gap-3 sm:grid-cols-2">
             <MiniDomainCard icon={WalletCards} tone="green" label="Entradas" value={money(finance.entries)} detail={periodRange.label} />
             <MiniDomainCard icon={CircleDollarSign} tone="coral" label="Saídas" value={money(finance.expenses)} detail={periodRange.label} />
@@ -484,18 +485,18 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
         </Surface>
 
         <Surface className="space-y-5 p-5 sm:p-6">
-          <DsSectionHeader title="Operação" description="Atividades, pendências e acompanhamento da equipe." action={<ActionLink onClick={() => window.location.assign("/atividades")}>Ver atividades</ActionLink>} />
+          <DsSectionHeader title="Operação" description="Atividades, pendências e acompanhamento da equipe." action={<ActionLink href="/atividades">Ver atividades</ActionLink>} />
           <div className="grid gap-3 sm:grid-cols-3">
             <ActionCard icon={ClipboardList} title="Atividades" meta={operationSummary.inProgress + " em andamento"} description={operationSummary.overdue + " atrasada(s) · " + operationSummary.approval + " em aprovação"} tone={operationSummary.overdue ? "warning" : "neutral"} />
             {teamDemandSummary.slice(0, 2).map((item) => <ActionCard key={item.label} icon={UsersRound} title={item.label} meta={item.meta} description={item.description} tone={item.overdue ? "warning" : "neutral"} />)}
           </div>
-          {canCreateActivity ? <ActionButton onClick={() => window.location.assign("/atividades?new=1")}>Nova atividade</ActionButton> : null}
+          {canCreateActivity ? <ActionButton href="/atividades?new=1">Nova atividade</ActionButton> : null}
         </Surface>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <Surface className="space-y-5 p-5 sm:p-6">
-          <DsSectionHeader title="Produtos & Alunos" description="Base canônica de produtos, alunos, LTV e recompra." action={<ActionLink onClick={() => window.location.assign("/produtos-alunos?view=students")}>Ver Produtos & Alunos</ActionLink>} />
+          <DsSectionHeader title="Produtos & Alunos" description="Base canônica de produtos, alunos, LTV e recompra." action={<ActionLink href="/produtos-alunos?view=students">Ver Produtos & Alunos</ActionLink>} />
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MiniDomainCard icon={Package} tone="teal" label="Produtos ativos" value={numberLabel(productsStudents.activeProducts)} detail="cadastro canônico" />
             <MiniDomainCard icon={GraduationCap} tone="purple" label="Alunos" value={numberLabel(productsStudents.students)} detail="matrículas canônicas" />
@@ -505,7 +506,7 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
         </Surface>
 
         <Surface className="space-y-5 p-5 sm:p-6">
-          <DsSectionHeader title="Saúde Digital" description="Resumo de sites, LPs e monitoramento Presence." action={<ActionLink onClick={() => window.location.assign("/presence")}>Ver Saúde Digital</ActionLink>} />
+          <DsSectionHeader title="Saúde Digital" description="Resumo de sites, LPs e monitoramento Presence." action={<ActionLink href="/presence">Ver Saúde Digital</ActionLink>} />
           <div className="grid gap-3 sm:grid-cols-3">
             <MiniDomainCard icon={ShieldCheck} tone={digitalHealth.tone} label="Saúde geral" value={digitalHealth.healthLabel} detail={digitalHealth.detail} />
             <MiniDomainCard icon={LineChart} tone="blue" label="Sites ativos" value={String(digitalHealth.activeSites)} detail="monitorados" />
@@ -516,7 +517,7 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
         <Surface className="space-y-4 p-5 sm:p-6">
-          <DsSectionHeader title="Agenda de hoje" description="Compromissos, horários e preparação." action={<ActionLink onClick={() => window.location.assign("/agenda")}>Ver agenda</ActionLink>} />
+          <DsSectionHeader title="Agenda de hoje" description="Compromissos, horários e preparação." action={<ActionLink href="/agenda">Ver agenda</ActionLink>} />
           <div className="space-y-3">
             {nextAgendaEvents.map((event) => <AgendaRow key={event.id} title={event.titulo} type={event.tipo ?? "Agenda"} startsAt={event.inicio} />)}
             {!nextAgendaEvents.length ? <EmptyState title="Sem próximos compromissos">Nada futuro encontrado na agenda carregada.</EmptyState> : null}
@@ -537,7 +538,7 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
           <ActionCard icon={Target} title={mission.name} meta={mission.period} description={nextMissionStep} tone="primary" />
         </Surface>
         <Surface className="space-y-4 p-5 sm:p-6">
-          <DsSectionHeader title="Automações" description="ManyChat, Telegram e sincronizações." action={<ActionLink onClick={() => window.location.assign("/automacoes")}>Ver automações</ActionLink>} />
+          <DsSectionHeader title="Automações" description="ManyChat, Telegram e sincronizações." action={<ActionLink href="/automacoes">Ver automações</ActionLink>} />
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
             <MiniDomainCard icon={Bot} tone="purple" label="ManyChat" value={automations.manychatLabel} detail={automations.manychatDetail} />
             <MiniDomainCard icon={Bot} tone="blue" label="Telegram" value={automations.telegramLabel} detail={automations.telegramDetail} />
@@ -546,8 +547,8 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
         <Surface className="space-y-4 p-5 sm:p-6">
           <DsSectionHeader title="Marketing e resultados" description="Caminhos rápidos para aprofundar sem pesar a Home." />
           <div className="flex flex-wrap gap-2">
-            <ActionButton onClick={() => window.location.assign("/marketing?view=instagram")}>Ver Instagram</ActionButton>
-            <ActionButton onClick={() => window.location.assign("/marketing?view=ads&period=30d&granularity=day")}>Ver Ads</ActionButton>
+            <ActionButton href="/marketing?view=instagram">Ver Instagram</ActionButton>
+            <ActionButton href="/marketing?view=ads&period=30d&granularity=day">Ver Ads</ActionButton>
             <ActionButton onClick={() => goTo("growth")}>Resultados</ActionButton>
           </div>
         </Surface>
@@ -767,8 +768,9 @@ function Metric({ label, value, state }: { label: string; value: string; state: 
   return <MetricCard label={label} value={value} status={translateState(state)} tone={toneFromState(state)} />;
 }
 
-function ActionButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return <button type="button" onClick={onClick} className="h-10 rounded-full border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] px-4 text-sm font-semibold text-[color:var(--ds-text)] shadow-[var(--ds-shadow-sm)] transition hover:bg-[color:var(--ds-bg-soft)]">{children}</button>;
+function ActionButton({ onClick, href, children }: { onClick?: () => void; href?: string; children: ReactNode }) {
+  const router = useRouter();
+  return <button type="button" onClick={() => href ? router.push(href) : onClick?.()} className="h-10 rounded-full border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] px-4 text-sm font-semibold text-[color:var(--ds-text)] shadow-[var(--ds-shadow-sm)] transition hover:bg-[color:var(--ds-bg-soft)]">{children}</button>;
 }
 type DomainTone = "green" | "purple" | "coral" | "gold" | "blue" | "teal";
 
@@ -820,7 +822,7 @@ function InstagramSpotlight({ instagram }: { instagram: ReturnType<typeof instag
         </div>
         <div className="flex flex-col items-start gap-3 sm:items-end">
           <DataFreshness label={instagram.freshness} stale={instagram.stale} />
-          <ActionLink onClick={() => window.location.assign("/marketing?view=instagram")}>Ver Instagram</ActionLink>
+          <ActionLink href="/marketing?view=instagram">Ver Instagram</ActionLink>
         </div>
       </div>
       <div className="relative mt-7 grid gap-5 lg:grid-cols-[0.78fr_1.22fr]">
@@ -932,8 +934,9 @@ function AgendaRow({ title, type, startsAt }: { title: string; type: string; sta
   return <div className="flex items-center gap-4 rounded-3xl border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]"><span className="flex h-14 w-20 shrink-0 items-center justify-center rounded-2xl bg-amber-100 px-2 text-center text-xs font-semibold leading-4 text-amber-800">{label}</span><div className="min-w-0"><p className="truncate text-sm font-semibold text-[color:var(--ds-text)]">{title}</p><p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">{type}</p></div></div>;
 }
 
-function ActionLink({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return <button type="button" onClick={onClick} className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--ds-primary)] hover:text-[color:var(--ds-accent)]">{children}<ArrowRight className="h-4 w-4" /></button>;
+function ActionLink({ onClick, href, children }: { onClick?: () => void; href?: string; children: ReactNode }) {
+  const router = useRouter();
+  return <button type="button" onClick={() => href ? router.push(href) : onClick?.()} className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--ds-primary)] hover:text-[color:var(--ds-accent)]">{children}<ArrowRight className="h-4 w-4" /></button>;
 }
 
 function Empty({ children }: { children: ReactNode }) {

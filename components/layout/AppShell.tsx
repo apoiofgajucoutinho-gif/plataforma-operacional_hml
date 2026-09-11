@@ -135,11 +135,16 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
   });
   const [userLabel, setUserLabel] = useState<string | null>(null);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const roleNavigation = navigationForRole(role);
   const visibleNavigation = allowedItems
     ? roleNavigation.filter((item) => allowedItems.includes(item.module) || allowedItems.includes(item.key) || allowedItems.includes("admin"))
     : roleNavigation;
   const groups = groupedNavigation(visibleNavigation);
+
+  useEffect(() => {
+    setPendingHref(null);
+  }, [pathname, searchParams]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("platform-sidebar-collapsed");
@@ -247,8 +252,11 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
                   const itemUrl = new URL(item.href, "http://local");
                   const itemTab = itemUrl.searchParams.get("tab");
                   const currentTab = searchParams.get("tab");
+                  const pendingUrl = pendingHref ? new URL(pendingHref, "http://local") : null;
+                  const isPendingItem = pendingUrl?.pathname === itemUrl.pathname;
                   const isSamePath = itemUrl.pathname === pathname;
-                  const isActive = itemTab ? isSamePath && itemTab === currentTab : isSamePath && !currentTab && item.key === activeItem;
+                  const isCurrentActive = itemTab ? isSamePath && itemTab === currentTab : isSamePath && !currentTab && item.key === activeItem;
+                  const isActive = isPendingItem || isCurrentActive;
                   const isReady = readyModules.includes(item.module);
                   const isDisabled = !isReady;
 
@@ -258,7 +266,11 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
                       href={isDisabled ? "#" : item.href}
                       aria-disabled={isDisabled}
                       onClick={(event) => {
-                        if (isDisabled) event.preventDefault();
+                        if (isDisabled) {
+                          event.preventDefault();
+                          return;
+                        }
+                        setPendingHref(item.href);
                       }}
                       title={isDisabled ? "Módulo em desenvolvimento. Em breve estará disponível." : item.label}
                       data-active={isActive}
@@ -267,6 +279,7 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
                         "app-nav-item flex min-w-max items-center gap-3 rounded-full px-3 py-2.5 text-sm font-semibold transition",
                         isCollapsed && "lg:min-w-0 lg:justify-center lg:px-0",
                         isDisabled && "cursor-not-allowed opacity-55",
+                        isPendingItem && "animate-pulse",
                         isActive ? "bg-white !text-brand-teal shadow-sm hover:bg-white" : "text-brand-cream hover:bg-white/10 hover:text-white",
                       )}
                     >
