@@ -141,10 +141,17 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     ? roleNavigation.filter((item) => allowedItems.includes(item.module) || allowedItems.includes(item.key) || allowedItems.includes("admin"))
     : roleNavigation;
   const groups = groupedNavigation(visibleNavigation);
+  const prefetchKey = visibleNavigation.map((item) => item.href).join("|");
 
   useEffect(() => {
     setPendingHref(null);
   }, [pathname, searchParams]);
+
+  useEffect(() => {
+    visibleNavigation.forEach((item) => {
+      if (readyModules.includes(item.module)) router.prefetch(item.href);
+    });
+  }, [router, prefetchKey]);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("platform-sidebar-collapsed");
@@ -265,6 +272,9 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
                       key={item.key}
                       href={isDisabled ? "#" : item.href}
                       aria-disabled={isDisabled}
+                      prefetch
+                      onMouseEnter={() => { if (!isDisabled) router.prefetch(item.href); }}
+                      onFocus={() => { if (!isDisabled) router.prefetch(item.href); }}
                       onClick={(event) => {
                         if (isDisabled) {
                           event.preventDefault();

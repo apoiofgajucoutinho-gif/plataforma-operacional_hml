@@ -255,6 +255,8 @@ export type CreateLancamentoPayload = {
   banco_id?: string | null;
   cartao_id?: string | null;
   qtd_parcelas?: number;
+  data_compra?: string | null;
+  primeira_fatura_mes?: string | null;
   descricao: string;
   valor: number;
   observacao?: string | null;

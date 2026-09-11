@@ -255,6 +255,11 @@ export async function getFinanceiroContext(): Promise<FinanceiroContext> {
 function lancamentoPayload(input: CreateLancamentoPayload, tenantId?: string, userId?: string) {
   const dataPagamento = input.data_pagamento;
   const status = input.status;
+  const cardMetadata = input.forma_pagamento === "cartao_credito" ? {
+    data_compra_cartao: input.data_compra || input.data_pagamento,
+    primeira_fatura_mes: input.primeira_fatura_mes || null,
+    regra_caixa: "fatura_cartao",
+  } : {};
   return {
     ...(tenantId ? { tenant_id: tenantId } : {}),
     data_pagamento: dataPagamento,
@@ -280,6 +285,7 @@ function lancamentoPayload(input: CreateLancamentoPayload, tenantId?: string, us
     origem: "manual",
     fonte_original: "manual",
     classificacao_status: "trusted",
+    ...(input.forma_pagamento === "cartao_credito" ? { metadata: cardMetadata } : {}),
     ...(userId ? { created_by: userId } : {}),
   };
 }
