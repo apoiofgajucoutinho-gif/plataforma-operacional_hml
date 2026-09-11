@@ -183,11 +183,19 @@ def classify(row):
         elif "teleprompter" in n_desc or "teleprompter" in n_sub: subcategory = "Teleprompter"
         elif "estrutura" in n_sub: subcategory = "Estrutura"
         else: subcategory = "Outros"
-    elif n_cat == "infoproduto" and ("activecamp" in n_desc or "cademi" in n_desc):
+    elif n_cat == "infoproduto" and ("activecamp" in n_desc or "cademi" in n_desc or "chat gpt" in n_desc or "manychat" in n_desc):
         category = "Tecnologia & Ferramentas"
-        subcategory = "ActiveCampaign" if "activecamp" in n_desc else "Cademi"
-    elif n_cat == "infoproduto" and "funcionario" in n_sub:
-        category, subcategory = "Pessoas", "Prestadores recorrentes"
+        if "activecamp" in n_desc:
+            subcategory = "ActiveCampaign"
+        elif "cademi" in n_desc:
+            subcategory = "Cademi"
+        elif "chat gpt" in n_desc:
+            subcategory = "ChatGPT"
+        else:
+            subcategory = "Automação / CRM"
+    elif n_cat == "infoproduto" and ("funcionario" in n_sub or "comissao" in n_sub or "comissao" in n_desc):
+        category = "Pessoas"
+        subcategory = "Comissões" if "comissao" in n_sub or "comissao" in n_desc else "Prestadores recorrentes"
     elif n_cat == "administrativo" and ("ferramenta" in n_sub or "canva" in n_desc or "cloude" in n_desc):
         category = "Tecnologia & Ferramentas"
         if "canva" in n_desc: subcategory = "Canva"

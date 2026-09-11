@@ -58,10 +58,10 @@ async function queryRest(table, params) {
       acc[row.tipo] = Math.round(((acc[row.tipo] || 0) + Number(row.valor)) * 100) / 100;
       return acc;
     }, {});
-    assert.equal(loaded.length, 186, "Financeiro HML should contain 186 loaded spreadsheet rows");
-    assert.equal(totals.entrada, 161254.23, "Financeiro entradas must reconcile with spreadsheet");
-    assert.equal(totals.saida, 189747.21, "Financeiro saidas must reconcile with spreadsheet");
-    assert.equal(loaded.filter((row) => row.classificacao_status === "review").length, 0, "Financeiro V2 should not leave known spreadsheet rows in review after explicit taxonomy mapping");
+    assert.equal(loaded.length, 215, "Financeiro HML should contain 215 loaded spreadsheet rows from the current official workbook");
+    assert.equal(totals.entrada, 176644.69, "Financeiro entradas must reconcile with spreadsheet");
+    assert.equal(totals.saida, 216052.29, "Financeiro saidas must reconcile with spreadsheet");
+    assert.equal(loaded.filter((row) => row.classificacao_status === "review").length, 1, "Financeiro V2 should keep the single uncategorized TUNA row in review instead of inventing taxonomy");
   }
 
   console.log("Financeiro V2 regression PASS", { db: Boolean(rows) });
@@ -69,5 +69,6 @@ async function queryRest(table, params) {
   console.error(error);
   process.exit(1);
 });
+
 
 
