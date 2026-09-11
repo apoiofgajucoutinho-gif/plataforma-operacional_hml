@@ -9,6 +9,7 @@ const tests = [
   "scripts/norwyn-student360-searchparams-test.cjs",
   "scripts/norwyn-student-enrollment-backfill-tests.cjs",
   "scripts/norwyn-presence-regression-test.cjs",
+  "scripts/norwyn-financeiro-v2-regression-test.cjs",
 ];
 
 function runNode(script) {

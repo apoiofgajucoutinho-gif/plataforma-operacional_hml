@@ -7,6 +7,9 @@ export type FinFormaPagamento =
   | "boleto"
   | "dinheiro";
 export type FinPerfil = "admin" | "suporte" | "marketing" | "especialista";
+export type FinNaturezaFluxo = "operacional" | "nao_operacional";
+export type FinComportamento = "fixo" | "variavel" | "nao_aplicavel";
+export type FinClassificacaoStatus = "trusted" | "partial" | "review" | "unknown";
 
 export type FinTenant = {
   id: string;
@@ -58,10 +61,12 @@ export type FinNatureza = {
 export type FinCategoria = {
   id: string;
   tenant_id: string;
-  natureza_id: string;
+  natureza_id: string | null;
   tipo: FinTipo;
   nome: string;
   dre_grupo: string;
+  natureza_fluxo_padrao?: FinNaturezaFluxo | null;
+  comportamento_padrao?: FinComportamento | null;
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -72,7 +77,9 @@ export type FinSubcategoria = {
   tenant_id: string;
   categoria_id: string;
   nome: string;
-  dre_grupo: string;
+  dre_grupo: string | null;
+  natureza_fluxo_padrao?: FinNaturezaFluxo | null;
+  comportamento_padrao?: FinComportamento | null;
   ativo: boolean;
   created_at: string;
   updated_at: string;
@@ -92,8 +99,12 @@ export type FinLancamento = {
   tenant_id: string;
   data_pagamento: string;
   mes_competencia: string;
+  data_vencimento?: string | null;
+  data_realizacao?: string | null;
   tipo: FinTipo;
   status: FinStatus;
+  natureza_fluxo?: FinNaturezaFluxo;
+  comportamento?: FinComportamento;
   centro_resultado_id: string;
   categoria_id: string;
   subcategoria_id: string | null;
@@ -107,6 +118,12 @@ export type FinLancamento = {
   valor: number;
   observacao: string | null;
   origem: string;
+  fonte_original?: string | null;
+  referencia_externa?: string | null;
+  responsavel?: string | null;
+  anexo_url?: string | null;
+  classificacao_status?: FinClassificacaoStatus;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };
@@ -226,6 +243,10 @@ export type CreateLancamentoPayload = {
   status: FinStatus;
   data_pagamento: string;
   mes_competencia: string;
+  data_vencimento?: string | null;
+  data_realizacao?: string | null;
+  natureza_fluxo?: FinNaturezaFluxo;
+  comportamento?: FinComportamento;
   centro_resultado_id: string;
   categoria_id: string;
   subcategoria_id?: string | null;
@@ -237,5 +258,5 @@ export type CreateLancamentoPayload = {
   descricao: string;
   valor: number;
   observacao?: string | null;
+  responsavel?: string | null;
 };
-
