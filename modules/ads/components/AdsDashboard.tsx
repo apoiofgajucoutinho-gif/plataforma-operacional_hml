@@ -572,7 +572,7 @@ function OverviewTab({ rows, granularity }: { rows: AdsDailyRow[]; granularity: 
   return (
     <div className="space-y-5">
       <SectionTitle icon={<Sparkles className="h-4 w-4" />} title="Visão Geral" />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
         <KpiCard icon={<CircleDollarSign />} label="Investimento Total" value={formatMoney(metrics.totSpend)} sub={`${rows.length} registros`} />
         <KpiCard icon={<Radio />} label="Alcance Total" value={formatCompact(metrics.totReach)} sub="pessoas únicas" />
         <KpiCard icon={<Eye />} label="Impressões" value={formatCompact(metrics.totImp)} sub="exibições totais" />
@@ -898,12 +898,11 @@ function AnalysisTab({ rows, allRows }: { rows: AdsDailyRow[]; allRows: AdsDaily
 
 function KpiCard({ icon, label, value, sub, muted }: { icon: ReactNode; label: string; value: string; sub: string; muted?: boolean }) {
   return (
-    <Card className={clsx("relative overflow-hidden p-4", muted && "opacity-70")}>
-      <div className={clsx("absolute left-4 right-4 top-0 h-1 rounded-b-full", muted ? "bg-brand-sand" : "bg-brand-clay")} />
-      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-[#FFF0F2] text-brand-clay [&_svg]:h-5 [&_svg]:w-5">{icon}</div>
-      <p className="text-xs font-black uppercase text-brand-clay/75">{label}</p>
-      <p className="mt-2 text-2xl font-black leading-none text-brand-teal">{value}</p>
-      <p className="mt-2 text-xs font-semibold text-brand-teal/50">{sub}</p>
+    <Card className={clsx("rounded-3xl border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]", muted && "opacity-70")}>
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-rose-50 text-rose-500 [&_svg]:h-5 [&_svg]:w-5">{icon}</div>
+      <p className="text-xs font-semibold text-[color:var(--ds-text-secondary)]">{label}</p>
+      <p className="mt-1 break-words text-xl font-semibold leading-tight text-[color:var(--ds-text)]">{value}</p>
+      <p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">{sub}</p>
     </Card>
   );
 }
@@ -948,10 +947,10 @@ function InsightGrid({ rows }: { rows: AdsDailyRow[] }) {
 
 function InsightCard({ title, value, desc, tone = "neutral" }: { title: string; value: string; desc: string; tone?: "neutral" | "good" | "warn" | "bad" }) {
   return (
-    <Card className={clsx("border-l-4 p-4", tone === "good" && "border-l-emerald-500", tone === "warn" && "border-l-amber-500", tone === "bad" && "border-l-rose-500", tone === "neutral" && "border-l-brand-clay")}>
-      <p className="text-xs font-black uppercase text-brand-clay/75">{title}</p>
-      <p className="mt-2 text-xl font-black text-brand-teal">{value}</p>
-      <p className="mt-2 text-sm text-brand-teal/60">{desc}</p>
+    <Card className={clsx("rounded-3xl border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]", tone === "good" && "ring-1 ring-emerald-100", tone === "warn" && "ring-1 ring-amber-100", tone === "bad" && "ring-1 ring-rose-100")}>
+      <p className="text-xs font-semibold text-[color:var(--ds-text-secondary)]">{title}</p>
+      <p className="mt-1 break-words text-lg font-semibold leading-tight text-[color:var(--ds-text)]">{value}</p>
+      <p className="mt-1 max-h-10 overflow-hidden text-xs leading-5 text-[color:var(--ds-text-muted)]">{desc}</p>
     </Card>
   );
 }
@@ -1159,7 +1158,7 @@ function MiniMetric({ label, value }: { label: string; value: string | number })
 function SummaryPill({ label, value, tone = "neutral" }: { label: string; value: string | number; tone?: "neutral" | "good" | "warn" | "bad" }) {
   return (
     <Card className={clsx("p-4", tone === "good" && "border-emerald-100", tone === "warn" && "border-amber-100", tone === "bad" && "border-rose-100")}>
-      <p className="text-xs font-black uppercase text-brand-clay/75">{label}</p>
+      <p className="text-xs font-semibold text-[color:var(--ds-text-secondary)]">{label}</p>
       <p className="mt-2 text-2xl font-black text-brand-teal">{value}</p>
     </Card>
   );
@@ -1167,7 +1166,7 @@ function SummaryPill({ label, value, tone = "neutral" }: { label: string; value:
 
 function AlertCard({ title, text, tone = "warn" }: { title: string; text: string; tone?: "good" | "warn" | "bad" }) {
   return (
-    <Card className={clsx("border-l-4 p-4", tone === "good" && "border-l-emerald-500", tone === "warn" && "border-l-amber-500", tone === "bad" && "border-l-rose-500")}>
+    <Card className={clsx("rounded-3xl border p-4 shadow-[var(--ds-shadow-sm)]", tone === "good" && "border-l-emerald-500", tone === "warn" && "border-l-amber-500", tone === "bad" && "border-l-rose-500")}>
       <p className="font-black text-brand-teal">{title}</p>
       <p className="mt-2 text-sm leading-relaxed text-brand-teal/65">{text}</p>
     </Card>
@@ -1386,5 +1385,7 @@ function buildPredictability(rows: AdsDailyRow[], allRows: AdsDailyRow[]) {
     { label: "Próx. saturações", value: nextSaturation, tone: nextSaturation ? "warn" as const : "good" as const },
   ];
 }
+
+
 
 

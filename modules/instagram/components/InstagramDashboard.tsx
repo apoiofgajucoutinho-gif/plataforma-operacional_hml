@@ -1163,7 +1163,7 @@ export function InstagramDashboard({
           </section>
 
           <SectionTitle icon={<Sparkles className="h-4 w-4" />} title="Insights Rapidos" />
-          <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <InsightCard label="Melhor dia da semana" value={bestWeekDay?.label ?? "-"} description={`Alcance medio de ${compactFormat(bestWeekDay?.averageReach ?? 0)} neste dia`} />
             <InsightCard label="Melhor formato" value={bestFormat?.type ?? "-"} description={`Alcance medio de ${compactFormat(bestFormat?.averageReach ?? 0)}`} />
             <InsightCard label="Post com mais alcance" value={topReach?.alcance ? compactFormat(topReach.alcance) : "0"} description={truncate(topReach?.legenda)} />
@@ -1175,8 +1175,8 @@ export function InstagramDashboard({
           </section>
 
           <SectionTitle icon={<Trophy className="h-4 w-4" />} title="Ranking de Posts" />
-          <Card className="overflow-hidden border-[#E9CBD1] bg-white/95 p-5 shadow-sm">
-            <div className="mb-5 flex flex-wrap gap-2">
+          <Card className="overflow-hidden border-[#E9CBD1] bg-white/95 p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap gap-2">
               {rankMetrics.map((item) => (
                 <FilterButton key={item.value} isActive={rankMetric === item.value} onClick={() => setRankMetric(item.value)}>
                   <span className="inline-flex items-center gap-1.5">{item.icon}{item.label}</span>
@@ -1613,16 +1613,16 @@ function InsightCard({
   onClick?: () => void;
 }) {
   const className = clsx(
-    "min-h-[118px] rounded-lg border border-[#E9CBD1] bg-[#FFF7F8] p-5 shadow-sm transition",
+    "rounded-3xl border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)] transition",
     isActive && "border-brand-clay bg-white ring-2 ring-brand-clay/20",
     onClick && "cursor-pointer text-left hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-clay/25",
   );
 
   const content = (
     <>
-      <p className="text-xs font-black uppercase tracking-wide text-brand-clay/70">{label}</p>
-      <p className="mt-3 text-2xl font-black text-brand-clay">{value}</p>
-      <p className="mt-2 max-h-12 overflow-hidden text-sm leading-6 text-brand-teal/70">{description}</p>
+      <p className="text-xs font-semibold text-[color:var(--ds-text-secondary)]">{label}</p>
+      <p className="mt-1 break-words text-xl font-semibold leading-tight text-[color:var(--ds-text)]">{value}</p>
+      <p className="mt-1 max-h-10 overflow-hidden text-xs leading-5 text-[color:var(--ds-text-muted)]">{description}</p>
     </>
   );
 
@@ -2176,6 +2176,7 @@ function InteractionStatusBadge({ value }: { value: InstagramInteractionStatus }
 function EmptyState() {
   return <p className="px-5 py-8 text-sm text-brand-teal/70">Nenhum post encontrado para os filtros.</p>;
 }
+
 
 
 
