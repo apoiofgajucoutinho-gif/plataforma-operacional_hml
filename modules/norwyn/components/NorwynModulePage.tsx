@@ -6,7 +6,9 @@ import { AlertTriangle, BarChart3, Bot, CheckCircle2, CircleDollarSign, Clock3, 
 import { ActionCard, DataFreshness, EmptyState, IconPill, InsightCard, MetricCard, PageHeader, SectionHeader, StatusBadge, Surface, TaskCard } from "@/components/ui/norwyn-design-system";
 import { CustomerStudent360 } from "@/modules/norwyn/components/CustomerStudent360";
 import { AdsDashboard } from "@/modules/ads/components/AdsDashboard";
+import { InstagramDashboard } from "@/modules/instagram/components/InstagramDashboard";
 import type { AdsContext } from "@/modules/ads/types";
+import type { InstagramContext } from "@/modules/instagram/types";
 import { canAccessMissionFeature, functionalRoleFor } from "@/lib/auth/roles";
 import type { NorwynModuleContext } from "@/modules/norwyn/services/norwyn-module-server";
 
@@ -94,13 +96,13 @@ function Freshness({ context, label = "Atualizado" }: { context: NorwynModuleCon
   return <DataFreshness label={`${label} em ${dateTime(context.updatedAt)}`} stale={stale(context.updatedAt)} />;
 }
 
-export function NorwynModulePage({ context, searchParams, adsContext }: { context: NorwynModuleContext; searchParams?: SearchLike; adsContext?: AdsContext | null }) {
+export function NorwynModulePage({ context, searchParams, adsContext, instagramContext }: { context: NorwynModuleContext; searchParams?: SearchLike; adsContext?: AdsContext | null; instagramContext?: InstagramContext | null }) {
   if (context.diagnostic) {
     return <AccessState context={context} />;
   }
 
   if (context.module === "missoes") return <MissionsModule context={context} />;
-  if (context.module === "marketing") return <MarketingModule context={context} searchParams={searchParams} adsContext={adsContext} />;
+  if (context.module === "marketing") return <MarketingModule context={context} searchParams={searchParams} adsContext={adsContext} instagramContext={instagramContext} />;
   if (context.module === "resultados") return <ResultsModule context={context} />;
   if (context.module === "produtos-alunos") return <ProductsStudentsModule context={context} searchParams={searchParams} />;
   return <AutomationsModule context={context} />;
@@ -171,7 +173,7 @@ function MissionsModule({ context }: { context: NorwynModuleContext }) {
   );
 }
 
-function MarketingModule({ context, searchParams, adsContext }: { context: NorwynModuleContext; searchParams?: SearchLike; adsContext?: AdsContext | null }) {
+function MarketingModule({ context, searchParams, adsContext, instagramContext }: { context: NorwynModuleContext; searchParams?: SearchLike; adsContext?: AdsContext | null; instagramContext?: InstagramContext | null }) {
   const requestedView = getParam(searchParams, "view");
   const view = requestedView === "instagram" || requestedView === "ads" || requestedView === "content" ? requestedView : "overview";
   const followerSummary = context.followerGrowthSummary;
@@ -195,7 +197,7 @@ function MarketingModule({ context, searchParams, adsContext }: { context: Norwy
         {tabs.map((tab) => <Link key={tab.key} role="tab" aria-selected={view === tab.key} href={tab.href} className={moduleTabClass(view === tab.key)}>{tab.label}</Link>)}
       </div>
       {view === "overview" ? <MarketingOverview context={context} followerTotal={followerTotal} followerFreshness={followerFreshness} adsSpend={adsSpend} reach={reach} pendingContent={pendingContent} /> : null}
-      {view === "instagram" ? <MarketingInstagramPanel context={context} followerTotal={followerTotal} followerFreshness={followerFreshness} /> : null}
+      {view === "instagram" ? (instagramContext ? <InstagramDashboard context={instagramContext} initialTab="insights" editorialAuthorized={instagramContext.role === "ADMIN" || instagramContext.role === "SUPORTE"} /> : <MarketingInstagramPanel context={context} followerTotal={followerTotal} followerFreshness={followerFreshness} />) : null}
       {view === "ads" ? (adsContext ? <AdsDashboard context={adsContext} basePath="/marketing" searchParams={searchParams} /> : <EmptyState title="Ads indisponível">Não foi possível carregar Ads dentro de Marketing.</EmptyState>) : null}
       {view === "content" ? <MarketingContentPanel context={context} pendingContent={pendingContent} /> : null}
       {stale(followerFreshness, 48) ? <InsightCard title="Seguidores podem estar defasados" tone="warning">A tela evidencia a data do último snapshot. O número depende da próxima coleta/importação do Instagram.</InsightCard> : null}
@@ -584,5 +586,7 @@ function TelegramPanel({ context, health }: { context: NorwynModuleContext; heal
     </div>
   );
 }
+
+
 
 

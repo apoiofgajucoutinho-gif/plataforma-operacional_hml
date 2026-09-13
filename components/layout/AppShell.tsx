@@ -142,6 +142,13 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     : roleNavigation;
   const groups = groupedNavigation(visibleNavigation);
   const prefetchKey = visibleNavigation.map((item) => item.href).join("|");
+  const pendingItem = pendingHref
+    ? visibleNavigation.find((item) => {
+      const pendingUrl = new URL(pendingHref, "http://local");
+      const itemUrl = new URL(item.href, "http://local");
+      return pendingUrl.pathname === itemUrl.pathname;
+    })
+    : null;
 
   useEffect(() => {
     setPendingHref(null);
@@ -305,7 +312,18 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
       </aside>
 
       <TrackPageView activeItem={activeItem} />
-      <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
+      <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:py-8" aria-busy={Boolean(pendingHref)}>
+        {pendingHref ? (
+          <div className="sticky top-0 z-40 -mx-4 mb-4 rounded-b-2xl border-b border-brand-sky/30 bg-white/85 px-4 py-3 text-sm font-semibold text-brand-teal shadow-[0_14px_35px_rgba(0,62,78,0.08)] backdrop-blur sm:-mx-6 lg:-mx-8 lg:px-8">
+            <div className="flex items-center gap-3">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand-clay" />
+              <span>Abrindo {pendingItem?.label ?? "módulo"}...</span>
+            </div>
+            <div className="mt-2 h-1 overflow-hidden rounded-full bg-brand-sky/15">
+              <div className="h-full w-1/2 animate-pulse rounded-full bg-brand-teal" />
+            </div>
+          </div>
+        ) : null}
         <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
           {userLabel ? (
             <div className="theme-toggle hidden max-w-[260px] truncate rounded-full border border-[color:var(--ds-border)] bg-[color:var(--ds-surface)] px-3 py-2 text-xs font-semibold text-[color:var(--ds-text-secondary)] shadow-[var(--ds-shadow-sm)] sm:block">
@@ -349,6 +367,8 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     </div>
   );
 }
+
+
 
 
 

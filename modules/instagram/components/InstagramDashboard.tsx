@@ -10,6 +10,7 @@ import {
   CalendarDays,
   ExternalLink,
   Heart,
+  Instagram,
   LayoutGrid,
   Mail,
   MessageCircle,
@@ -980,19 +981,22 @@ export function InstagramDashboard({
 
   return (
     <div className="mx-auto max-w-[1760px] space-y-5 text-[15px]">
-      <header className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-sm font-semibold uppercase text-brand-clay">
-            {context.account?.username ? `@${context.account.username}` : "Instagram"}
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold text-brand-teal sm:text-4xl">Instagram Analytics</h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
-            Indicadores, tendências e oportunidades para otimizar a performance do Instagram.
-          </p>
+      <header className="flex flex-col justify-between gap-4 rounded-[28px] border border-[#F0DDE1] bg-white/80 p-5 shadow-[0_18px_50px_rgba(0,62,78,0.07)] lg:flex-row lg:items-center">
+        <div className="flex items-start gap-4">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[radial-gradient(circle_at_30%_110%,#ffdd55_0%,#ff543e_35%,#c837ab_62%,#4c68d7_100%)] text-white shadow-[0_12px_30px_rgba(200,55,171,0.25)]"><Instagram className="h-7 w-7" /></div>
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.22em] text-brand-clay">
+              {context.account?.username ? `@${context.account.username}` : "Instagram"}
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-brand-teal sm:text-4xl">Sua audiência em detalhe</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
+              Acompanhe crescimento, conteúdos, interações e oportunidades como uma expansão natural do resumo da Home.
+            </p>
+          </div>
         </div>
         {context.updatedAt ? (
-          <p className="text-xs font-semibold text-brand-teal/55">
-            Base atualizada em {dateTimeFormat(context.updatedAt)}
+          <p className="inline-flex w-fit rounded-full border border-brand-sky/40 bg-brand-sky/10 px-4 py-2 text-xs font-bold text-brand-teal/70">
+            Atualizado em {dateTimeFormat(context.updatedAt)}
           </p>
         ) : null}
       </header>
@@ -2172,4 +2176,7 @@ function InteractionStatusBadge({ value }: { value: InstagramInteractionStatus }
 function EmptyState() {
   return <p className="px-5 py-8 text-sm text-brand-teal/70">Nenhum post encontrado para os filtros.</p>;
 }
+
+
+
 

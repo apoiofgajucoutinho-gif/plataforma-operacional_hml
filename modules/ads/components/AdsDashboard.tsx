@@ -349,7 +349,7 @@ export function AdsDashboard({ context, basePath = "/ads", searchParams }: { con
               type="button"
               onClick={() => setActiveTab(tab.value)}
               className={clsx(
-                "inline-flex h-10 items-center gap-2 rounded-md border px-4 text-sm font-bold transition",
+                "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-bold transition",
                 isActive
                   ? "border-brand-clay bg-brand-clay text-white shadow-sm"
                   : "border-[#E9CBD1] bg-white text-brand-teal hover:bg-[#FFF7F8]",
@@ -420,15 +420,22 @@ export function AdsDashboard({ context, basePath = "/ads", searchParams }: { con
 }
 function Header({ updatedAt }: { updatedAt: string | null }) {
   return (
-    <header className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-      <div>
-        <p className="text-sm font-bold uppercase tracking-wide text-brand-clay">@FGA.JUCOUTINHO</p>
-        <h1 className="mt-2 text-4xl font-bold tracking-normal text-brand-teal">Instagram Ads Analytics</h1>
-        <p className="mt-2 max-w-3xl text-base leading-relaxed text-brand-teal/70">
-          KPIs, performance, detalhamento e análise de anúncios pagos migrados da aba Ads para o Supabase.
-        </p>
+    <header className="flex flex-col justify-between gap-4 rounded-[28px] border border-[#F0DDE1] bg-white/80 p-5 shadow-[0_18px_50px_rgba(0,62,78,0.07)] lg:flex-row lg:items-center">
+      <div className="flex items-start gap-4">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-500 shadow-[0_12px_30px_rgba(244,63,94,0.14)]">
+          <Radio className="h-7 w-7" />
+        </div>
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.22em] text-brand-clay">Meta Ads</p>
+          <h1 className="mt-2 text-3xl font-black tracking-tight text-brand-teal sm:text-4xl">Como o investimento está performando</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-brand-teal/70">
+            Acompanhe investimento, alcance, campanhas e evolução no período selecionado, sem misturar com os sinais orgânicos do Instagram.
+          </p>
+        </div>
       </div>
-      <div className="text-sm font-semibold text-brand-teal/55">Dados atualizados em {formatDateTime(updatedAt)}</div>
+      <div className="inline-flex w-fit rounded-full border border-brand-sky/40 bg-brand-sky/10 px-4 py-2 text-xs font-bold text-brand-teal/70">
+        Dados atualizados em {formatDateTime(updatedAt)}
+      </div>
     </header>
   );
 }
@@ -1379,3 +1386,5 @@ function buildPredictability(rows: AdsDailyRow[], allRows: AdsDailyRow[]) {
     { label: "Próx. saturações", value: nextSaturation, tone: nextSaturation ? "warn" as const : "good" as const },
   ];
 }
+
+
