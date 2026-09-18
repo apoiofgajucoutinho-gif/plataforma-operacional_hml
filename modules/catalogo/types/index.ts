@@ -3,6 +3,10 @@ export type CatalogCommercialStatus = "rascunho" | "ativo" | "pausado" | "desati
 export type CatalogTechnicalHealth = "funcionando" | "redirecionando" | "quebrado" | "indisponivel" | "nao_verificado";
 export type CatalogAttributionConfidence = "alta" | "media" | "baixa" | "nao_atribuivel";
 export type CatalogDataQualityStatus = "trusted" | "partial" | "review" | "insufficient_data";
+export type CatalogPaymentCondition = "avista" | "parcelamento_comum" | "parcelamento_hotmart" | "a_confirmar";
+export type CatalogAccessDuration = "1_ano" | "2_anos" | "3_anos" | "vitalicio" | "a_confirmar";
+export type CatalogComposition = "individual" | "combo";
+export type CatalogAudienceType = "geral" | "ex_aluno" | "a_confirmar";
 
 export type CatalogProduct = {
   id: string;
@@ -43,6 +47,10 @@ export type CatalogOffer = {
   lead_origin: string | null;
   special_rule: string | null;
   data_quality_status: CatalogDataQualityStatus;
+  payment_condition: CatalogPaymentCondition;
+  access_duration: CatalogAccessDuration;
+  composition: CatalogComposition;
+  audience_type: CatalogAudienceType;
   metadata: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
@@ -149,5 +157,9 @@ export type CatalogOfferPayload = {
   audience?: string | null;
   lead_origin?: string | null;
   special_rule?: string | null;
+  payment_condition?: CatalogPaymentCondition;
+  access_duration?: CatalogAccessDuration;
+  composition?: CatalogComposition;
+  audience_type?: CatalogAudienceType;
   reason?: string | null;
 };

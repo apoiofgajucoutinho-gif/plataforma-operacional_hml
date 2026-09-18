@@ -199,6 +199,14 @@ export async function getCatalogContext(): Promise<CatalogContext> {
   }
 }
 
+function normalizeAccessDuration(value?: string | null): "1_ano" | "2_anos" | "3_anos" | "vitalicio" | "a_confirmar" {
+  const normalized = normalizeText(value ?? "");
+  if (/\b1\s*ano\b/.test(normalized)) return "1_ano";
+  if (/\b2\s*anos?\b/.test(normalized)) return "2_anos";
+  if (/\b3\s*anos?\b/.test(normalized)) return "3_anos";
+  if (normalized.includes("vitalicio") || normalized.includes("perpetuo")) return "vitalicio";
+  return "a_confirmar";
+}
 function assertCanWrite(auth: CatalogAuth) {
   if (!canWriteCatalog(auth.role)) throw new Error("Seu perfil nao pode alterar o catalogo.");
 }
@@ -236,6 +244,10 @@ function offerPayload(input: CatalogOfferPayload, tenantId: string, productId: s
     lead_origin: cleanOptional(input.lead_origin),
     special_rule: cleanOptional(input.special_rule),
     data_quality_status: input.current_price == null || !input.use_type ? "partial" : "trusted",
+    payment_condition: input.payment_condition ?? "a_confirmar",
+    access_duration: input.access_duration ?? normalizeAccessDuration(input.access_time),
+    composition: input.composition ?? (input.offer_type === "combo" || (input.included_products?.length ?? 0) > 1 ? "combo" : "individual"),
+    audience_type: input.audience_type ?? "a_confirmar",
     ...(userId ? { created_by: userId } : {}),
   };
 }
