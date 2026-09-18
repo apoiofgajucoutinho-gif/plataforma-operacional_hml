@@ -28,7 +28,9 @@ async function queryRest(table, params) {
   const url = new URL(`${baseUrl.replace(/\/$/, "")}/rest/v1/${table}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const response = await fetch(url, { headers: { apikey: key, authorization: `Bearer ${key}` } });
-  assert.equal(response.ok, true, await response.text());
+  if (!response.ok) {
+    assert.fail(await response.text());
+  }
   return response.json();
 }
 
@@ -69,6 +71,7 @@ async function queryRest(table, params) {
   console.error(error);
   process.exit(1);
 });
+
 
 
 

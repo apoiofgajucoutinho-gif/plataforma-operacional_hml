@@ -26,6 +26,7 @@ import {
   Sparkles,
   Sun,
   Target,
+  Tags,
   UsersRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -53,6 +54,7 @@ const defaultNavigation: NavigationItem[] = [
   { label: "Resultados", href: "/resultados", icon: BarChart3, key: "resultados", module: "norwyn", group: "Negócio" },
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Negócio" },
   { label: "Produtos & Alunos", href: "/produtos-alunos", icon: UsersRound, key: "produtos-alunos", module: "norwyn", group: "Negócio" },
+  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Negócio" },
   { label: "Missões", href: "/missoes", icon: Target, key: "missoes", module: "norwyn", group: "Negócio" },
   { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Negócio" },
   { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Negócio" },
@@ -79,6 +81,7 @@ const specialistNavigation: NavigationItem[] = [
   { label: "Resultados", href: "/resultados", icon: BarChart3, key: "resultados", module: "norwyn", group: "Trabalho" },
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Trabalho" },
   { label: "Produtos & Alunos", href: "/produtos-alunos", icon: UsersRound, key: "produtos-alunos", module: "norwyn", group: "Trabalho" },
+  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Trabalho" },
   { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Trabalho" },
   { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Trabalho" },
   { label: "Presença", href: "/presence", icon: MonitorSmartphone, key: "presence", module: "norwyn", group: "Trabalho" },
@@ -92,6 +95,7 @@ const operationalNavigation: NavigationItem[] = [
   { label: "Alunos", href: "/produtos-alunos?view=students", icon: UsersRound, key: "alunos", module: "norwyn", group: "Operação" },
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Operação" },
   { label: "Produtos", href: "/produtos-alunos?view=products", icon: BriefcaseBusiness, key: "produtos", module: "norwyn", group: "Operação" },
+  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Operação" },
   { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Operação" },
   { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Operação" },
 ];
@@ -367,6 +371,11 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     </div>
   );
 }
+
+
+
+
+
 
 
 

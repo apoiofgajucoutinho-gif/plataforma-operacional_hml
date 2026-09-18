@@ -10,6 +10,7 @@ export const readyModules = [
   "marketing",
   "resultados",
   "produtos-alunos",
+  "catalogo",
   "automacoes",
   "validacao",
   "presence",
@@ -32,6 +33,7 @@ export const allModules = [
   "marketing",
   "resultados",
   "produtos-alunos",
+  "catalogo",
   "automacoes",
   "validacao",
   "presence",
@@ -42,4 +44,3 @@ export const allModules = [
   "relatorios",
   "admin",
 ];
-
