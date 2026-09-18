@@ -3,7 +3,8 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type { CatalogContext, CatalogOfferPayload, CatalogProduct, CatalogOffer, CatalogSalesLink, CatalogHistoryEvent, CatalogRow } from "@/modules/catalogo/types";
+import { runPresenceCheck } from "@/modules/presence/services/presence-monitor";
+import type { CatalogContext, CatalogOfferPayload, CatalogProduct, CatalogOffer, CatalogSalesLink, CatalogHistoryEvent, CatalogRow, CatalogTechnicalHealth } from "@/modules/catalogo/types";
 
 type SupabaseAny = any;
 
@@ -316,4 +317,171 @@ export async function updateCatalogOffer(input: CatalogOfferPayload) {
   await auth.dataClient.from("catalog_link_history").insert({ tenant_id: auth.tenantId, product_id: productId, offer_id: offer.id, sales_link_id: link.id, event_type: "updated", previous_value: { offer: previousOffer, link: previousLink }, new_value: { offer, link }, reason: input.reason ?? "Edicao manual", actor_id: auth.userId, actor_label: auth.userEmail });
   return { offer, link };
 }
+
+
+type CatalogLinkCheckSummary = {
+  linkId: string;
+  presenceAssetId: string;
+  presenceCheckId: string;
+  technicalHealth: string;
+  checkedAt: string | null;
+  httpStatus: number | null;
+  responseTimeMs: number | null;
+  finalUrl: string | null;
+  redirectChain: string[];
+  errorMessage: string | null;
+};
+
+function mapPresenceToCatalogHealth(check: any): CatalogTechnicalHealth {
+  const status = typeof check?.http_status === "number" ? check.http_status : null;
+  const resultJson = (check?.result_json ?? {}) as Record<string, unknown>;
+  const finalUrl = typeof resultJson.final_url === "string" ? resultJson.final_url : null;
+  const sourceUrl = typeof resultJson.catalog_source_url === "string" ? resultJson.catalog_source_url : null;
+  const redirected = Boolean(finalUrl && sourceUrl && finalUrl !== sourceUrl);
+  if (status == null) return "indisponivel";
+  if (status >= 500) return "indisponivel";
+  if (status >= 400) return "quebrado";
+  if (redirected || (Array.isArray(check?.redirect_chain) && check.redirect_chain.length > 1)) return "redirecionando";
+  return "funcionando";
+}
+
+async function loadCatalogRowForCheck(auth: CatalogAuth, linkId: string) {
+  const { data: link, error: linkError } = await auth.dataClient
+    .from("catalog_sales_links")
+    .select("*")
+    .eq("tenant_id", auth.tenantId)
+    .eq("id", linkId)
+    .maybeSingle();
+  if (linkError || !link) throw new Error(linkError?.message ?? "Link nao encontrado.");
+
+  const [{ data: offer, error: offerError }, { data: product, error: productError }] = await Promise.all([
+    auth.dataClient.from("catalog_offers").select("*").eq("tenant_id", auth.tenantId).eq("id", link.offer_id).maybeSingle(),
+    auth.dataClient.from("catalog_products").select("*").eq("tenant_id", auth.tenantId).eq("id", link.product_id).maybeSingle(),
+  ]);
+  if (offerError || !offer) throw new Error(offerError?.message ?? "Oferta nao encontrada.");
+  if (productError || !product) throw new Error(productError?.message ?? "Produto nao encontrado.");
+  return { link: link as CatalogSalesLink, offer: offer as CatalogOffer, product: product as CatalogProduct };
+}
+
+async function ensurePresenceAssetForCatalogLink(auth: CatalogAuth, row: { link: CatalogSalesLink; offer: CatalogOffer; product: CatalogProduct }) {
+  if (row.link.presence_asset_id) {
+    const { data: linked } = await auth.dataClient
+      .from("digital_assets")
+      .select("*")
+      .eq("tenant_id", auth.tenantId)
+      .eq("id", row.link.presence_asset_id)
+      .maybeSingle();
+    if (linked) return linked;
+  }
+
+  const { data: existing, error: existingError } = await auth.dataClient
+    .from("digital_assets")
+    .select("*")
+    .eq("tenant_id", auth.tenantId)
+    .eq("url", row.link.checkout_url)
+    .maybeSingle();
+  if (existingError) throw new Error(existingError.message);
+  if (existing) {
+    await auth.dataClient.from("catalog_sales_links").update({ presence_asset_id: existing.id }).eq("tenant_id", auth.tenantId).eq("id", row.link.id);
+    return existing;
+  }
+
+  const { data: asset, error } = await auth.dataClient
+    .from("digital_assets")
+    .insert({
+      tenant_id: auth.tenantId,
+      name: `${row.product.name} - ${row.offer.name}`.slice(0, 160),
+      url: row.link.checkout_url,
+      asset_type: "checkout",
+      environment: "external",
+      owner: row.offer.responsible ?? "Norwyn Catalogo",
+      is_critical: row.offer.commercial_status === "ativo",
+      monitoring_enabled: row.offer.commercial_status === "ativo",
+      monitor_content: false,
+      monitor_links: false,
+      monitor_performance: true,
+      expected_content: [],
+      expected_elements: [],
+      allowed_domains: [],
+      thresholds: { response_warning_ms: 1800, response_critical_ms: 4000, timeout_ms: 15000 },
+      metadata: { source: "catalogo", catalog_link_id: row.link.id, catalog_offer_id: row.offer.id, catalog_product_id: row.product.id },
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  await auth.dataClient.from("catalog_sales_links").update({ presence_asset_id: asset.id }).eq("tenant_id", auth.tenantId).eq("id", row.link.id);
+  return asset;
+}
+
+function buildCatalogPresenceMetadata(link: CatalogSalesLink, check: any) {
+  const resultJson = (check?.result_json ?? {}) as Record<string, unknown>;
+  const finalUrl = typeof resultJson.final_url === "string" ? resultJson.final_url : null;
+  const redirectChain = Array.isArray(check?.redirect_chain) ? check.redirect_chain.filter((item: unknown): item is string => typeof item === "string") : [];
+  return {
+    ...(link.metadata ?? {}),
+    presence: {
+      check_id: check.id,
+      checked_at: check.checked_at,
+      http_status: check.http_status ?? null,
+      response_time_ms: check.response_time_ms ?? null,
+      final_url: finalUrl,
+      redirect_chain: redirectChain,
+      error_message: check.error_message ?? null,
+      health_score: check.health_score ?? null,
+      presence_status: check.status ?? null,
+    },
+  };
+}
+
+export async function checkCatalogSalesLink(linkId: string): Promise<CatalogLinkCheckSummary> {
+  const auth = await getCatalogAuth();
+  assertCanWrite(auth);
+  const row = await loadCatalogRowForCheck(auth, linkId);
+  const previousHealth = row.link.technical_health;
+  const asset = await ensurePresenceAssetForCatalogLink(auth, row);
+  const { check } = await runPresenceCheck(auth.dataClient, { ...asset, url: row.link.checkout_url, tenant_id: auth.tenantId });
+  const enrichedCheck = { ...check, result_json: { ...(check.result_json ?? {}), catalog_source_url: row.link.checkout_url } };
+  const technicalHealth = mapPresenceToCatalogHealth(enrichedCheck);
+  const metadata = buildCatalogPresenceMetadata(row.link, enrichedCheck);
+  const { data: updatedLink, error: updateError } = await auth.dataClient
+    .from("catalog_sales_links")
+    .update({
+      technical_health: technicalHealth,
+      last_checked_at: check.checked_at,
+      presence_asset_id: asset.id,
+      metadata,
+    })
+    .eq("tenant_id", auth.tenantId)
+    .eq("id", row.link.id)
+    .select("*")
+    .single();
+  if (updateError) throw new Error(updateError.message);
+
+  await auth.dataClient.from("catalog_link_history").insert({
+    tenant_id: auth.tenantId,
+    product_id: row.product.id,
+    offer_id: row.offer.id,
+    sales_link_id: row.link.id,
+    event_type: previousHealth === technicalHealth ? "health_checked" : "health_changed",
+    previous_value: { technical_health: previousHealth },
+    new_value: { technical_health: technicalHealth, presence_check_id: check.id, http_status: check.http_status, final_url: metadata.presence.final_url },
+    reason: previousHealth === technicalHealth ? "Verificacao de saude do link" : `Saude alterada de ${previousHealth} para ${technicalHealth}`,
+    actor_id: auth.userId,
+    actor_label: auth.userEmail,
+  });
+
+  return {
+    linkId: row.link.id,
+    presenceAssetId: asset.id,
+    presenceCheckId: check.id,
+    technicalHealth: updatedLink.technical_health,
+    checkedAt: updatedLink.last_checked_at,
+    httpStatus: metadata.presence.http_status,
+    responseTimeMs: metadata.presence.response_time_ms,
+    finalUrl: metadata.presence.final_url,
+    redirectChain: metadata.presence.redirect_chain,
+    errorMessage: metadata.presence.error_message,
+  };
+}
+
 

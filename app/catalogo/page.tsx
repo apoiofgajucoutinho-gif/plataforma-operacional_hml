@@ -1,5 +1,5 @@
 import { AppShell } from "@/components/layout/AppShell";
-import { CatalogoDashboard } from "@/modules/catalogo/components/CatalogoDashboard";
+import { CatalogoDashboardP02 } from "@/modules/catalogo/components/CatalogoDashboardP02";
 import { getCatalogContext } from "@/modules/catalogo/services/catalogo-server";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,8 @@ export default async function CatalogoPage() {
 
   return (
     <AppShell activeItem="catalogo" allowedItems={context.allowedModules} role={context.role}>
-      <CatalogoDashboard context={context} />
+      <CatalogoDashboardP02 context={context} />
     </AppShell>
   );
 }
+

@@ -257,7 +257,7 @@ function DetailPanel({ row, canEdit, canSeeTechnical, history, onCopy, onEdit }:
   </Surface>;
 }
 
-function OfferForm({ row, products, pending, onClose, onSave }: { row: CatalogRow | null; products: string[]; pending: boolean; onClose: () => void; onSave: (payload: CatalogOfferPayload) => void }) {
+export function OfferForm({ row, products, pending, onClose, onSave }: { row: CatalogRow | null; products: string[]; pending: boolean; onClose: () => void; onSave: (payload: CatalogOfferPayload) => void }) {
   const [form, setForm] = useState<CatalogOfferPayload>(() => row ? {
     id: row.offer.id,
     product_id: row.product.id,
@@ -296,3 +296,4 @@ function dateTime(value: string) { return new Intl.DateTimeFormat("pt-BR", { dat
 function coparticipationLabel(row: CatalogRow, compact = false) { if (row.offer.has_coparticipation === false) return "Sem coparticipação"; if (row.offer.has_coparticipation === true) return `${row.offer.partner ?? "Parceiro"}${row.offer.coparticipation_percent != null ? ` · ${row.offer.coparticipation_percent}%` : ""}`; return compact ? "A confirmar" : <StatusBadge tone="warning">A confirmar</StatusBadge>; }
 function historyLabel(value: string) { return value === "created" ? "Criado" : value === "updated" ? "Editado" : value; }
 function Info({ label, value }: { label: string; value: React.ReactNode }) { return <div className="rounded-[var(--ds-radius-md)] bg-[color:var(--ds-bg-soft)] p-3"><p className="text-[11px] font-semibold uppercase text-[color:var(--ds-text-muted)]">{label}</p><p className="mt-1 break-words font-semibold text-[color:var(--ds-text)]">{value}</p></div>; }
+
