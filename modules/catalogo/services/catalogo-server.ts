@@ -4,7 +4,7 @@ import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-b
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { runPresenceCheck } from "@/modules/presence/services/presence-monitor";
-import type { CatalogContext, CatalogOfferPayload, CatalogProduct, CatalogOffer, CatalogSalesLink, CatalogHistoryEvent, CatalogRow, CatalogTechnicalHealth } from "@/modules/catalogo/types";
+import type { CatalogBulkUpdatePayload, CatalogBulkUpdateResult, CatalogContext, CatalogOfferPayload, CatalogProduct, CatalogOffer, CatalogSalesLink, CatalogHistoryEvent, CatalogRow, CatalogTechnicalHealth } from "@/modules/catalogo/types";
 
 type SupabaseAny = any;
 
@@ -330,6 +330,39 @@ export async function updateCatalogOffer(input: CatalogOfferPayload) {
   return { offer, link };
 }
 
+
+const taxonomyValues = {
+  audience_type: ["geral", "ex_aluno", "a_confirmar"],
+  access_duration: ["1_ano", "2_anos", "3_anos", "vitalicio", "a_confirmar"],
+  payment_condition: ["avista", "parcelamento_comum", "parcelamento_hotmart", "a_confirmar"],
+  composition: ["individual", "combo"],
+} as const;
+
+export async function bulkUpdateCatalogOffers(input: CatalogBulkUpdatePayload): Promise<CatalogBulkUpdateResult> {
+  const auth = await getCatalogAuth();
+  assertCanWrite(auth);
+
+  const offerIds = Array.from(new Set((input.offerIds ?? []).filter(Boolean)));
+  if (!offerIds.length) throw new Error("Selecione ao menos uma oferta.");
+  if (!Object.prototype.hasOwnProperty.call(taxonomyValues, input.field)) throw new Error("Campo de taxonomia invalido.");
+
+  const validValues = taxonomyValues[input.field] as readonly string[];
+  if (!validValues.includes(String(input.value))) throw new Error("Valor invalido para o campo selecionado.");
+
+  const { data, error } = await auth.dataClient.rpc("catalog_bulk_update_taxonomy", {
+    p_tenant_id: auth.tenantId,
+    p_offer_ids: offerIds,
+    p_field: input.field,
+    p_new_value: String(input.value),
+    p_only_pending: input.onlyPending ?? true,
+    p_actor_id: auth.userId,
+    p_actor_label: auth.userEmail,
+    p_origin: input.origin ?? "bulk",
+  });
+
+  if (error) throw new Error(error.message);
+  return data as CatalogBulkUpdateResult;
+}
 
 type CatalogLinkCheckSummary = {
   linkId: string;

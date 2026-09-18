@@ -5,12 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { clsx } from "clsx";
 import { AlertTriangle, CheckCircle2, Clipboard, Clock3, Copy, ExternalLink, Filter, Link2, PackageCheck, Pencil, Plus, RefreshCw, Search, ShieldCheck, Star, Tags, X } from "lucide-react";
 import { ActionCard, DataFreshness, EmptyState, IconPill, MetricCard, PageHeader, StatusBadge, Surface } from "@/components/ui/norwyn-design-system";
-import type { CatalogAccessDuration, CatalogAudienceType, CatalogCommercialStatus, CatalogComposition, CatalogContext, CatalogOfferPayload, CatalogOfferType, CatalogPaymentCondition, CatalogRow, CatalogTechnicalHealth } from "@/modules/catalogo/types";
+import type { CatalogAccessDuration, CatalogAudienceType, CatalogBulkUpdateResult, CatalogCommercialStatus, CatalogComposition, CatalogContext, CatalogOfferPayload, CatalogOfferType, CatalogPaymentCondition, CatalogRow, CatalogTaxonomyField, CatalogTechnicalHealth } from "@/modules/catalogo/types";
 
 type CatalogView = "offers" | "health" | "pending" | "history";
 type PendingKey = "price" | "use" | "access" | "warranty" | "health" | "coparticipation" | "main" | "offer_id" | "payment" | "composition" | "audience";
 type PendingGroup = "Cadastro incompleto" | "Saude" | "Link principal" | "Coparticipacao" | "Pagamento" | "Acesso" | "Composicao" | "Publico";
 type PendingTag = { key: PendingKey; label: string; group: PendingGroup };
+type TaxonomyPendingKey = "audience" | "access" | "payment" | "composition";
+type PendingEntry = { row: CatalogRow; tag: PendingTag; field: CatalogTaxonomyField };
 type Filters = { q: string; product: string; payment: string; access: string; composition: string; audience: string; copa: string; health: string; status: string; pending: string };
 
 const viewLabels: Record<CatalogView, string> = { offers: "Ofertas", health: "Saude dos links", pending: "Pendencias", history: "Historico" };
@@ -22,6 +24,15 @@ const accessLabels: Record<CatalogAccessDuration, string> = { "1_ano": "1 ano", 
 const compositionLabels: Record<CatalogComposition, string> = { individual: "Individual", combo: "Combo" };
 const audienceLabels: Record<CatalogAudienceType, string> = { geral: "Geral", ex_aluno: "Ex-aluno", a_confirmar: "A confirmar" };
 const pendingLabels: Record<PendingKey, string> = { price: "Preco a confirmar", use: "Uso nao informado", access: "Acesso a revisar", warranty: "Garantia a confirmar", health: "Saude nao verificada", coparticipation: "Coparticipacao a revisar", main: "Sem Link principal", offer_id: "Offer ID ausente", payment: "Pagamento a revisar", composition: "Composicao a revisar", audience: "Publico a revisar" };
+const taxonomyPendingKeys: TaxonomyPendingKey[] = ["audience", "access", "payment", "composition"];
+const taxonomyFieldByPendingKey: Record<TaxonomyPendingKey, CatalogTaxonomyField> = { audience: "audience_type", access: "access_duration", payment: "payment_condition", composition: "composition" };
+const taxonomyFieldLabels: Record<CatalogTaxonomyField, string> = { audience_type: "Publico", access_duration: "Acesso", payment_condition: "Pagamento", composition: "Composicao" };
+const taxonomyOptions: Record<CatalogTaxonomyField, Array<[string, string]>> = {
+  audience_type: Object.entries(audienceLabels),
+  access_duration: Object.entries(accessLabels),
+  payment_condition: Object.entries(paymentLabels),
+  composition: Object.entries(compositionLabels),
+};
 
 export function CatalogoDashboardP02({ context }: { context: CatalogContext }) {
   const router = useRouter();
@@ -30,6 +41,7 @@ export function CatalogoDashboardP02({ context }: { context: CatalogContext }) {
   const [editing, setEditing] = useState<CatalogRow | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [checkingLinkId, setCheckingLinkId] = useState<string | null>(null);
+  const [taxonomySaving, setTaxonomySaving] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const view = parseView(searchParams.get("view"));
@@ -51,7 +63,7 @@ export function CatalogoDashboardP02({ context }: { context: CatalogContext }) {
   const selectedLinkId = searchParams.get("linkId") ?? filteredRows[0]?.link.id ?? context.rows[0]?.link.id ?? null;
   const selectedRow = context.rows.find((row) => row.link.id === selectedLinkId) ?? filteredRows[0] ?? context.rows[0] ?? null;
   const healthSummary = useMemo(() => summarizeHealth(context.rows), [context.rows]);
-  const pendingItems = useMemo(() => context.rows.map((row) => ({ row, tags: pendingTags(row, productMainMap) })).filter((item) => item.tags.length > 0), [context.rows, productMainMap]);
+  const pendingItems = useMemo(() => filteredRows.map((row) => ({ row, tags: pendingTags(row, productMainMap) })).filter((item) => item.tags.length > 0), [filteredRows, productMainMap]);
   const historyRows = useMemo(() => filterHistory(context.history, filters.q), [context.history, filters.q]);
 
   function updateParams(changes: Record<string, string | null | undefined>) {
@@ -81,6 +93,27 @@ export function CatalogoDashboardP02({ context }: { context: CatalogContext }) {
       router.refresh();
     });
   }
+  async function updateTaxonomy(offerIds: string[], field: CatalogTaxonomyField, value: string, onlyPending = true, origin: "individual" | "bulk" = "bulk"): Promise<CatalogBulkUpdateResult | null> {
+    setTaxonomySaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/catalogo/offers/bulk-update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ offerIds, field, value, onlyPending, origin }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Nao foi possivel atualizar as pendencias.");
+      const data = result.data as CatalogBulkUpdateResult;
+      const action = data.updated_count === 1 ? "1 oferta atualizada" : `${data.updated_count} ofertas atualizadas`;
+      const skipped = data.skipped_count ? ` ${data.skipped_count} ignorada(s) por protecao ou valor ja aplicado.` : "";
+      setMessage(`${action}.${skipped}`);
+      router.refresh();
+      return data;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar as pendencias.");
+      return null;
+    } finally {
+      setTaxonomySaving(false);
+    }
+  }
+
 
   async function verifyNow(row: CatalogRow) {
     setCheckingLinkId(row.link.id);
@@ -107,7 +140,7 @@ export function CatalogoDashboardP02({ context }: { context: CatalogContext }) {
     <CatalogFilters filters={filters} products={context.products.map((product) => ({ id: product.id, name: product.name }))} onChange={updateParams} />
     {view === "offers" ? <OffersView context={context} rows={filteredRows} selectedRow={selectedRow} healthSummary={healthSummary} productMainMap={productMainMap} canEdit={context.canEdit} canSeeTechnical={context.canSeeTechnical} checkingLinkId={checkingLinkId} onSelect={(row) => updateParams({ linkId: row.link.id })} onCopy={copyLink} onEdit={(row) => { setEditing(row); setFormOpen(true); }} onVerify={verifyNow} /> : null}
     {view === "health" ? <HealthView rows={filteredRows} summary={healthSummary} checkingLinkId={checkingLinkId} onSelect={(row) => updateParams({ view: "offers", linkId: row.link.id })} onVerify={verifyNow} /> : null}
-    {view === "pending" ? <PendingView items={pendingItems} onSelect={(row) => updateParams({ view: "offers", linkId: row.link.id })} /> : null}
+    {view === "pending" ? <PendingView items={pendingItems} canEdit={context.canEdit} pending={taxonomySaving} onSelect={(row) => updateParams({ view: "offers", linkId: row.link.id })} onUpdate={updateTaxonomy} /> : null}
     {view === "history" ? <HistoryView events={historyRows} rows={context.rows} /> : null}
     {formOpen ? <CatalogOfferForm row={editing} products={context.products.map((product) => product.name)} pending={isPending} onClose={() => setFormOpen(false)} onSave={saveOffer} /> : null}
   </section>;
@@ -127,9 +160,149 @@ function HealthView({ rows, summary, checkingLinkId, onSelect, onVerify }: { row
   return <div className="space-y-5"><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"><MetricCard label="Links verificados" value={String(summary.checked)} period="Com ultimo check" tone="info" icon={CheckCircle2} /><MetricCard label="Funcionando" value={String(summary.funcionando)} period="Ultimo check saudavel" tone="success" icon={ShieldCheck} /><MetricCard label="Redirecionando" value={String(summary.redirecionando)} period="Nao e erro por si so" tone="info" icon={ExternalLink} /><MetricCard label="Com problema" value={String(summary.withIssue)} period="Quebrado/indisponivel" tone={summary.withIssue ? "danger" : "neutral"} icon={AlertTriangle} /><MetricCard label="Nao verificados" value={String(summary.notChecked)} period="Pendencia de observabilidade" tone="warning" icon={Clock3} /></div><Surface className="space-y-4"><h2 className="text-xl font-semibold text-[color:var(--ds-text)]">Saude dos links</h2><div className="grid gap-3">{rows.map((row) => <HealthRow key={row.link.id} row={row} checking={checkingLinkId === row.link.id} onSelect={() => onSelect(row)} onVerify={() => onVerify(row)} />)}</div></Surface></div>;
 }
 
-function PendingView({ items, onSelect }: { items: Array<{ row: CatalogRow; tags: PendingTag[] }>; onSelect: (row: CatalogRow) => void }) {
-  const grouped = groupPending(items);
-  return <div className="grid gap-5 lg:grid-cols-2">{Object.entries(grouped).map(([group, groupItems]) => <Surface key={group} className="space-y-3"><div className="flex items-center justify-between gap-3"><h2 className="text-xl font-semibold text-[color:var(--ds-text)]">{group}</h2><StatusBadge tone="warning">{groupItems.length}</StatusBadge></div>{groupItems.map(({ row, tags }) => <button key={`${group}-${row.link.id}`} type="button" onClick={() => onSelect(row)} className="w-full rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 text-left shadow-[var(--ds-shadow-sm)] transition hover:border-[color:var(--ds-primary)]"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-[color:var(--ds-text)]">{row.offer.name}</p><p className="mt-1 text-sm text-[color:var(--ds-text-secondary)]">{row.product.name}</p></div><span className="text-xs font-semibold text-[color:var(--ds-primary)]">Revisar</span></div><div className="mt-3 flex flex-wrap gap-2">{tags.map((tag) => <StatusBadge key={tag.key} tone="warning">{tag.label}</StatusBadge>)}</div></button>)}</Surface>)}{items.length === 0 ? <Surface><EmptyState title="Sem pendencias">Os links do recorte atual nao exigem acao humana.</EmptyState></Surface> : null}</div>;
+function PendingView({ items, canEdit, pending, onSelect, onUpdate }: { items: Array<{ row: CatalogRow; tags: PendingTag[] }>; canEdit: boolean; pending: boolean; onSelect: (row: CatalogRow) => void; onUpdate: (offerIds: string[], field: CatalogTaxonomyField, value: string, onlyPending?: boolean, origin?: "individual" | "bulk") => Promise<CatalogBulkUpdateResult | null> }) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkField, setBulkField] = useState<CatalogTaxonomyField>("audience_type");
+  const [bulkValue, setBulkValue] = useState("geral");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [allowOverwrite, setAllowOverwrite] = useState(false);
+  const entries = useMemo(() => buildTaxonomyPendingEntries(items), [items]);
+  const counts = useMemo(() => countTaxonomyPending(entries), [entries]);
+  const grouped = useMemo(() => groupTaxonomyPending(entries), [entries]);
+  const rowByOfferId = useMemo(() => new Map(entries.map((entry) => [entry.row.offer.id, entry.row])), [entries]);
+  const selectedRows = selectedIds.map((id) => rowByOfferId.get(id)).filter(Boolean) as CatalogRow[];
+  const selectedPendingRows = selectedRows.filter((row) => isPendingForField(row, bulkField));
+  const selectedConfirmedRows = selectedRows.filter((row) => !isPendingForField(row, bulkField));
+  const affectedRows = allowOverwrite ? selectedRows : selectedPendingRows;
+  const visibleOfferIds = Array.from(new Set(entries.map((entry) => entry.row.offer.id)));
+
+  function toggle(id: string) {
+    setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  }
+
+  function selectVisible() {
+    setSelectedIds(visibleOfferIds);
+  }
+
+  async function quickUpdate(row: CatalogRow, field: CatalogTaxonomyField, value: string) {
+    if (value === currentTaxonomyValue(row, field)) return;
+    const result = await onUpdate([row.offer.id], field, value, true, "individual");
+    if (result?.updated_count) setSelectedIds((current) => current.filter((id) => id !== row.offer.id));
+  }
+
+  async function applyBulk() {
+    const result = await onUpdate(selectedIds, bulkField, bulkValue, !allowOverwrite, "bulk");
+    if (result) {
+      setConfirmOpen(false);
+      setAllowOverwrite(false);
+      setSelectedIds([]);
+    }
+  }
+
+  return <div className="space-y-5">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <MetricCard label="Publico a revisar" value={String(counts.audience)} period="Fila comercial" tone={counts.audience ? "warning" : "success"} icon={Tags} />
+      <MetricCard label="Acesso a revisar" value={String(counts.access)} period="Tempo de acesso" tone={counts.access ? "warning" : "success"} icon={Clock3} />
+      <MetricCard label="Pagamento a revisar" value={String(counts.payment)} period="Condicao comercial" tone={counts.payment ? "warning" : "success"} icon={Clipboard} />
+      <MetricCard label="Composicao a revisar" value={String(counts.composition)} period="Individual ou combo" tone={counts.composition ? "warning" : "success"} icon={PackageCheck} />
+    </div>
+
+    <Surface className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-[color:var(--ds-text)]">Fila de pendencias</h2>
+          <p className="mt-1 text-sm text-[color:var(--ds-text-secondary)]">Somente pendentes. Resolva individualmente ou selecione varias ofertas para aplicar em lote.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={selectVisible} disabled={!canEdit || !visibleOfferIds.length} className="rounded-full border border-[color:var(--ds-border)] px-4 py-2 text-sm font-semibold text-[color:var(--ds-text)] disabled:opacity-50">Selecionar visiveis</button>
+          <button type="button" onClick={() => setSelectedIds([])} disabled={!selectedIds.length} className="rounded-full border border-[color:var(--ds-border)] px-4 py-2 text-sm font-semibold text-[color:var(--ds-text)] disabled:opacity-50">Limpar selecao</button>
+        </div>
+      </div>
+
+      {selectedIds.length ? <div className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-bg-soft)] p-4">
+        <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+          <FilterSelect label={`${selectedIds.length} oferta(s) selecionada(s)`} value={bulkField} onChange={(value) => { const field = value as CatalogTaxonomyField; setBulkField(field); setBulkValue(taxonomyOptions[field][0]?.[0] ?? ""); setAllowOverwrite(false); }} options={(Object.entries(taxonomyFieldLabels) as Array<[CatalogTaxonomyField, string]>)} />
+          <FilterSelect label="Novo valor" value={bulkValue} onChange={setBulkValue} options={taxonomyOptions[bulkField]} />
+          <button type="button" onClick={() => setConfirmOpen(true)} disabled={!canEdit || pending || !bulkValue} className="self-end rounded-full bg-[color:var(--ds-primary)] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">Aplicar em lote</button>
+        </div>
+        <p className="mt-2 text-xs font-semibold text-[color:var(--ds-text-muted)]">Padrao: aplicar apenas nos itens ainda pendentes para este campo.</p>
+      </div> : null}
+    </Surface>
+
+    {Object.entries(grouped).map(([key, groupEntries]) => <Surface key={key} className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-[color:var(--ds-text)]">{pendingLabels[key as TaxonomyPendingKey]}</h3>
+          <p className="text-sm text-[color:var(--ds-text-secondary)]">{groupEntries.length} oferta(s) para revisar.</p>
+        </div>
+        <StatusBadge tone="warning">{groupEntries.length}</StatusBadge>
+      </div>
+      <div className="grid gap-3">
+        {groupEntries.map((entry) => <PendingWorkItem key={`${entry.tag.key}-${entry.row.offer.id}`} entry={entry} selected={selectedIds.includes(entry.row.offer.id)} canEdit={canEdit} pending={pending} onToggle={() => toggle(entry.row.offer.id)} onSelect={() => onSelect(entry.row)} onQuickUpdate={quickUpdate} />)}
+      </div>
+    </Surface>)}
+
+    {entries.length === 0 ? <Surface><EmptyState title="Sem pendencias">Os links do recorte atual nao exigem acao humana nessa fila.</EmptyState></Surface> : null}
+
+    {confirmOpen ? <div className="fixed inset-0 z-50 flex items-center justify-center bg-[color:var(--ds-text)]/45 p-3 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="w-full max-w-xl rounded-[var(--ds-radius-lg)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-5 shadow-[var(--ds-shadow-lg)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase text-[color:var(--ds-accent)]">Confirmacao em lote</p>
+            <h3 className="mt-1 text-2xl font-semibold text-[color:var(--ds-text)]">Aplicar {taxonomyFieldLabels[bulkField]} = {taxonomyValueLabel(bulkField, bulkValue)}</h3>
+          </div>
+          <button type="button" onClick={() => setConfirmOpen(false)} className="rounded-full p-2 hover:bg-[color:var(--ds-bg-soft)]"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="mt-4 grid gap-3 text-sm text-[color:var(--ds-text-secondary)]">
+          <Info label="Quantidade selecionada" value={`${selectedIds.length} oferta(s)`} />
+          <Info label="Aplicacao padrao" value={`${affectedRows.length} oferta(s) ${allowOverwrite ? "incluindo valores ja confirmados" : "ainda pendente(s)"}`} />
+          <Info label="Produtos afetados" value={uniqueValues(affectedRows.map((row) => row.product.name)).join(", ") || "Nenhum item pendente para esse campo"} />
+          <Info label="Valores atuais" value={summarizeCurrentValues(affectedRows, bulkField)} />
+        </div>
+        {selectedConfirmedRows.length ? <div className="mt-4 rounded-[var(--ds-radius-md)] border border-[color:var(--ds-warning)] bg-[color:var(--ds-warning-soft)] p-3 text-sm font-semibold text-[color:var(--ds-text)]">
+          {selectedConfirmedRows.length} oferta(s) ja possuem {taxonomyFieldLabels[bulkField]} diferente de pendente. Por padrao, elas serao ignoradas.
+          <label className="mt-3 flex items-center gap-2 text-xs"><input type="checkbox" checked={allowOverwrite} onChange={(event) => setAllowOverwrite(event.target.checked)} className="h-4 w-4 accent-[color:var(--ds-primary)]" />Permitir sobrescrever tambem essas ofertas.</label>
+        </div> : null}
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={() => setConfirmOpen(false)} className="rounded-full border border-[color:var(--ds-border)] px-4 py-2 text-sm font-semibold text-[color:var(--ds-text)]">Cancelar</button>
+          <button type="button" onClick={applyBulk} disabled={pending || !affectedRows.length} className="rounded-full bg-[color:var(--ds-primary)] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">{pending ? "Aplicando..." : `Aplicar em ${affectedRows.length} oferta(s)`}</button>
+        </div>
+      </div>
+    </div> : null}
+  </div>;
+}
+
+function PendingWorkItem({ entry, selected, canEdit, pending, onToggle, onSelect, onQuickUpdate }: { entry: PendingEntry; selected: boolean; canEdit: boolean; pending: boolean; onToggle: () => void; onSelect: () => void; onQuickUpdate: (row: CatalogRow, field: CatalogTaxonomyField, value: string) => void }) {
+  const { row, tag, field } = entry;
+  return <article className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <label className="flex min-w-0 flex-1 items-start gap-3">
+        <input type="checkbox" checked={selected} onChange={onToggle} disabled={!canEdit} className="mt-1 h-4 w-4 shrink-0 accent-[color:var(--ds-primary)] disabled:opacity-50" />
+        <span className="min-w-0">
+          <span className="block font-semibold text-[color:var(--ds-text)]">{row.offer.name}</span>
+          <span className="mt-1 block text-sm text-[color:var(--ds-text-secondary)]">{row.product.name}</span>
+        </span>
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge tone="warning">{tag.label}</StatusBadge>
+        <button type="button" onClick={onSelect} className="rounded-full border border-[color:var(--ds-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--ds-text)] hover:bg-[color:var(--ds-bg-soft)]">Ver oferta</button>
+      </div>
+    </div>
+    <div className="mt-4 grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-4">
+      <Info label="Preco" value={money(row.offer.current_price)} />
+      <Info label="Tipo" value={offerTypeLabels[row.offer.offer_type]} />
+      <Info label="Uso" value={row.offer.use_type || "A confirmar"} />
+      <Info label="Regra especial" value={row.offer.special_rule || "A confirmar"} />
+      <Info label="Acesso atual" value={accessLabels[row.offer.access_duration]} />
+      <Info label="Pagamento atual" value={paymentLabels[row.offer.payment_condition]} />
+      <Info label="Publico atual" value={audienceLabels[row.offer.audience_type]} />
+      <Info label="Composicao atual" value={compositionLabels[row.offer.composition]} />
+    </div>
+    <div className="mt-4 grid gap-2 md:grid-cols-[minmax(180px,260px)_auto] md:items-end">
+      <FilterSelect label={`Definir ${taxonomyFieldLabels[field]}`} value={currentTaxonomyValue(row, field)} onChange={(value) => onQuickUpdate(row, field, value)} options={taxonomyOptions[field]} />
+      <p className="text-xs font-semibold text-[color:var(--ds-text-muted)]">Salva direto e remove da fila quando a pendencia for resolvida.</p>
+    </div>
+  </article>;
 }
 
 function HistoryView({ events, rows }: { events: CatalogContext["history"]; rows: CatalogRow[] }) {
@@ -216,7 +389,23 @@ function hasCompositionConflict(row: CatalogRow) {
 }
 function buildProductMainMap(rows: CatalogRow[]) { const map = new Map<string, { activeMainCount: number; activeOfferCount: number }>(); for (const row of rows) { const current = map.get(row.product.id) ?? { activeMainCount: 0, activeOfferCount: 0 }; if (row.offer.commercial_status === "ativo") { current.activeOfferCount += 1; if (row.link.is_main_link) current.activeMainCount += 1; } map.set(row.product.id, current); } return map; }
 function summarizeHealth(rows: CatalogRow[]) { const total = rows.length; const funcionando = rows.filter((row) => row.link.technical_health === "funcionando").length; const redirecionando = rows.filter((row) => row.link.technical_health === "redirecionando").length; const quebrados = rows.filter((row) => row.link.technical_health === "quebrado").length; const indisponiveis = rows.filter((row) => row.link.technical_health === "indisponivel").length; const notChecked = rows.filter((row) => row.link.technical_health === "nao_verificado").length; return { total, checked: total - notChecked, funcionando, redirecionando, quebrados, indisponiveis, notChecked, withIssue: quebrados + indisponiveis }; }
-function groupPending(items: Array<{ row: CatalogRow; tags: PendingTag[] }>) { const grouped: Record<string, Array<{ row: CatalogRow; tags: PendingTag[] }>> = {}; for (const item of items) { const firstGroup = item.tags[0]?.group ?? "Cadastro incompleto"; grouped[firstGroup] = grouped[firstGroup] ?? []; grouped[firstGroup].push(item); } return grouped; }
+function buildTaxonomyPendingEntries(items: Array<{ row: CatalogRow; tags: PendingTag[] }>): PendingEntry[] {
+  const entries: PendingEntry[] = [];
+  for (const item of items) {
+    for (const tagItem of item.tags) {
+      if (isTaxonomyPendingKey(tagItem.key)) entries.push({ row: item.row, tag: tagItem, field: taxonomyFieldByPendingKey[tagItem.key] });
+    }
+  }
+  return entries;
+}
+function groupTaxonomyPending(entries: PendingEntry[]) { const grouped: Record<TaxonomyPendingKey, PendingEntry[]> = { audience: [], access: [], payment: [], composition: [] }; for (const entry of entries) { if (isTaxonomyPendingKey(entry.tag.key)) grouped[entry.tag.key].push(entry); } return Object.fromEntries(Object.entries(grouped).filter(([, value]) => value.length > 0)) as Partial<Record<TaxonomyPendingKey, PendingEntry[]>>; }
+function countTaxonomyPending(entries: PendingEntry[]) { const counts: Record<TaxonomyPendingKey, number> = { audience: 0, access: 0, payment: 0, composition: 0 }; for (const entry of entries) { if (isTaxonomyPendingKey(entry.tag.key)) counts[entry.tag.key] += 1; } return counts; }
+function isTaxonomyPendingKey(value: PendingKey): value is TaxonomyPendingKey { return taxonomyPendingKeys.includes(value as TaxonomyPendingKey); }
+function currentTaxonomyValue(row: CatalogRow, field: CatalogTaxonomyField) { if (field === "audience_type") return row.offer.audience_type; if (field === "access_duration") return row.offer.access_duration; if (field === "payment_condition") return row.offer.payment_condition; return row.offer.composition; }
+function taxonomyValueLabel(field: CatalogTaxonomyField, value: string) { return taxonomyOptions[field].find(([optionValue]) => optionValue === value)?.[1] ?? value; }
+function summarizeCurrentValues(rows: CatalogRow[], field: CatalogTaxonomyField) { const summary = new Map<string, number>(); for (const row of rows) { const label = taxonomyValueLabel(field, currentTaxonomyValue(row, field)); summary.set(label, (summary.get(label) ?? 0) + 1); } return Array.from(summary.entries()).map(([label, count]) => `${label}: ${count}`).join(" | ") || "Sem itens aplicaveis"; }
+function isPendingForField(row: CatalogRow, field: CatalogTaxonomyField) { if (field === "audience_type") return row.offer.audience_type === "a_confirmar"; if (field === "access_duration") return row.offer.access_duration === "a_confirmar"; if (field === "payment_condition") return row.offer.payment_condition === "a_confirmar"; return hasCompositionConflict(row); }
+
 function presenceDetails(row: CatalogRow) { const presence = (row.link.metadata?.presence ?? {}) as Record<string, unknown>; return { httpStatus: typeof presence.http_status === "number" ? presence.http_status : null, responseTimeMs: typeof presence.response_time_ms === "number" ? presence.response_time_ms : null, finalUrl: typeof presence.final_url === "string" ? presence.final_url : null, redirectChain: Array.isArray(presence.redirect_chain) ? presence.redirect_chain.filter((item): item is string => typeof item === "string") : [], errorMessage: typeof presence.error_message === "string" ? presence.error_message : null }; }
 function HealthBadge({ health }: { health: CatalogTechnicalHealth }) { const tone = health === "funcionando" ? "success" : health === "redirecionando" ? "info" : health === "nao_verificado" ? "neutral" : "danger"; return <StatusBadge tone={tone}>{healthLabels[health]}</StatusBadge>; }
 function FilterSelect({ label, value, options, compact = false, onChange }: { label: string; value: string; options: Array<[string, string]>; compact?: boolean; onChange: (value: string) => void }) { return <label className={clsx("grid gap-1 text-xs font-semibold text-[color:var(--ds-text-muted)]", compact && "max-w-xs")}>{label}<select value={value} onChange={(event) => onChange(event.target.value)} className="h-11 rounded-full border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] px-3 text-sm font-semibold text-[color:var(--ds-text)] outline-none focus:border-[color:var(--ds-primary)]">{options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}</select></label>; }
@@ -229,5 +418,7 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) { ret
 function normalize(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(); }
 function isUnknown(value: string | null | undefined) { return !value || normalize(value) === "a confirmar" || normalize(value) === "nao informado" || normalize(value) === "nao informada"; }
 function uniqueValues(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")); }
+
+
 
 

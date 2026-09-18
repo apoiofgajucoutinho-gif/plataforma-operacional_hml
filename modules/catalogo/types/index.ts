@@ -8,6 +8,27 @@ export type CatalogAccessDuration = "1_ano" | "2_anos" | "3_anos" | "vitalicio" 
 export type CatalogComposition = "individual" | "combo";
 export type CatalogAudienceType = "geral" | "ex_aluno" | "a_confirmar";
 
+
+export type CatalogTaxonomyField = "audience_type" | "access_duration" | "payment_condition" | "composition";
+
+export type CatalogBulkUpdatePayload = {
+  offerIds: string[];
+  field: CatalogTaxonomyField;
+  value: CatalogAudienceType | CatalogAccessDuration | CatalogPaymentCondition | CatalogComposition;
+  onlyPending?: boolean;
+  origin?: "individual" | "bulk";
+};
+
+export type CatalogBulkUpdateResult = {
+  requested_count: number;
+  eligible_count: number;
+  updated_count: number;
+  skipped_count: number;
+  field: CatalogTaxonomyField;
+  new_value: string;
+  only_pending: boolean;
+};
+
 export type CatalogProduct = {
   id: string;
   tenant_id: string;
