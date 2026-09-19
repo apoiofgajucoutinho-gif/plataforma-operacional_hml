@@ -93,6 +93,20 @@ function formatRelative(value: string | null | undefined) {
   return `ha ${days} dias`;
 }
 
+
+function formatShortDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(date);
+}
+
+function checkOriginLabel(check: PresenceCheck) {
+  const origin = check.result_json?.check_origin;
+  if (origin === "automatic") return "Automático";
+  if (origin === "manual") return "Manual";
+  return "Legado";
+}
 function formatMs(value: number | null | undefined) {
   if (value == null) return "-";
   if (value < 1000) return `${value} ms`;
@@ -133,6 +147,7 @@ export function PresenceCenterPage({ context }: Props) {
   const selectedAsset = context.assets.find((asset) => asset.id === selectedAssetId) ?? context.assets[0] ?? null;
   const selectedCheck = selectedAsset ? latestCheck(selectedAsset, context.checks) : null;
   const selectedIncidents = selectedAsset ? context.incidents.filter((incident) => incident.asset_id === selectedAsset.id && (incident.source_type ?? "REAL") === "REAL") : [];
+  const selectedChecks = selectedAsset ? context.checks.filter((check) => check.asset_id === selectedAsset.id && (check.source_type ?? "REAL") === "REAL").slice(0, 8) : [];
   const pendingLinks = context.discoveredLinks.filter((link) => link.status === "pending");
 
   const assetsWithChecks = useMemo(() => context.assets.map((asset) => ({ asset, check: latestCheck(asset, context.checks) })), [context.assets, context.checks]);
@@ -176,6 +191,7 @@ export function PresenceCenterPage({ context }: Props) {
 
       {message ? <InsightCard title="Retorno da operacao" tone={message.toLowerCase().includes("falha") ? "warning" : "success"}>{message}</InsightCard> : null}
       {context.diagnostic ? <InsightCard title="Diagnostico" tone="warning">{context.diagnostic}</InsightCard> : null}
+      <AutomationStatus automation={context.automation} />
 
       {view === "specialist" ? <SpecialistView context={context} /> : null}
       {view === "admin" && context.isAdmin ? (
@@ -185,6 +201,7 @@ export function PresenceCenterPage({ context }: Props) {
           selectedAsset={selectedAsset}
           selectedCheck={selectedCheck}
           selectedIncidents={selectedIncidents}
+          selectedChecks={selectedChecks}
           detailTab={detailTab}
           setDetailTab={setDetailTab}
           setSelectedAssetId={setSelectedAssetId}
@@ -210,6 +227,28 @@ export function PresenceCenterPage({ context }: Props) {
   );
 }
 
+function AutomationStatus({ automation }: { automation: PresenceContext["automation"] }) {
+  return (
+    <Surface className="border-sky-200 bg-sky-50/70">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge tone="success">Monitoramento automático ativo</StatusBadge>
+            <StatusBadge tone="info">{automation.scheduledHours.join(" · ")} · {automation.timezone}</StatusBadge>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-[color:var(--ds-text-secondary)]">
+            Última execução automática: <b className="text-[color:var(--ds-text)]">{formatRelative(automation.lastAutomaticRunAt)}</b> · próxima prevista: <b className="text-[color:var(--ds-text)]">{formatShortDateTime(automation.nextAutomaticRunAt)}</b>
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[420px]">
+          <Mini label="Funcionando" value={String(automation.functioningAssets)} />
+          <Mini label="Com problema" value={String(automation.problemAssets)} />
+          <Mini label="Não verificados" value={String(automation.notVerifiedAssets)} />
+        </div>
+      </div>
+    </Surface>
+  );
+}
 function SpecialistView({ context }: { context: PresenceContext }) {
   const { summary } = context;
   const headline = summary.overallStatus === "healthy" ? "Tudo funcionando normalmente" : summary.overallStatus === "unknown" ? "Primeira checagem pendente" : `Encontramos ${summary.openIncidents} problema(s) que podem exigir atencao.`;
@@ -255,7 +294,7 @@ function SpecialistView({ context }: { context: PresenceContext }) {
   );
 }
 
-function AdminView({ assetsWithChecks, incidents, selectedAsset, selectedCheck, selectedIncidents, detailTab, setDetailTab, setSelectedAssetId, onCheck, busy }: { assetsWithChecks: Array<{ asset: PresenceAsset; check: PresenceCheck | null }>; incidents: PresenceIncident[]; selectedAsset: PresenceAsset | null; selectedCheck: PresenceCheck | null; selectedIncidents: PresenceIncident[]; detailTab: DetailTab; setDetailTab: (tab: DetailTab) => void; setSelectedAssetId: (id: string) => void; onCheck: (assetId: string) => void; busy: string | null }) {
+function AdminView({ assetsWithChecks, incidents, selectedAsset, selectedCheck, selectedIncidents, selectedChecks, detailTab, setDetailTab, setSelectedAssetId, onCheck, busy }: { assetsWithChecks: Array<{ asset: PresenceAsset; check: PresenceCheck | null }>; incidents: PresenceIncident[]; selectedAsset: PresenceAsset | null; selectedCheck: PresenceCheck | null; selectedIncidents: PresenceIncident[]; selectedChecks: PresenceCheck[]; detailTab: DetailTab; setDetailTab: (tab: DetailTab) => void; setSelectedAssetId: (id: string) => void; onCheck: (assetId: string) => void; busy: string | null }) {
   const realIncidents = incidents.filter((incident) => (incident.source_type ?? "REAL") === "REAL");
   const openIncidents = realIncidents.filter((incident) => incident.status === "open" || incident.status === "acknowledged");
   return (
@@ -296,12 +335,12 @@ function AdminView({ assetsWithChecks, incidents, selectedAsset, selectedCheck, 
         </div>
       </Surface>
 
-      {selectedAsset ? <AssetDetail asset={selectedAsset} check={selectedCheck} incidents={selectedIncidents} tab={detailTab} setTab={setDetailTab} /> : null}
+      {selectedAsset ? <AssetDetail asset={selectedAsset} check={selectedCheck} checks={selectedChecks} incidents={selectedIncidents} tab={detailTab} setTab={setDetailTab} /> : null}
     </div>
   );
 }
 
-function AssetDetail({ asset, check, incidents, tab, setTab }: { asset: PresenceAsset; check: PresenceCheck | null; incidents: PresenceIncident[]; tab: DetailTab; setTab: (tab: DetailTab) => void }) {
+function AssetDetail({ asset, check, checks, incidents, tab, setTab }: { asset: PresenceAsset; check: PresenceCheck | null; checks: PresenceCheck[]; incidents: PresenceIncident[]; tab: DetailTab; setTab: (tab: DetailTab) => void }) {
   const tabs: Array<[DetailTab, string]> = [["summary", "Resumo"], ["availability", "Disponibilidade"], ["links", "Links"], ["content", "Conteudo"], ["performance", "Performance"], ["incidents", "Incidentes"], ["history", "Historico"]];
   const brokenLinks = resultList(check, "broken_links") as Array<{ url?: string; status?: number }>;
   const scoreExplanation = resultList(check, "score_explanation") as string[];
@@ -326,7 +365,7 @@ function AssetDetail({ asset, check, incidents, tab, setTab }: { asset: Presence
         {tab === "content" ? <ContentIntegrity check={check} scoreExplanation={scoreExplanation} suspiciousEvidence={suspiciousEvidence} /> : null}
         {tab === "performance" ? <Mini label="Tempo de resposta" value={formatMs(check?.response_time_ms)} detail="Threshold inicial: saudavel abaixo de 1500 ms, atencao ate 3000 ms, critico acima de 3000 ms." /> : null}
         {tab === "incidents" ? <IncidentList incidents={incidents} /> : null}
-        {tab === "history" ? <Mini label="Historico" value={check ? formatRelative(check.checked_at) : "Sem checagens"} detail="O historico completo fica persistido em presence_checks para analise de queda, recuperacao e tendencia." /> : null}
+        {tab === "history" ? <List title="Histórico recente" items={checks.map((item) => `${formatShortDateTime(item.checked_at)} · ${statusLabel[item.status]} · ${formatMs(item.response_time_ms)} · ${checkOriginLabel(item)}`)} empty="Nenhuma checagem operacional registrada para este ativo." /> : null}
       </div>
     </Surface>
   );

@@ -76,15 +76,15 @@ const specialistNavigation: NavigationItem[] = [
   { label: "Início", href: "/norwyn", icon: Compass, key: "norwyn", module: "norwyn", group: "Principal" },
   { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda", module: "agenda", group: "Principal" },
   { label: "Missões", href: "/missoes", icon: Target, key: "missoes", module: "norwyn", group: "Principal" },
-  { label: "Comercial", href: "/comercial", icon: BriefcaseBusiness, key: "comercial", module: "comercial", group: "Trabalho" },
   { label: "Marketing", href: "/marketing", icon: Sparkles, key: "marketing", module: "norwyn", group: "Trabalho" },
+  { label: "Comercial", href: "/comercial", icon: BriefcaseBusiness, key: "comercial", module: "comercial", group: "Trabalho" },
+  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Trabalho" },
+  { label: "Produtos & Alunos", href: "/produtos-alunos", icon: UsersRound, key: "produtos-alunos", module: "norwyn", group: "Trabalho" },
   { label: "Resultados", href: "/resultados", icon: BarChart3, key: "resultados", module: "norwyn", group: "Trabalho" },
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Trabalho" },
-  { label: "Produtos & Alunos", href: "/produtos-alunos", icon: UsersRound, key: "produtos-alunos", module: "norwyn", group: "Trabalho" },
-  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Trabalho" },
   { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Trabalho" },
-  { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Trabalho" },
   { label: "Presença", href: "/presence", icon: MonitorSmartphone, key: "presence", module: "norwyn", group: "Trabalho" },
+  { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Trabalho" },
 ];
 
 const operationalNavigation: NavigationItem[] = [
@@ -371,20 +371,3 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

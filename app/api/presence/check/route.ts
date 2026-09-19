@@ -15,6 +15,6 @@ export async function POST(request: Request) {
   const { data: asset, error } = await access.dataClient.from("digital_assets").select("*").eq("tenant_id", access.tenantId).eq("id", assetId).maybeSingle();
   if (error || !asset) return NextResponse.json({ error: error?.message ?? "Ativo nao encontrado" }, { status: 404 });
 
-  const { check } = await runPresenceCheck(access.dataClient, asset);
+  const { check } = await runPresenceCheck(access.dataClient, asset, { origin: "manual", retryOnFailure: true });
   return NextResponse.json({ message: "Checagem concluida", check });
 }

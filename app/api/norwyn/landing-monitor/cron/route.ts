@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzeLandingHtml, type LandingRegistryEntry } from "@/modules/norwyn/services/landing-intelligence";
+import { runPresenceAutomation } from "@/modules/presence/services/presence-automation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -131,7 +132,8 @@ export async function GET(request: Request) {
     const tenantId = await resolveTenantId(dataClient);
     const entries = await loadDueLandings(dataClient, tenantId);
     const results = await Promise.all(entries.map((entry: LandingRegistryEntry & { id?: string }) => monitorLanding(dataClient, tenantId, entry)));
-    return NextResponse.json({ ok: true, monitored: entries.length, operationMode: "REGISTRY_DRIVEN_READ_ONLY", results });
+    const presence = await runPresenceAutomation({ force: true, limit: 120 });
+    return NextResponse.json({ ok: true, monitored: entries.length, operationMode: "REGISTRY_DRIVEN_READ_ONLY", results, presence });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha no monitoramento." }, { status: 500 });
   }

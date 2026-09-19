@@ -24,6 +24,58 @@ const DEFAULT_SITE = {
   forbidden_patterns: ["casino", "bet", "aposta", "slot", "crypto spam", "adult", "pharma spam"],
   thresholds: { response_warning_ms: 1500, response_critical_ms: 3000, timeout_ms: 15000 },
 };
+export const PRESENCE_AUTOMATION_TIMEZONE = "America/Sao_Paulo" as const;
+export const PRESENCE_AUTOMATION_HOURS = [8, 14, 20] as const;
+
+function saoPauloParts(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: PRESENCE_AUTOMATION_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month"), day: get("day"), hour: get("hour"), minute: get("minute") };
+}
+
+function saoPauloWallTimeAsUtc(year: number, month: number, day: number, hour: number, minute = 0) {
+  return new Date(Date.UTC(year, month - 1, day, hour + 3, minute, 0));
+}
+
+export function nextPresenceAutomationRun(now = new Date()) {
+  const local = saoPauloParts(now);
+  const todayHours = PRESENCE_AUTOMATION_HOURS.filter((hour) => hour > local.hour || (hour === local.hour && local.minute === 0));
+  if (todayHours.length) return saoPauloWallTimeAsUtc(local.year, local.month, local.day, todayHours[0]).toISOString();
+  return saoPauloWallTimeAsUtc(local.year, local.month, local.day + 1, PRESENCE_AUTOMATION_HOURS[0]).toISOString();
+}
+
+export function isPresenceAutomationWindow(now = new Date()) {
+  const local = saoPauloParts(now);
+  return PRESENCE_AUTOMATION_HOURS.includes(local.hour as (typeof PRESENCE_AUTOMATION_HOURS)[number]) && local.minute < 20;
+}
+
+function checkOrigin(check: PresenceCheck) {
+  const origin = check.result_json?.check_origin;
+  return origin === "automatic" || origin === "manual" ? origin : "legacy";
+}
+
+function buildAutomationSummary(assets: PresenceAsset[], checks: PresenceCheck[]) {
+  const realAssets = assets.filter((asset) => !isSimulatedAsset(asset) && asset.monitoring_enabled);
+  const lastAutomaticRunAt = checks.find((check) => check.source_type === "REAL" && checkOrigin(check) === "automatic")?.checked_at ?? null;
+  return {
+    enabled: true,
+    timezone: PRESENCE_AUTOMATION_TIMEZONE,
+    scheduledHours: PRESENCE_AUTOMATION_HOURS.map((hour) => `${String(hour).padStart(2, "0")}:00`),
+    lastAutomaticRunAt,
+    nextAutomaticRunAt: nextPresenceAutomationRun(),
+    functioningAssets: realAssets.filter((asset) => asset.last_status === "healthy").length,
+    problemAssets: realAssets.filter((asset) => asset.last_status === "warning" || asset.last_status === "critical").length,
+    notVerifiedAssets: realAssets.filter((asset) => !asset.last_checked_at || asset.last_status === "unknown").length,
+  };
+}
 
 function emptySummary(): PresenceSummary {
   return {
@@ -181,6 +233,7 @@ export async function getPresenceContext(): Promise<PresenceContext> {
 
   const allowedModules = await getAllowedModules(tenantId, role, dataClient);
   const assetRows = (assets ?? []) as PresenceAsset[];
+  const checkRows = (checks ?? []) as PresenceCheck[];
   const incidentRows = (incidents ?? []) as PresenceIncident[];
 
   return {
@@ -192,19 +245,23 @@ export async function getPresenceContext(): Promise<PresenceContext> {
     updatedAt: new Date().toISOString(),
     isAdmin: role === "ADMIN",
     assets: assetRows,
-    checks: (checks ?? []) as PresenceCheck[],
+    checks: checkRows,
     incidents: incidentRows,
     discoveredLinks: (discoveredLinks ?? []) as PresenceDiscoveredLink[],
     summary: assetRows.length || incidentRows.length ? buildSummary(assetRows, incidentRows) : emptySummary(),
+    automation: buildAutomationSummary(assetRows, checkRows),
   };
 }
 
-export async function duePresenceAssets(client: SupabaseAny, tenantId: string) {
-  const { data } = await client.from("digital_assets").select("*").eq("tenant_id", tenantId).eq("monitoring_enabled", true).limit(20);
-  const now = Date.now();
-  return ((data ?? []) as PresenceAsset[]).filter((asset) => {
-    if (!asset.last_checked_at) return true;
-    const minutes = asset.is_critical ? 5 : 15;
-    return now - new Date(asset.last_checked_at).getTime() >= minutes * 60 * 1000;
-  });
+export async function duePresenceAssets(client: SupabaseAny, tenantId: string, limit = 120) {
+  const { data } = await client
+    .from("digital_assets")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("monitoring_enabled", true)
+    .order("is_critical", { ascending: false })
+    .order("last_checked_at", { ascending: true, nullsFirst: true })
+    .limit(limit);
+
+  return ((data ?? []) as PresenceAsset[]).filter((asset) => !isSimulatedAsset(asset));
 }

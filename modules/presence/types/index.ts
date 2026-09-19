@@ -5,6 +5,7 @@ export type PresenceContentStatus = "ok" | "missing_expected" | "suspicious" | "
 export type PresenceSeverity = "low" | "medium" | "high" | "critical";
 export type PresenceIncidentStatus = "open" | "acknowledged" | "resolved" | "ignored";
 export type PresenceSourceType = "REAL" | "SIMULATED";
+export type PresenceCheckOrigin = "manual" | "automatic" | "legacy";
 export type PresenceIncidentType =
   | "site_down"
   | "http_error"
@@ -57,6 +58,10 @@ export type PresenceCheck = {
   ssl_ok: boolean | null;
   ssl_expires_at: string | null;
   redirect_chain: string[] | null;
+  redirects_count?: number | null;
+  final_url?: string | null;
+  unexpected_redirect?: boolean | null;
+  status_family?: string | null;
   broken_links_count: number;
   content_status: PresenceContentStatus;
   content_hash: string | null;
@@ -107,6 +112,17 @@ export type PresenceDiscoveredLink = {
   updated_at: string;
 };
 
+export type PresenceAutomationSummary = {
+  enabled: boolean;
+  timezone: "America/Sao_Paulo";
+  scheduledHours: string[];
+  lastAutomaticRunAt: string | null;
+  nextAutomaticRunAt: string | null;
+  functioningAssets: number;
+  problemAssets: number;
+  notVerifiedAssets: number;
+};
+
 export type PresenceSummary = {
   overallScore: number | null;
   overallStatus: PresenceStatus;
@@ -137,4 +153,5 @@ export type PresenceContext = {
   incidents: PresenceIncident[];
   discoveredLinks: PresenceDiscoveredLink[];
   summary: PresenceSummary;
+  automation: PresenceAutomationSummary;
 };

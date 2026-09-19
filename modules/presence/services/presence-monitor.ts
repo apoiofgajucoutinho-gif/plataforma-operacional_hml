@@ -544,8 +544,44 @@ async function syncIncidents(client: SupabaseAny, asset: PresenceAsset, checkId:
   }
 }
 
-export async function runPresenceCheck(client: SupabaseAny, asset: PresenceAsset) {
-  const result = await buildPresenceCheck(client, asset);
+type RunPresenceCheckOptions = {
+  origin?: "manual" | "automatic";
+  retryOnFailure?: boolean;
+  retryDelayMs?: number;
+};
+
+function shouldRetryPresenceCheck(result: CheckResult) {
+  return !result.is_available || result.status === "critical" || result.issues.some((issue) => issue.type === "site_down" || issue.type === "http_error" || issue.type === "checkout_problem");
+}
+
+function waitForRetry(delayMs: number) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+export async function runPresenceCheck(client: SupabaseAny, asset: PresenceAsset, options: RunPresenceCheckOptions = {}) {
+  const origin = options.origin ?? "manual";
+  const firstResult = await buildPresenceCheck(client, asset);
+  let result = firstResult;
+  let retryAttempted = false;
+
+  if (options.retryOnFailure !== false && shouldRetryPresenceCheck(firstResult)) {
+    retryAttempted = true;
+    await waitForRetry(options.retryDelayMs ?? 750);
+    result = await buildPresenceCheck(client, asset);
+  }
+
+  const finalUrl = typeof result.result_json.final_url === "string" ? result.result_json.final_url : null;
+  const redirectCount = Array.isArray(result.redirect_chain) ? Math.max(result.redirect_chain.length - 1, 0) : 0;
+  const enrichedResultJson = {
+    ...result.result_json,
+    check_origin: origin,
+    check_origin_label: origin === "automatic" ? "Automático" : "Manual",
+    retry_attempted: retryAttempted,
+    retry_confirmed_failure: retryAttempted && shouldRetryPresenceCheck(result),
+    first_attempt_status: firstResult.status,
+    first_attempt_http_status: firstResult.http_status,
+  };
+
   const { data: check, error } = await client
     .from("presence_checks")
     .insert({
@@ -557,13 +593,17 @@ export async function runPresenceCheck(client: SupabaseAny, asset: PresenceAsset
       ssl_ok: result.ssl_ok,
       ssl_expires_at: result.ssl_expires_at,
       redirect_chain: result.redirect_chain,
+      redirects_count: redirectCount,
+      final_url: finalUrl,
+      unexpected_redirect: redirectCount > 0,
+      status_family: result.http_status ? `${Math.floor(result.http_status / 100)}xx` : null,
       broken_links_count: result.broken_links_count,
       content_status: result.content_status,
       content_hash: result.content_hash,
       content_change_score: result.content_change_score,
       health_score: result.health_score,
       status: result.status,
-      result_json: result.result_json,
+      result_json: enrichedResultJson,
       error_message: result.error_message,
       source_type: "REAL",
       suspicious_evidence: result.suspicious_evidence,
