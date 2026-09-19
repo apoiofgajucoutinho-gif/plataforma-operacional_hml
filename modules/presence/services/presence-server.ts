@@ -25,7 +25,7 @@ const DEFAULT_SITE = {
   thresholds: { response_warning_ms: 1500, response_critical_ms: 3000, timeout_ms: 15000 },
 };
 export const PRESENCE_AUTOMATION_TIMEZONE = "America/Sao_Paulo" as const;
-export const PRESENCE_AUTOMATION_HOURS = [8, 14, 20] as const;
+export const PRESENCE_AUTOMATION_HOURS = [8] as const;
 
 function saoPauloParts(date: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", {
