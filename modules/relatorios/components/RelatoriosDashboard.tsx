@@ -25,7 +25,7 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: "admin", label: "Admin" },
 ];
 
-const tipoLabels: Record<RelatorioTipoResumo, string> = {
+const tipoLabels: Record<string, string> = {
   resumo_executivo: "Resumo executivo",
   resumo_suporte: "Resumo suporte",
   alerta_tecnico: "Alerta tecnico",
@@ -35,13 +35,13 @@ const tipoLabels: Record<RelatorioTipoResumo, string> = {
   lembrete_agendamento: "Lembrete de agenda",
 };
 
-const canalLabels: Record<RelatorioCanal, string> = {
+const canalLabels: Record<string, string> = {
   telegram: "Telegram",
   email: "E-mail",
   whatsapp: "WhatsApp futuro",
 };
 
-const frequenciaLabels: Record<RelatorioFrequencia, string> = {
+const frequenciaLabels: Record<string, string> = {
   sob_demanda: "Sob demanda",
   diario: "Diario",
   semanal: "Semanal",
@@ -49,7 +49,7 @@ const frequenciaLabels: Record<RelatorioFrequencia, string> = {
   imediato: "Imediato",
 };
 
-const moduleOptions = ["agenda", "instagram", "ads", "objetivos", "financeiro", "ocorrencias", "atividades", "adocao"];
+const moduleOptions = ["agenda", "decisoes", "presence", "marketing_instagram", "marketing_ads", "comercial", "financeiro", "interacoes", "atividades", "aluno_360", "recomendacoes"];
 const blockOptions: Array<{ key: string; label: string }> = [
   { key: "agenda", label: "Agenda" },
   { key: "financeiro", label: "Financeiro operacional" },
@@ -60,7 +60,7 @@ const blockOptions: Array<{ key: string; label: string }> = [
   { key: "atividades", label: "Atividades e rotinas" },
 ];
 
-const periodLabels: Record<RelatorioPeriodo, string> = {
+const periodLabels: Record<string, string> = {
   hoje: "Hoje",
   amanha: "Amanha",
   proximos_7d: "Proximos 7 dias",
@@ -72,7 +72,7 @@ const periodLabels: Record<RelatorioPeriodo, string> = {
   pendentes: "Pendentes em aberto",
 };
 
-const templateLabels: Record<RelatorioTemplateKey, string> = {
+const templateLabels: Record<string, string> = {
   ju_resumo_executivo: "Ju - Resumo executivo",
   ju_fechamento_dia: "Ju - Fechamento do dia",
   suporte_prioridades: "Suporte - Prioridades do dia",
@@ -117,7 +117,7 @@ const initialSchedule = {
   canal: "telegram" as RelatorioCanal,
   frequencia: "diario" as RelatorioFrequencia,
   horario: "07:30",
-  incluir_modulos: ["agenda", "financeiro", "ocorrencias"],
+  incluir_modulos: ["agenda", "presence", "comercial"],
   filtros: defaultScheduleFilters,
   ativo: true,
 };
@@ -281,11 +281,11 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     setMessage("Report enviado no Telegram.");
   }
 
-  async function manageHistory(action: "cancel_prepared" | "clear_history") {
-    const label = action === "cancel_prepared" ? "cancelar todos os envios preparados" : "limpar todo o historico de envios";
+  async function manageHistory(action: "cancel_prepared") {
+    const label = "cancelar todos os envios preparados";
     if (!window.confirm(`Deseja ${label}?`)) return;
 
-    setMessage(action === "cancel_prepared" ? "Cancelando envios preparados..." : "Limpando historico...");
+    setMessage("Cancelando envios preparados...");
     const response = await fetch("/api/relatorios/history", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -295,15 +295,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     if (!response.ok) {
       setMessage(result.error ?? "Nao foi possivel atualizar o historico.");
       return;
-    }
-
-    if (action === "clear_history") {
-      setEnvios([]);
-      setMessage("Historico limpo.");
-      return;
-    }
-
-    const updated = (result.data ?? []) as RelatorioEnvio[];
+    }const updated = (result.data ?? []) as RelatorioEnvio[];
     const updatedById = new Map(updated.map((item) => [item.id, item]));
     setEnvios((items) => items.map((item) => updatedById.get(item.id) ?? item));
     setMessage(`${updated.length} envio(s) preparado(s) cancelado(s).`);
@@ -326,7 +318,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     event.preventDefault();
     const filtros = getScheduleFilters();
     const incluirModulos = Object.entries(filtros.blocos ?? {})
-      .filter(([, config]) => config.enabled)
+      .filter(([, config]) => config?.enabled)
       .map(([key]) => key);
     const payload = {
       ...scheduleForm,
@@ -439,13 +431,6 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
                 className="rounded-md border border-brand-sand bg-white/80 px-4 py-3 text-sm font-black text-brand-teal"
               >
                 Cancelar preparados
-              </button>
-              <button
-                type="button"
-                onClick={() => manageHistory("clear_history")}
-                className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700"
-              >
-                Limpar historico
               </button>
             </div>
           ) : null}
@@ -899,3 +884,6 @@ function ListItem({
     </div>
   );
 }
+
+
+

@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     const data = await updateRelatorioEnvioStatus({
       logId,
       status: status as "enviado" | "erro" | "ignorado",
-      error: body.error ? String(body.error) : null,
+      error: body.error ? String(body.error) : undefined,
       metadata: typeof body.metadata === "object" && body.metadata ? body.metadata : {},
     });
 
@@ -43,3 +43,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+

@@ -3,945 +3,289 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import type {
-  RelatorioAgendamento,
-  RelatorioDestinatario,
-  RelatorioEnvio,
-  RelatorioFiltros,
-  RelatorioPeriodo,
-  RelatoriosContext,
-  RelatorioTipoResumo,
-} from "@/modules/relatorios/types";
+import type { RelatorioAgendamento, RelatorioBlocoKey, RelatorioDestinatario, RelatorioEnvio, RelatorioFiltros, RelatorioPeriodo, RelatoriosContext, RelatorioTipoResumo } from "@/modules/relatorios/types";
 
-type SupabaseAny = any;
+type AnyClient = any;
+type Block = { key: RelatorioBlocoKey; title: string; lines: string[]; empty?: string };
+type DispatchOptions = { origin?: "manual" | "agendado" | "preview" | "sistema"; createLog?: boolean; requireActive?: boolean };
 
-const dayMs = 1000 * 60 * 60 * 24;
-const defaultBlocks = {
-  agenda: { enabled: true, periodo: "hoje" },
-  financeiro: { enabled: false, periodo: "mes_atual" },
-  ocorrencias: { enabled: true, periodo: "pendentes" },
-  instagram: { enabled: false, periodo: "ultimos_7d" },
-  ads: { enabled: false, periodo: "ultimos_7d" },
-  objetivos: { enabled: false, periodo: "mes_atual" },
-  atividades: { enabled: false, periodo: "hoje" },
-} satisfies NonNullable<RelatorioFiltros["blocos"]>;
-
-const templateDefaults: Record<string, RelatorioFiltros> = {
-  ju_resumo_executivo: {
-    template_key: "ju_resumo_executivo",
-    nivel_detalhe: "normal",
-    blocos: {
-      agenda: { enabled: true, periodo: "proximos_7d" },
-      financeiro: { enabled: true, periodo: "mes_atual" },
-      ocorrencias: { enabled: true, periodo: "pendentes" },
-      atividades: { enabled: true, periodo: "proximos_7d" },
-      instagram: { enabled: true, periodo: "ultimos_7d" },
-      ads: { enabled: true, periodo: "ultimos_7d" },
-      objetivos: { enabled: true, periodo: "mes_atual" },
-    },
-  },
-  ju_fechamento_dia: {
-    template_key: "ju_fechamento_dia",
-    nivel_detalhe: "curto",
-    blocos: {
-      agenda: { enabled: true, periodo: "proximos_7d" },
-      financeiro: { enabled: true, periodo: "hoje" },
-      ocorrencias: { enabled: true, periodo: "pendentes" },
-      atividades: { enabled: true, periodo: "hoje" },
-      instagram: { enabled: true, periodo: "hoje" },
-      objetivos: { enabled: true, periodo: "mes_atual" },
-    },
-  },
-  suporte_prioridades: {
-    template_key: "suporte_prioridades",
-    nivel_detalhe: "normal",
-    blocos: {
-      agenda: { enabled: true, periodo: "hoje" },
-      financeiro: { enabled: true, periodo: "proximos_7d" },
-      ocorrencias: { enabled: true, periodo: "pendentes" },
-      atividades: { enabled: true, periodo: "hoje" },
-      instagram: { enabled: true, periodo: "ultimos_7d" },
-    },
-  },
-  operacional_atividades: {
-    template_key: "operacional_atividades",
-    nivel_detalhe: "normal",
-    blocos: {
-      atividades: { enabled: true, periodo: "pendentes" },
-    },
-  },
-  jeff_alertas_tecnicos: {
-    template_key: "jeff_alertas_tecnicos",
-    nivel_detalhe: "curto",
-    enviar_apenas_com_alerta: true,
-    blocos: {
-      ocorrencias: { enabled: true, periodo: "pendentes" },
-      ads: { enabled: true, periodo: "ultimos_7d" },
-      instagram: { enabled: true, periodo: "ultimos_7d" },
-    },
-  },
-  especialista_agenda: {
-    template_key: "especialista_agenda",
-    nivel_detalhe: "curto",
-    blocos: {
-      agenda: { enabled: true, periodo: "proximos_7d" },
-    },
-  },
-  marketing_performance: {
-    template_key: "marketing_performance",
-    nivel_detalhe: "normal",
-    blocos: {
-      instagram: { enabled: true, periodo: "ultimos_7d" },
-      ads: { enabled: true, periodo: "ultimos_7d" },
-      objetivos: { enabled: true, periodo: "mes_atual" },
-      ocorrencias: { enabled: true, periodo: "pendentes" },
-    },
-  },
-  lembrete_agenda: {
-    template_key: "lembrete_agenda",
-    nivel_detalhe: "curto",
-    antecedencia_minutos: 60,
-    enviar_apenas_com_alerta: true,
-    blocos: {
-      agenda: { enabled: true, periodo: "proximos_7d" },
-    },
-  },
+const tz = "America/Sao_Paulo";
+const writeRoles = new Set(["ADMIN", "ESPECIALISTA", "SUPORTE", "OPERACIONAL"]);
+const defaults: Partial<Record<RelatorioBlocoKey, { enabled: boolean; periodo: RelatorioPeriodo; empty_behavior?: "omit" | "show_empty" }>> = {
+  agenda: { enabled: true, periodo: "hoje", empty_behavior: "show_empty" },
+  decisoes: { enabled: true, periodo: "pendentes" },
+  presence: { enabled: true, periodo: "hoje", empty_behavior: "show_empty" },
+  marketing_instagram: { enabled: true, periodo: "ultimos_30d" },
+  comercial: { enabled: true, periodo: "ultimos_30d" },
+  interacoes: { enabled: true, periodo: "ultimos_30d" },
+  recomendacoes: { enabled: true, periodo: "hoje" },
+};
+const typeBlocks: Record<RelatorioTipoResumo, RelatorioBlocoKey[]> = {
+  resumo_executivo: ["agenda", "decisoes", "presence", "marketing_instagram", "comercial", "interacoes", "recomendacoes"],
+  resumo_suporte: ["agenda", "decisoes", "interacoes", "atividades", "presence"],
+  alerta_tecnico: ["presence", "recomendacoes"],
+  agenda: ["agenda"],
+  ocorrencias: ["decisoes", "interacoes"],
+  financeiro: ["financeiro"],
+  lembrete_agendamento: ["agenda"],
+  marketing: ["marketing_instagram", "marketing_ads", "recomendacoes"],
+  comercial: ["comercial", "recomendacoes"],
+  presence: ["presence"],
+  aluno_360: ["aluno_360", "comercial", "interacoes"],
+  personalizado: ["agenda", "presence", "marketing_instagram", "comercial"],
 };
 
-async function getMembershipByUserId(userId: string) {
+async function member(userId: string) {
+  const supabase = createAdminClient() ?? (await createClient());
+  const { data, error } = await supabase.from("tenant_members").select("tenant_id, role").eq("user_id", userId).eq("ativo", true).limit(1).maybeSingle();
+  if (error) throw error;
+  return data as { tenant_id: string; role: string } | null;
+}
+
+async function authContext() {
+  const localUser = getLocalBypassUser();
   const admin = createAdminClient();
-  const supabase = admin ?? (await createClient());
-
-  const { data, error } = await supabase
-    .from("tenant_members")
-    .select("tenant_id, role")
-    .eq("user_id", userId)
-    .eq("ativo", true)
-    .limit(1)
-    .maybeSingle();
-
-  return {
-    membership: data,
-    error,
-    source: admin ? "service_role" : "rls",
-  };
+  const localMember = await getLocalBypassMembership(admin ?? (await createClient()));
+  if (localUser && localMember) return { userId: localUser.id, tenantId: localMember.tenant_id, role: localMember.role, dataClient: admin ?? (await createClient()) };
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) redirect("/login");
+  const membership = await member(data.user.id);
+  return { userId: data.user.id, tenantId: membership?.tenant_id ?? null, role: membership?.role ?? null, dataClient: admin ?? supabase };
 }
-
-async function getAllowedModules(tenantId: string, role: string, dataClient: SupabaseAny) {
-  if (role === "ADMIN") return allModules;
-
-  const { data } = await dataClient
-    .from("tenant_module_permissions")
-    .select("module")
-    .eq("tenant_id", tenantId)
-    .eq("role", role)
-    .eq("can_read", true);
-
-  return (data ?? []).map((item: { module: string }) => item.module);
+function allowed(role: string | null) { return role ? allModules : []; }
+function canWrite(role: string | null) { return Boolean(role && writeRoles.has(role)); }
+function n(value: unknown) { if (typeof value === "number") return Number.isFinite(value) ? value : 0; if (typeof value === "string") return Number(value.replace(/[^0-9,-]/g, "").replace(".", "").replace(",", ".")) || 0; return 0; }
+function money(value: number) { return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0); }
+function date(value?: string | null) { return value ? new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: tz }).format(new Date(value)) : "-"; }
+function datetime(value?: string | null) { return value ? new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: tz }).format(new Date(value)) : "-"; }
+function today() { return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date()); }
+function plusDays(days: number) { const d = new Date(); d.setDate(d.getDate() + days); return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(d); }
+function range(period?: RelatorioPeriodo) {
+  const t = today();
+  if (period === "amanha") return { from: plusDays(1), to: plusDays(1), label: "Amanha" };
+  if (period === "proximos_2d") return { from: t, to: plusDays(2), label: "Proximos 2 dias" };
+  if (period === "proximos_7d") return { from: t, to: plusDays(7), label: "Proximos 7 dias" };
+  if (period === "proximos_15d") return { from: t, to: plusDays(15), label: "Proximos 15 dias" };
+  if (period === "ultimos_7d") return { from: plusDays(-7), to: t, label: "Ultimos 7 dias" };
+  if (period === "ultimos_90d") return { from: plusDays(-90), to: t, label: "Ultimos 90 dias" };
+  if (period === "mes_atual") return { from: t.slice(0, 8) + "01", to: t, label: "Mes atual" };
+  if (period === "ano_atual") return { from: t.slice(0, 4) + "-01-01", to: t, label: "Ano atual" };
+  if (period === "ultimos_30d") return { from: plusDays(-30), to: t, label: "Ultimos 30 dias" };
+  return { from: t, to: t, label: "Hoje" };
 }
-
-function latestDate(rows: Array<{ updated_at?: string | null; created_at?: string | null; sent_at?: string | null }>) {
-  return rows.reduce<string | null>((latest, row) => {
-    const value = row.updated_at ?? row.sent_at ?? row.created_at ?? null;
-    if (!value) return latest;
-    if (!latest || value > latest) return value;
-    return latest;
-  }, null);
+async function safe<T>(query: PromiseLike<{ data: T | null; error: unknown }>, fallback: T): Promise<T> { try { const { data, error } = await query; return error ? fallback : data ?? fallback; } catch { return fallback; } }
+function filtersFor(input: RelatorioFiltros | null | undefined, tipo: RelatorioTipoResumo): RelatorioFiltros {
+  const source = input ?? {}; const blocks = { ...defaults, ...(source.blocos ?? {}) }; const keys = typeBlocks[tipo] ?? typeBlocks.personalizado;
+  for (const key of keys) blocks[key] = { enabled: true, periodo: blocks[key]?.periodo ?? "hoje", empty_behavior: blocks[key]?.empty_behavior ?? "omit" };
+  return { ...source, nivel_detalhe: source.nivel_detalhe ?? "normal", include_recommendation: source.include_recommendation ?? true, customer_ids: Array.isArray(source.customer_ids) ? source.customer_ids : [], blocos: blocks };
 }
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+function enabled(filters: RelatorioFiltros, key: RelatorioBlocoKey) { return Boolean(filters.blocos?.[key]?.enabled); }
+function cfg(filters: RelatorioFiltros, key: RelatorioBlocoKey) { return filters.blocos?.[key] ?? { enabled: false, periodo: "hoje" as RelatorioPeriodo }; }
+async function agendaBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
+  const r = range(period); const rows = await safe<any[]>(client.from("agenda_eventos").select("titulo, inicio, observacao, local").eq("tenant_id", tenantId).gte("inicio", `${r.from}T00:00:00`).lte("inicio", `${r.to}T23:59:59`).order("inicio", { ascending: true }).limit(12), []);
+  return { key: "agenda", title: "📅 Agenda", empty: `Sem compromissos em ${r.label.toLowerCase()}.`, lines: rows.map((e) => `• ${datetime(e.inicio)} - ${e.titulo}${e.observacao ? ` (${e.observacao})` : ""}`) };
 }
-
-function localTodayIso() {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Sao_Paulo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+async function decisionsBlock(client: AnyClient, tenantId: string): Promise<Block> {
+  const rows = await safe<any[]>(client.from("atividades_tarefas").select("titulo, prioridade, status, prazo").eq("tenant_id", tenantId).in("status", ["pendente", "em_andamento", "bloqueada"]).order("prazo", { ascending: true, nullsFirst: false }).limit(8), []);
+  return { key: "decisoes", title: "🎯 Precisa de voce", empty: "Sem decisoes pendentes no momento.", lines: rows.map((i) => `• ${i.titulo}${i.prazo ? ` - prazo ${date(i.prazo)}` : ""}`) };
 }
-
-function minutesFromTime(value: string | null | undefined) {
-  if (!value) return null;
-  const match = value.match(/^(\d{2}):(\d{2})/);
-  if (!match) return null;
-  return Number(match[1]) * 60 + Number(match[2]);
+async function presenceBlock(client: AnyClient, tenantId: string): Promise<Block> {
+  const assets = await safe<any[]>(client.from("digital_assets").select("id, name, status, health_status, last_checked_at").eq("tenant_id", tenantId).eq("is_active", true).limit(500), []);
+  const links = await safe<any[]>(client.from("catalog_sales_links").select("id, health_status, last_checked_at").eq("tenant_id", tenantId).limit(500), []);
+  const ok = ["healthy", "funcionando", "redirecting", "redirecionando", "ok"];
+  const bad = ["critical", "broken", "quebrado", "indisponivel", "down"];
+  const healthyAssets = assets.filter((a) => ok.includes(String(a.health_status ?? a.status).toLowerCase())).length;
+  const healthyLinks = links.filter((l) => ok.includes(String(l.health_status).toLowerCase())).length;
+  const critical = assets.filter((a) => bad.includes(String(a.health_status ?? a.status).toLowerCase()));
+  const last = [...assets, ...links].map((x) => x.last_checked_at).filter(Boolean).sort().pop();
+  const lines = [`✅ ${healthyAssets}/${assets.length} ativos funcionando`, `✅ ${healthyLinks}/${links.length} links de venda funcionando`];
+  if (critical.length) lines.push(`⚠️ ${critical.length} ativo(s) com problema: ${critical.slice(0, 3).map((x) => x.name).join(", ")}`);
+  if (last) lines.push(`Ultima verificacao: ${datetime(last)}`);
+  return { key: "presence", title: "🛡️ Saude digital", empty: "Sem dados de saude digital disponiveis.", lines };
 }
-
-function isInsideLookbackWindow(scheduleTime: string | null | undefined, currentTime: string, windowMinutes: number) {
-  const scheduleMinutes = minutesFromTime(scheduleTime);
-  const currentMinutes = minutesFromTime(currentTime);
-  if (scheduleMinutes === null || currentMinutes === null) return false;
-
-  const diff = currentMinutes - scheduleMinutes;
-  return diff >= 0 && diff < windowMinutes;
+async function instagramBlock(client: AnyClient, tenantId: string): Promise<Block> {
+  const [summary, posts, interactions] = await Promise.all([
+    safe<any>(client.from("instagram_follower_growth_summary").select("*").eq("tenant_id", tenantId).maybeSingle(), null),
+    safe<any[]>(client.from("instagram_posts").select("caption, media_type, reach, saved, likes, comments_count, posted_at").eq("tenant_id", tenantId).order("posted_at", { ascending: false }).limit(30), []),
+    safe<any[]>(client.from("instagram_interactions").select("id, status, interaction_type").eq("tenant_id", tenantId).limit(200), []),
+  ]);
+  const followers = n(summary?.followers_current ?? summary?.current_followers); const delta = n(summary?.delta_30d ?? summary?.growth_30d);
+  const reach = posts.reduce((s, p) => s + n(p.reach), 0); const saved = posts.reduce((s, p) => s + n(p.saved), 0); const best = posts.slice().sort((a, b) => n(b.reach) - n(a.reach))[0];
+  const pending = interactions.filter((i) => ["pendente", "open", "novo"].includes(String(i.status).toLowerCase())).length;
+  const lines: string[] = [];
+  if (followers) lines.push(`Seguidores: ${followers.toLocaleString("pt-BR")}${delta ? ` (${delta >= 0 ? "+" : ""}${delta} em 30 dias)` : ""}`);
+  if (reach) lines.push(`Alcance: ${reach.toLocaleString("pt-BR")} · Salvos: ${saved.toLocaleString("pt-BR")}`);
+  if (best) lines.push(`Destaque: ${(best.caption ?? "post sem legenda").slice(0, 80)}... · ${n(best.reach).toLocaleString("pt-BR")} de alcance`);
+  if (pending) lines.push(`Interacoes pendentes: ${pending}`);
+  return { key: "marketing_instagram", title: "📈 Marketing · Instagram", empty: "Sem dados de Instagram no recorte.", lines };
 }
-
-function addDays(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+async function adsBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
+  const r = range(period); const rows = await safe<any[]>(client.from("instagram_ads_daily").select("date, spend, reach, impressions, clicks, campaign_name").eq("tenant_id", tenantId).gte("date", r.from).lte("date", r.to).limit(500), []);
+  const spend = rows.reduce((s, x) => s + n(x.spend), 0); const reach = rows.reduce((s, x) => s + n(x.reach), 0); const clicks = rows.reduce((s, x) => s + n(x.clicks), 0); const campaigns = new Set(rows.map((x) => x.campaign_name).filter(Boolean)).size;
+  return { key: "marketing_ads", title: "📣 Marketing · Ads", empty: `Sem dados de Ads em ${r.label.toLowerCase()}.`, lines: rows.length ? [`Periodo: ${r.label}`, `Investimento: ${money(spend)}`, `Alcance: ${reach.toLocaleString("pt-BR")} · Cliques: ${clicks.toLocaleString("pt-BR")}`, `Campanhas: ${campaigns}`] : [] };
 }
-
-function addMinutes(minutes: number) {
-  const date = new Date();
-  date.setMinutes(date.getMinutes() + minutes);
-  return date.toISOString();
+async function comercialBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
+  const r = range(period); const rows = await safe<any[]>(client.from("comercial_vendas").select("transaction_id, status_normalizado, sale_confirmed, revenue_eligible, currency, valor_bruto_brl, data_compra").eq("tenant_id", tenantId).eq("commercial_transaction", true).gte("data_compra", r.from).lte("data_compra", r.to).limit(1000), []);
+  const confirmed = rows.filter((x) => x.sale_confirmed === true); const revenue = confirmed.filter((x) => x.revenue_eligible === true && String(x.currency ?? "BRL").toUpperCase() === "BRL");
+  const gross = revenue.reduce((s, x) => s + n(x.valor_bruto_brl), 0); const refunded = rows.filter((x) => ["REFUNDED", "CHARGEBACK"].includes(String(x.status_normalizado).toUpperCase())).length;
+  return { key: "comercial", title: "💰 Comercial", empty: `Sem vendas comerciais em ${r.label.toLowerCase()}.`, lines: rows.length ? [`Periodo: ${r.label}`, `${confirmed.length} vendas confirmadas`, `Receita confirmada BRL: ${money(gross)}`, `Ticket medio: ${money(confirmed.length ? gross / confirmed.length : 0)}`, `Reembolsos/chargebacks: ${refunded}`] : [] };
 }
-
-function getPeriodRange(period: RelatorioPeriodo) {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-
-  if (period === "amanha") {
-    return {
-      start: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString(),
-      end: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2).toISOString(),
-      label: "amanha",
-    };
-  }
-
-  if (period === "proximos_7d") return { start: todayStart.toISOString(), end: new Date(todayStart.getTime() + 7 * dayMs).toISOString(), label: "proximos 7 dias" };
-  if (period === "proximos_15d") return { start: todayStart.toISOString(), end: new Date(todayStart.getTime() + 15 * dayMs).toISOString(), label: "proximos 15 dias" };
-  if (period === "ultimos_7d") return { start: new Date(todayStart.getTime() - 7 * dayMs).toISOString(), end: todayEnd.toISOString(), label: "ultimos 7 dias" };
-  if (period === "ultimos_30d") return { start: new Date(todayStart.getTime() - 30 * dayMs).toISOString(), end: todayEnd.toISOString(), label: "ultimos 30 dias" };
-  if (period === "mes_atual") return { start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), end: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(), label: "mes atual" };
-  if (period === "ano_atual") return { start: new Date(now.getFullYear(), 0, 1).toISOString(), end: new Date(now.getFullYear() + 1, 0, 1).toISOString(), label: "ano atual" };
-
-  return { start: todayStart.toISOString(), end: todayEnd.toISOString(), label: period === "pendentes" ? "pendentes em aberto" : "hoje" };
+async function financeBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
+  const r = range(period); const rows = await safe<any[]>(client.from("fin_lancamentos").select("tipo, status, valor, data, descricao").eq("tenant_id", tenantId).gte("data", r.from).lte("data", r.to).limit(1000), []);
+  const entradas = rows.filter((x) => String(x.tipo).toLowerCase() === "entrada" && ["recebido", "pago"].includes(String(x.status).toLowerCase())).reduce((s, x) => s + n(x.valor), 0);
+  const saidas = rows.filter((x) => String(x.tipo).toLowerCase() === "saida" && ["pago", "recebido"].includes(String(x.status).toLowerCase())).reduce((s, x) => s + n(x.valor), 0);
+  const aReceber = rows.filter((x) => String(x.tipo).toLowerCase() === "entrada" && String(x.status).toLowerCase() === "previsto").reduce((s, x) => s + n(x.valor), 0);
+  const aPagar = rows.filter((x) => String(x.tipo).toLowerCase() === "saida" && String(x.status).toLowerCase() === "previsto").reduce((s, x) => s + n(x.valor), 0);
+  return { key: "financeiro", title: "💳 Financeiro", empty: `Sem lancamentos em ${r.label.toLowerCase()}.`, lines: rows.length ? [`Periodo: ${r.label}`, `Entrou na conta: ${money(entradas)}`, `Saiu da conta: ${money(saidas)}`, `A receber: ${money(aReceber)} · A pagar: ${money(aPagar)}`] : [] };
 }
-
-function normalizeReportFilters(schedule: RelatorioAgendamento): Required<Pick<RelatorioFiltros, "nivel_detalhe" | "blocos">> &
-  Omit<RelatorioFiltros, "nivel_detalhe" | "blocos"> {
-  const raw = (schedule.filtros ?? {}) as RelatorioFiltros;
-  const templateKey =
-    raw.template_key ??
-    (schedule.tipo_resumo === "resumo_suporte"
-      ? "suporte_prioridades"
-      : schedule.tipo_resumo === "alerta_tecnico"
-        ? "jeff_alertas_tecnicos"
-        : schedule.tipo_resumo === "lembrete_agendamento"
-          ? "lembrete_agenda"
-          : "personalizado");
-  const template = templateDefaults[templateKey] ?? {};
-  const templateBlocks = template.blocos ?? {};
-
-  return {
-    ...template,
-    ...raw,
-    template_key: templateKey as RelatorioFiltros["template_key"],
-    nivel_detalhe: raw.nivel_detalhe ?? template.nivel_detalhe ?? "normal",
-    blocos: {
-      ...defaultBlocks,
-      ...templateBlocks,
-      ...(raw.blocos ?? {}),
-    },
-  };
+async function interactionsBlock(client: AnyClient, tenantId: string): Promise<Block> {
+  const [ig, support] = await Promise.all([safe<any[]>(client.from("instagram_interactions").select("id, status, interaction_type").eq("tenant_id", tenantId).limit(300), []), safe<any[]>(client.from("support_occurrences").select("id, status, prioridade").eq("tenant_id", tenantId).limit(300), [])]);
+  const pending = ["pendente", "open", "novo"]; const comments = ig.filter((x) => String(x.interaction_type).toLowerCase().includes("comment") && pending.includes(String(x.status).toLowerCase())).length; const directs = ig.filter((x) => String(x.interaction_type).toLowerCase().includes("direct") && pending.includes(String(x.status).toLowerCase())).length; const openSupport = support.filter((x) => !["resolvido", "fechado", "done", "closed"].includes(String(x.status).toLowerCase())).length;
+  return { key: "interacoes", title: "💬 Interacoes", empty: "Sem interacoes pendentes no recorte.", lines: ig.length || support.length ? [`${comments} comentarios pendentes`, `${directs} directs pendentes`, `${openSupport} suporte/ocorrencias em aberto`] : [] };
 }
-
-function monthStartIso() {
-  const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().slice(0, 10);
+async function activitiesBlock(client: AnyClient, tenantId: string): Promise<Block> {
+  const rows = await safe<any[]>(client.from("atividades_tarefas").select("titulo, status, prioridade, prazo").eq("tenant_id", tenantId).in("status", ["pendente", "em_andamento", "bloqueada"]).order("prazo", { ascending: true, nullsFirst: false }).limit(8), []);
+  return { key: "atividades", title: "✅ Atividades", empty: "Sem atividades pendentes.", lines: rows.map((x) => `• ${x.titulo}${x.prazo ? ` - ${date(x.prazo)}` : ""}`) };
 }
-
-function monthEndIso() {
-  const date = new Date();
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().slice(0, 10);
+async function alunoBlock(client: AnyClient, tenantId: string, filters: RelatorioFiltros): Promise<Block> {
+  const ids = filters.customer_ids ?? []; if (!ids.length) return { key: "aluno_360", title: "👤 Aluno 360", empty: "Nenhum aluno selecionado.", lines: [] };
+  const rows = await safe<any[]>(client.from("norwyn_customer_student_360").select("customer_id, name, email, ltv_brl, purchase_count, product_count, last_purchase_at, last_activity_at").eq("tenant_id", tenantId).in("customer_id", ids).limit(5), []);
+  return { key: "aluno_360", title: "👤 Aluno 360", empty: "Aluno nao encontrado no recorte.", lines: rows.flatMap((s) => [`• ${s.name ?? s.email ?? s.customer_id}`, `  LTV: ${money(n(s.ltv_brl))} · ${n(s.purchase_count)} compra(s) · ${n(s.product_count)} produto(s)`, `  Ultima compra: ${date(s.last_purchase_at)} · Ultimo acesso: ${date(s.last_activity_at)}`]) };
 }
-
-function formatMoney(value: number) {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+function recommendationBlock(blocks: Block[]): Block {
+  const issue = blocks.some((b) => b.key === "presence" && b.lines.some((l) => l.includes("⚠️"))); const interaction = blocks.some((b) => b.key === "interacoes" && b.lines.some((l) => !l.startsWith("0 "))); const agenda = blocks.some((b) => b.key === "agenda" && b.lines.length);
+  const line = issue ? "Priorizar ativos digitais com problema antes de novas campanhas." : interaction ? "Responder interacoes pendentes para evitar perda de oportunidade." : agenda ? "Conferir agenda e preparar materiais dos compromissos principais." : "Manter acompanhamento preventivo e revisar proximas acoes do dia.";
+  return { key: "recomendacoes", title: "💡 Norwyn recomenda", lines: [line] };
 }
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "-";
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "America/Sao_Paulo",
-  }).format(new Date(value));
+async function buildBlocks(client: AnyClient, tenantId: string, filters: RelatorioFiltros): Promise<Block[]> {
+  const blocks: Block[] = [];
+  if (enabled(filters, "agenda")) blocks.push(await agendaBlock(client, tenantId, cfg(filters, "agenda").periodo));
+  if (enabled(filters, "decisoes")) blocks.push(await decisionsBlock(client, tenantId));
+  if (enabled(filters, "presence")) blocks.push(await presenceBlock(client, tenantId));
+  if (enabled(filters, "marketing_instagram")) blocks.push(await instagramBlock(client, tenantId));
+  if (enabled(filters, "marketing_ads")) blocks.push(await adsBlock(client, tenantId, cfg(filters, "marketing_ads").periodo));
+  if (enabled(filters, "comercial")) blocks.push(await comercialBlock(client, tenantId, cfg(filters, "comercial").periodo));
+  if (enabled(filters, "financeiro")) blocks.push(await financeBlock(client, tenantId, cfg(filters, "financeiro").periodo));
+  if (enabled(filters, "interacoes")) blocks.push(await interactionsBlock(client, tenantId));
+  if (enabled(filters, "atividades")) blocks.push(await activitiesBlock(client, tenantId));
+  if (enabled(filters, "aluno_360")) blocks.push(await alunoBlock(client, tenantId, filters));
+  if (enabled(filters, "recomendacoes") || filters.include_recommendation) blocks.push(recommendationBlock(blocks));
+  return blocks.filter((b) => b.lines.length || cfg(filters, b.key).empty_behavior === "show_empty");
 }
-
-function toNumber(value: unknown) {
-  if (typeof value === "number") return value;
-  if (typeof value === "string" && value.trim() && !Number.isNaN(Number(value))) return Number(value);
-  return 0;
+function subject(tipo: RelatorioTipoResumo) { if (tipo === "aluno_360") return "Aluno 360"; if (tipo === "marketing") return "Relatorio de Marketing"; if (tipo === "comercial") return "Relatorio Comercial"; if (tipo === "presence") return "Saude digital"; if (tipo === "agenda" || tipo === "lembrete_agendamento") return "Agenda Norwyn"; return "Daily da Norwyn"; }
+function message(tipo: RelatorioTipoResumo, blocks: Block[]) {
+  const header = tipo === "aluno_360" ? `👤 *${subject(tipo)}*` : "☀️ *Bom dia — Norwyn*";
+  const lines = [header, `📅 ${new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: tz }).format(new Date())}`, ""];
+  for (const b of blocks) { lines.push(`*${b.title}*`); lines.push(...(b.lines.length ? b.lines : b.empty ? [b.empty] : [])); lines.push(""); }
+  lines.push("Norwyn · Relatorio gerado automaticamente"); return lines.join("\n").trim();
 }
-
-async function getRelatoriosAuth() {
-  const userClient = await createClient();
-  const {
-    data: { user },
-  } = await userClient.auth.getUser();
-  const dataClient = createAdminClient() ?? userClient;
-  const currentUser = user ?? getLocalBypassUser();
-
-  if (!currentUser) redirect("/login");
-
-  const localMembership = user ? null : await getLocalBypassMembership(dataClient);
-  const { membership, error, source } = localMembership
-    ? { membership: localMembership, error: null, source: "local_bypass" }
-    : await getMembershipByUserId(currentUser.id);
-
-  if (error) {
-    return { error: `${source}: ${error.message}`, userClient, dataClient };
-  }
-
-  if (!membership) {
-    return { error: "Nenhum tenant ativo encontrado para este usuario.", userClient, dataClient };
-  }
-
-  const allowedModules = await getAllowedModules(membership.tenant_id, membership.role, dataClient);
-  const canRead = allowedModules.includes("relatorios");
-  const canWrite =
-    membership.role === "ADMIN" ||
-    Boolean(
-      (
-        await dataClient
-          .from("tenant_module_permissions")
-          .select("can_write")
-          .eq("tenant_id", membership.tenant_id)
-          .eq("role", membership.role)
-          .eq("module", "relatorios")
-          .maybeSingle()
-      ).data?.can_write,
-    );
-
-  if (!canRead) {
-    return {
-      error: "Seu perfil nao possui acesso ao modulo Relatorios.",
-      userClient,
-      dataClient,
-      membership,
-      allowedModules,
-      canWrite: false,
-    };
-  }
-
-  return {
-    error: null,
-    userClient,
-    dataClient,
-    membership,
-    allowedModules,
-    canWrite,
-  };
+function isActive(schedule: RelatorioAgendamento) { return schedule.ativo !== false && schedule.status === "ativo"; }
+function dueToday(schedule: RelatorioAgendamento, now: Date) {
+  const day = now.getDay(); const dayOfMonth = Number(new Intl.DateTimeFormat("pt-BR", { day: "2-digit", timeZone: schedule.timezone ?? tz }).format(now));
+  if (["sob_demanda", "imediato"].includes(schedule.frequencia)) return false;
+  if (schedule.frequencia === "unico") return !schedule.last_run_at;
+  if (schedule.frequencia === "diario") return true;
+  if (schedule.frequencia === "dias_uteis") return day >= 1 && day <= 5;
+  if (schedule.frequencia === "semanal") return !schedule.dias_semana?.length || schedule.dias_semana.includes(day);
+  if (schedule.frequencia === "quinzenal") return dayOfMonth === 1 || dayOfMonth === 15;
+  if (schedule.frequencia === "mensal") return !schedule.dia_mes || schedule.dia_mes === dayOfMonth;
+  if (schedule.frequencia === "fechamento_mes") return dayOfMonth >= 28;
+  return false;
+}
+function inWindow(schedule: RelatorioAgendamento, now: Date, minutes: number) {
+  if (!schedule.horario) return true; const [h, m] = schedule.horario.split(":").map(Number); if (!Number.isFinite(h) || !Number.isFinite(m)) return true;
+  const local = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: schedule.timezone ?? tz }).format(now); const [ch, cm] = local.split(":").map(Number);
+  return Math.abs((ch * 60 + cm) - (h * 60 + m)) <= minutes;
+}
+async function alreadyToday(client: AnyClient, tenantId: string, scheduleId: string) {
+  const { data } = await client.from("relatorio_envios").select("id").eq("tenant_id", tenantId).eq("agendamento_id", scheduleId).gte("created_at", `${today()}T00:00:00`).limit(1).maybeSingle();
+  return Boolean(data);
 }
 
 export async function getRelatoriosContext(): Promise<RelatoriosContext> {
-  const auth = await getRelatoriosAuth();
-
-  if (auth.error || !auth.membership) {
-    return {
-      tenant: null,
-      allowedModules: auth.allowedModules ?? [],
-      diagnostic: auth.error,
-      canWrite: false,
-      destinatarios: [],
-      agendamentos: [],
-      envios: [],
-      updatedAt: null,
-    };
-  }
-
-  const [tenantResult, destinatariosResult, agendamentosResult, enviosResult] = await Promise.all([
-    auth.dataClient.from("tenants").select("id, nome").eq("id", auth.membership.tenant_id).maybeSingle(),
-    auth.dataClient
-      .from("relatorio_destinatarios")
-      .select("*")
-      .eq("tenant_id", auth.membership.tenant_id)
-      .order("nome"),
-    auth.dataClient
-      .from("relatorio_agendamentos")
-      .select("*")
-      .eq("tenant_id", auth.membership.tenant_id)
-      .order("horario", { ascending: true }),
-    auth.dataClient
-      .from("relatorio_envios")
-      .select("*")
-      .eq("tenant_id", auth.membership.tenant_id)
-      .order("created_at", { ascending: false })
-      .limit(100),
+  const auth = await authContext(); const modules = allowed(auth.role);
+  if (!auth.tenantId) return { tenant: null, allowedModules: modules, diagnostic: "Usuario sem tenant ativo.", canWrite: false, destinatarios: [], agendamentos: [], envios: [], enviosTotal: 0, updatedAt: null };
+  const [tenant, recipients, schedules, sends] = await Promise.all([
+    auth.dataClient.from("tenants").select("id, nome").eq("id", auth.tenantId).maybeSingle(),
+    auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).order("nome", { ascending: true }),
+    auth.dataClient.from("relatorio_agendamentos").select("*").eq("tenant_id", auth.tenantId).order("created_at", { ascending: false }),
+    auth.dataClient.from("relatorio_envios").select("*", { count: "exact" }).eq("tenant_id", auth.tenantId).order("created_at", { ascending: false }).range(0, 24),
   ]);
-
-  const destinatarios = (destinatariosResult.data ?? []) as RelatorioDestinatario[];
-  const agendamentos = (agendamentosResult.data ?? []) as RelatorioAgendamento[];
-  const envios = (enviosResult.data ?? []) as RelatorioEnvio[];
-
-  return {
-    tenant: tenantResult.data,
-    allowedModules: auth.allowedModules ?? [],
-    diagnostic: null,
-    canWrite: Boolean(auth.canWrite),
-    destinatarios,
-    agendamentos,
-    envios,
-    updatedAt: latestDate([...destinatarios, ...agendamentos, ...envios]),
-  };
+  return { tenant: tenant.data ?? null, allowedModules: modules, diagnostic: tenant.error?.message ?? recipients.error?.message ?? schedules.error?.message ?? sends.error?.message ?? null, canWrite: canWrite(auth.role), destinatarios: recipients.data ?? [], agendamentos: schedules.data ?? [], envios: sends.data ?? [], enviosTotal: sends.count ?? sends.data?.length ?? 0, updatedAt: new Date().toISOString() };
 }
-
 export async function assertRelatoriosWriteAccess() {
-  const auth = await getRelatoriosAuth();
-  if (auth.error || !auth.membership) {
-    throw new Error(auth.error ?? "Nao autenticado.");
-  }
-
-  if (!auth.canWrite) {
-    throw new Error("Sem permissao para configurar Relatorios.");
-  }
-
-  return {
-    dataClient: auth.dataClient,
-    tenantId: auth.membership.tenant_id,
-  };
+  const auth = await authContext(); if (!auth.tenantId) throw new Error("Usuario sem tenant ativo."); if (!canWrite(auth.role)) throw new Error("Perfil sem permissao para gerenciar relatorios.");
+  return { tenantId: auth.tenantId, role: auth.role, userId: auth.userId, dataClient: auth.dataClient };
 }
-
-export async function getRelatorioDispatchByScheduleId(scheduleId: string) {
-  const dataClient = createAdminClient();
-  if (!dataClient) throw new Error("SUPABASE_SERVICE_ROLE_KEY nao configurada.");
-
-  const { data: schedule, error: scheduleError } = await dataClient
-    .from("relatorio_agendamentos")
-    .select("*")
-    .eq("id", scheduleId)
-    .eq("ativo", true)
-    .single();
-
-  if (scheduleError || !schedule) {
-    throw new Error(scheduleError?.message ?? "Agendamento nao encontrado.");
-  }
-
-  const { data: recipient, error: recipientError } = await dataClient
-    .from("relatorio_destinatarios")
-    .select("*")
-    .eq("id", schedule.destinatario_id)
-    .eq("tenant_id", schedule.tenant_id)
-    .eq("ativo", true)
-    .single();
-
-  if (recipientError || !recipient) {
-    throw new Error(recipientError?.message ?? "Destinatario nao encontrado.");
-  }
-
-  const message = await buildOperationalSummary({
-    dataClient,
-    tenantId: schedule.tenant_id,
-    tipoResumo: schedule.tipo_resumo,
-    recipientName: recipient.nome,
-    schedule: schedule as RelatorioAgendamento,
-  });
-
-  const destino =
-    schedule.canal === "telegram"
-      ? recipient.telegram_chat_id
-      : schedule.canal === "email"
-        ? recipient.email
-        : recipient.whatsapp;
-
-  const { data: log, error: logError } = await dataClient
-    .from("relatorio_envios")
-    .insert({
-      tenant_id: schedule.tenant_id,
-      agendamento_id: schedule.id,
-      destinatario_id: recipient.id,
-      tipo_resumo: schedule.tipo_resumo,
-      canal: schedule.canal,
-      destino,
-      status: !message.shouldSend ? "ignorado" : destino ? "preparado" : "erro",
-      assunto: message.subject,
-      mensagem: message.text,
-      erro: !message.shouldSend
-        ? "Relatorio ignorado por nao haver alerta no periodo configurado."
-        : destino
-          ? null
-          : "Destinatario sem destino configurado para este canal.",
-      metadata: message.metadata,
-    })
-    .select("*")
-    .single();
-
-  if (logError) throw new Error(logError.message);
-
-  return {
-    schedule,
-    recipient,
-    log,
-    subject: message.subject,
-    text: message.text,
-    channel: schedule.canal,
-    telegramChatId: schedule.canal === "telegram" ? recipient.telegram_chat_id : null,
-    email: schedule.canal === "email" ? recipient.email : null,
-    whatsapp: schedule.canal === "whatsapp" ? recipient.whatsapp : null,
-    shouldSend: message.shouldSend,
-  };
+export async function listRelatorioEnvios(params: { page?: number; pageSize?: number; status?: string; origin?: string; channel?: string; q?: string; from?: string; to?: string } = {}) {
+  const auth = await assertRelatoriosWriteAccess(); const page = Math.max(1, params.page ?? 1); const pageSize = Math.min(100, Math.max(10, params.pageSize ?? 25)); const from = (page - 1) * pageSize;
+  let query = auth.dataClient.from("relatorio_envios").select("*", { count: "exact" }).eq("tenant_id", auth.tenantId);
+  if (params.status) query = query.eq("status", params.status); if (params.origin) query = query.eq("origem", params.origin); if (params.channel) query = query.eq("canal", params.channel); if (params.from) query = query.gte("created_at", `${params.from}T00:00:00`); if (params.to) query = query.lte("created_at", `${params.to}T23:59:59`); if (params.q) query = query.or(`assunto.ilike.%${params.q}%,resumo.ilike.%${params.q}%,destino.ilike.%${params.q}%`);
+  const { data, error, count } = await query.order("created_at", { ascending: false }).range(from, from + pageSize - 1); if (error) throw error;
+  return { data: (data ?? []) as RelatorioEnvio[], total: count ?? 0, page, pageSize };
 }
-
-export async function getRelatorioDispatchesDue(time: string, windowMinutes = 15) {
-  const dataClient = createAdminClient();
-  if (!dataClient) throw new Error("SUPABASE_SERVICE_ROLE_KEY nao configurada.");
-
-  const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : time.slice(0, 5);
-  const today = localTodayIso();
-  const { data: schedules, error } = await dataClient
-    .from("relatorio_agendamentos")
-    .select("id, horario")
-    .eq("ativo", true)
-    .neq("frequencia", "sob_demanda")
-    .not("horario", "is", null);
-
-  if (error) throw new Error(error.message);
-
+async function insertEnvioLog(client: AnyClient, payload: Record<string, unknown>) {
+  const { data, error } = await client.from("relatorio_envios").insert(payload).select("*").single();
+  if (!error) return data as RelatorioEnvio;
+  const message = String(error.message ?? "").toLowerCase();
+  if (!message.includes("origin") && !message.includes("origem") && !message.includes("resumo") && !message.includes("modulos") && !message.includes("filtros") && !message.includes("generated_at")) throw error;
+  const fallback = {
+    tenant_id: payload.tenant_id,
+    agendamento_id: payload.agendamento_id,
+    destinatario_id: payload.destinatario_id,
+    tipo_resumo: payload.tipo_resumo,
+    canal: payload.canal,
+    destino: payload.destino,
+    status: payload.status,
+    assunto: payload.assunto,
+    mensagem: payload.mensagem,
+    metadata: { ...(payload.metadata as Record<string, unknown>), origem: payload.origem, resumo: payload.resumo, modulos: payload.modulos, filtros: payload.filtros, generated_at: payload.generated_at },
+  };
+  const retry = await client.from("relatorio_envios").insert(fallback).select("*").single();
+  if (retry.error) throw retry.error;
+  return retry.data as RelatorioEnvio;
+}
+async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean) {
+  const filters = filtersFor(schedule.filtros, schedule.tipo_resumo); const blocks = await buildBlocks(client, tenantId, filters); const text = message(schedule.tipo_resumo, blocks); const modules = blocks.map((b) => b.key); const summary = `${blocks.length} bloco(s): ${blocks.map((b) => b.title).join(", ")}`;
+  let log: RelatorioEnvio | null = null;
+  if (createLog) {
+    log = await insertEnvioLog(client, { tenant_id: tenantId, agendamento_id: schedule.id, destinatario_id: recipient.id, tipo_resumo: schedule.tipo_resumo, canal: schedule.canal, destino: schedule.canal === "telegram" ? recipient.telegram_chat_id : recipient.email, status: "preparado", origem: origin, assunto: subject(schedule.tipo_resumo), resumo: summary, mensagem: text, modulos: modules, filtros: filters, metadata: { recipient_name: recipient.nome, schedule_name: schedule.nome }, generated_at: new Date().toISOString() });
+  }
+  return { schedule, recipient, log, subject: subject(schedule.tipo_resumo), text, summary, modules, filters, channel: schedule.canal, telegramChatId: recipient.telegram_chat_id };
+}
+export async function getRelatorioDispatchByScheduleId(scheduleId: string, options: DispatchOptions = {}) {
+  const auth = await assertRelatoriosWriteAccess(); const origin = options.origin ?? "manual"; const createLog = options.createLog ?? true;
+  const { data: schedule, error } = await auth.dataClient.from("relatorio_agendamentos").select("*").eq("tenant_id", auth.tenantId).eq("id", scheduleId).maybeSingle(); if (error) throw error; if (!schedule) throw new Error("Agendamento nao encontrado."); if (options.requireActive && !isActive(schedule as RelatorioAgendamento)) throw new Error("Agendamento nao esta ativo.");
+  const { data: recipient, error: recipientError } = await auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).eq("id", schedule.destinatario_id).maybeSingle(); if (recipientError) throw recipientError; if (!recipient) throw new Error("Destinatario do agendamento nao encontrado.");
+  return prepareDispatch(auth.dataClient, auth.tenantId, schedule as RelatorioAgendamento, recipient as RelatorioDestinatario, origin, createLog);
+}
+export async function getRelatorioDispatchesDue(now: Date | string = new Date(), windowMinutes = 20) {
+  const runAt = typeof now === "string" ? (() => { const [h, m] = now.split(":").map(Number); const d = new Date(); if (Number.isFinite(h)) d.setHours(h, Number.isFinite(m) ? m : 0, 0, 0); return d; })() : now;
+  const admin = createAdminClient(); if (!admin) throw new Error("Cliente administrativo indisponivel para despachar relatorios.");
+  let schedulesResult = await admin.from("relatorio_agendamentos").select("*").eq("ativo", true).eq("status", "ativo").order("created_at", { ascending: true }).limit(200);
+  if (schedulesResult.error && String(schedulesResult.error.message ?? "").toLowerCase().includes("status")) {
+    schedulesResult = await admin.from("relatorio_agendamentos").select("*").eq("ativo", true).order("created_at", { ascending: true }).limit(200);
+  }
+  const { data, error } = schedulesResult; if (error) throw error;
   const dispatches = [];
-  for (const schedule of schedules ?? []) {
-    if (!isInsideLookbackWindow(schedule.horario, normalizedTime, windowMinutes)) continue;
-
-    const { data: existingLog } = await dataClient
-      .from("relatorio_envios")
-      .select("id, status")
-      .eq("agendamento_id", schedule.id)
-      .gte("created_at", `${today}T00:00:00.000Z`)
-      .lte("created_at", `${today}T23:59:59.999Z`)
-      .in("status", ["preparado", "enviado", "ignorado"])
-      .limit(1)
-      .maybeSingle();
-
-    if (existingLog) continue;
-    const dispatch = await getRelatorioDispatchByScheduleId(schedule.id);
-    if (dispatch.shouldSend) dispatches.push(dispatch);
+  for (const schedule of (data ?? []) as RelatorioAgendamento[]) {
+    if (!dueToday(schedule, runAt) || !inWindow(schedule, runAt, windowMinutes) || await alreadyToday(admin, schedule.tenant_id, schedule.id)) continue;
+    const { data: recipient } = await admin.from("relatorio_destinatarios").select("*").eq("tenant_id", schedule.tenant_id).eq("id", schedule.destinatario_id).maybeSingle(); if (!recipient) continue;
+    dispatches.push(await prepareDispatch(admin, schedule.tenant_id, schedule, recipient as RelatorioDestinatario, "agendado", true));
   }
-
   return dispatches;
 }
-
-export async function updateRelatorioEnvioStatus(input: {
-  logId: string;
-  status: "enviado" | "erro" | "ignorado";
-  error?: string | null;
-  metadata?: Record<string, unknown>;
-}) {
-  const dataClient = createAdminClient();
-  if (!dataClient) throw new Error("SUPABASE_SERVICE_ROLE_KEY nao configurada.");
-
-  const { data, error } = await dataClient
-    .from("relatorio_envios")
-    .update({
-      status: input.status,
-      erro: input.error ?? null,
-      metadata: input.metadata ?? {},
-      sent_at: input.status === "enviado" ? new Date().toISOString() : null,
-    })
-    .eq("id", input.logId)
-    .select("*")
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data as RelatorioEnvio;
+export async function updateRelatorioEnvioStatus(params: { logId: string; status: "enviado" | "erro" | "ignorado"; error?: string; metadata?: Record<string, unknown> }) {
+  const client = createAdminClient() ?? (await createClient()); const payload: Record<string, unknown> = { status: params.status, updated_at: new Date().toISOString() };
+  if (params.status === "enviado") payload.sent_at = new Date().toISOString(); if (params.error) payload.erro = params.error; if (params.metadata) payload.metadata = params.metadata;
+  const { data, error } = await client.from("relatorio_envios").update(payload).eq("id", params.logId).select("*").single(); if (error) throw error;
+  const envio = data as RelatorioEnvio;
+  if (params.status === "enviado" && envio.destinatario_id) { await client.from("relatorio_destinatarios").update({ last_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", envio.destinatario_id); if (envio.agendamento_id) await client.from("relatorio_agendamentos").update({ last_run_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", envio.agendamento_id); }
+  return envio;
 }
 
 
-async function buildOperationalActivitiesReport({
-  dataClient,
-  tenantId,
-  recipientName,
-  schedule,
-  filters,
-}: {
-  dataClient: SupabaseAny;
-  tenantId: string;
-  recipientName: string;
-  schedule: RelatorioAgendamento;
-  filters: ReturnType<typeof normalizeReportFilters>;
-}) {
-  const { data, error } = await dataClient
-    .from("atividades_tarefas")
-    .select("id, titulo, descricao, time_responsavel, responsavel_nome, status, prioridade, prazo, due_at, created_at, blocked_reason, waiting_on, source_module, source_event")
-    .eq("tenant_id", tenantId)
-    .not("status", "in", "(\"concluida\",\"concluido\",\"cancelada\",\"ignorada\",\"done\",\"closed\")")
-    .limit(200);
 
-  if (error) throw new Error(error.message);
 
-  const recipientNeedle = normalizeReportText(recipientName);
-  const allRows = (data ?? []) as Array<Record<string, any>>;
-  const rows = allRows.filter((item) => {
-    const owner = normalizeReportText(item.responsavel_nome);
-    return item.time_responsavel === "suporte" || (recipientNeedle && owner.includes(recipientNeedle));
-  }).sort(sortReportTask);
 
-  const groups = [
-    { key: "overdue", title: "VENCIDAS", rows: rows.filter((item) => taskReportGroup(item) === "overdue") },
-    { key: "today", title: "HOJE", rows: rows.filter((item) => taskReportGroup(item) === "today") },
-    { key: "next", title: "PROXIMAS", rows: rows.filter((item) => taskReportGroup(item) === "next") },
-    { key: "blocked", title: "BLOQUEADAS", rows: rows.filter((item) => taskReportGroup(item) === "blocked") },
-  ];
-  const hasAlert = groups[0].rows.length > 0 || groups[3].rows.length > 0;
-  const subject = "Atividades - Operacao";
-  const lines = [
-    "*ATIVIDADES - OPERACAO*",
-    "Destinatario: " + recipientName,
-    "Fonte: atividades_tarefas",
-    "Atualizado em " + new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: schedule.timezone || "America/Sao_Paulo" }).format(new Date()),
-    "",
-  ];
-
-  for (const group of groups) {
-    lines.push("*" + group.title + " - " + group.rows.length + "*");
-    if (!group.rows.length) {
-      lines.push(group.key === "overdue" ? "Nenhuma atividade vencida." : group.key === "today" ? "Nenhuma atividade com prazo hoje." : group.key === "blocked" ? "Nenhuma atividade bloqueada." : "Nenhuma próxima atividade aberta.");
-    } else {
-      group.rows.slice(0, filters.nivel_detalhe === "detalhado" ? 10 : 6).forEach((item, index) => {
-        const due = reportTaskDueLabel(item, schedule.timezone || "America/Sao_Paulo");
-        const context = [item.source_module, item.source_event].filter(Boolean).join(" / ");
-        const waiting = item.waiting_on || item.blocked_reason;
-        lines.push(String(index + 1) + ". " + item.titulo);
-        lines.push("   Prioridade: " + priorityReportLabel(item.prioridade));
-        lines.push("   " + (group.key === "overdue" ? "Venceu" : "Prazo") + ": " + due);
-        if (context) lines.push("   Contexto: " + context);
-        if (waiting) lines.push("   Aguardando: " + waiting);
-      });
-    }
-    lines.push("");
-  }
-
-  lines.push("Abrir atividades: https://plataf-op-hml.vercel.app/atividades");
-
-  return {
-    subject,
-    text: lines.join("\n"),
-    shouldSend: !filters.enviar_apenas_com_alerta || hasAlert || rows.length > 0,
-    metadata: {
-      templateKey: filters.template_key,
-      source: "atividades_tarefas",
-      noDuplicateTaskManager: true,
-      recipientName,
-      scheduleId: schedule.id,
-      total: rows.length,
-      overdue: groups[0].rows.length,
-      today: groups[1].rows.length,
-      next: groups[2].rows.length,
-      blocked: groups[3].rows.length,
-      taskIds: rows.map((item) => item.id).slice(0, 50),
-      assignmentBasis: "time_responsavel=suporte plus configured recipient name when present; atividades_tarefas has no assignee_user_id column in current HML schema",
-    },
-  };
-}
-
-function taskReportGroup(item: Record<string, any>) {
-  const status = normalizeReportText(item.status);
-  if (status.includes("bloque") || item.blocked_reason || item.waiting_on) return "blocked";
-  const due = reportTaskDate(item);
-  const today = reportToday();
-  if (due && due < today) return "overdue";
-  if (due && due === today) return "today";
-  return "next";
-}
-
-function sortReportTask(a: Record<string, any>, b: Record<string, any>) {
-  const groupOrder = { overdue: 1, today: 2, next: 3, blocked: 4 } as Record<string, number>;
-  const groupDiff = groupOrder[taskReportGroup(a)] - groupOrder[taskReportGroup(b)];
-  if (groupDiff !== 0) return groupDiff;
-  const priorityDiff = reportPriorityRank(a.prioridade) - reportPriorityRank(b.prioridade);
-  if (priorityDiff !== 0) return priorityDiff;
-  return reportDateTime(a.prazo ?? a.due_at ?? a.created_at) - reportDateTime(b.prazo ?? b.due_at ?? b.created_at);
-}
-
-function reportPriorityRank(value: unknown) {
-  const normalized = normalizeReportText(value);
-  if (normalized.includes("critica") || normalized.includes("urgente")) return 1;
-  if (normalized.includes("alta")) return 2;
-  if (normalized.includes("media")) return 3;
-  if (normalized.includes("baixa")) return 4;
-  return 5;
-}
-
-function priorityReportLabel(value: unknown) {
-  const normalized = normalizeReportText(value);
-  if (normalized.includes("critica") || normalized.includes("urgente")) return "Critica";
-  if (normalized.includes("alta")) return "Alta";
-  if (normalized.includes("media")) return "Media";
-  if (normalized.includes("baixa")) return "Baixa";
-  return "Padrao";
-}
-
-function reportTaskDate(item: Record<string, any>) {
-  const value = item.prazo ?? item.due_at;
-  if (!value) return null;
-  const date = new Date(String(value).includes("T") ? value : String(value) + "T12:00:00-03:00");
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(date);
-}
-
-function reportToday() {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo" }).format(new Date());
-}
-
-function reportDateTime(value: unknown) {
-  if (!value) return Number.MAX_SAFE_INTEGER;
-  const stringValue = String(value);
-  const date = new Date(stringValue.includes("T") ? stringValue : stringValue + "T12:00:00-03:00");
-  return Number.isNaN(date.getTime()) ? Number.MAX_SAFE_INTEGER : date.getTime();
-}
-
-function reportTaskDueLabel(item: Record<string, any>, timezone: string) {
-  const value = item.prazo ?? item.due_at;
-  if (!value) return "sem prazo";
-  const stringValue = String(value);
-  const date = new Date(stringValue.includes("T") ? stringValue : stringValue + "T12:00:00-03:00");
-  if (Number.isNaN(date.getTime())) return stringValue;
-  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: timezone }).format(date);
-}
-
-function normalizeReportText(value: unknown) {
-  return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-export async function buildOperationalSummary({
-  dataClient,
-  tenantId,
-  tipoResumo,
-  recipientName,
-  schedule,
-}: {
-  dataClient: SupabaseAny;
-  tenantId: string;
-  tipoResumo: RelatorioTipoResumo;
-  recipientName: string;
-  schedule: RelatorioAgendamento;
-}) {
-  const filters = normalizeReportFilters(schedule);
-  const block = filters.blocos;
-  if (filters.template_key === "operacional_atividades") {
-    return buildOperationalActivitiesReport({ dataClient, tenantId, recipientName, schedule, filters });
-  }
-  const agendaPeriod = getPeriodRange(block.agenda.periodo);
-  const financialPeriod = getPeriodRange(block.financeiro.periodo);
-  const interactionPeriod = getPeriodRange(block.instagram.periodo);
-  const adsPeriod = getPeriodRange(block.ads.periodo);
-  const activitiesPeriod = getPeriodRange(block.atividades.periodo);
-  const reminderEnd = addMinutes(filters.antecedencia_minutos ?? 60);
-
-  const [
-    agendaResult,
-    occurrencesResult,
-    interactionsResult,
-    financialResult,
-    adsResult,
-    goalsResult,
-    activitiesResult,
-  ] = await Promise.all([
-    block.agenda.enabled
-      ? dataClient
-          .from("agenda_eventos")
-          .select("id, titulo, tipo, inicio, local, status")
-          .eq("tenant_id", tenantId)
-          .neq("status", "cancelado")
-          .gte("inicio", tipoResumo === "lembrete_agendamento" ? new Date().toISOString() : agendaPeriod.start)
-          .lt("inicio", tipoResumo === "lembrete_agendamento" ? reminderEnd : agendaPeriod.end)
-          .order("inicio", { ascending: true })
-          .limit(filters.nivel_detalhe === "detalhado" ? 12 : 6)
-      : Promise.resolve({ data: [] }),
-    block.ocorrencias.enabled
-      ? dataClient
-          .from("ocorrencias_chamados")
-          .select("id, prioridade, status, origem_falha, tipo_falha, erro_motivo, data_chamado")
-          .eq("tenant_id", tenantId)
-          .in("status", ["aberto", "em_andamento", "reaberto"])
-          .order("data_chamado", { ascending: false })
-          .limit(20)
-      : Promise.resolve({ data: [] }),
-    block.instagram.enabled
-      ? dataClient
-          .from("instagram_interactions")
-          .select("id, source, profile_username, message_text, status, potential, product_topic, interaction_at")
-          .eq("tenant_id", tenantId)
-          .in("status", ["novo", "analisado"])
-          .gte("interaction_at", interactionPeriod.start)
-          .lt("interaction_at", interactionPeriod.end)
-          .order("interaction_at", { ascending: false })
-          .limit(20)
-      : Promise.resolve({ data: [] }),
-    block.financeiro.enabled
-      ? dataClient
-          .from("fin_lancamentos")
-          .select("tipo, status, valor, data_pagamento, descricao")
-          .eq("tenant_id", tenantId)
-          .gte("data_pagamento", financialPeriod.start.slice(0, 10))
-          .lt("data_pagamento", financialPeriod.end.slice(0, 10))
-          .neq("status", "cancelado")
-          .order("data_pagamento", { ascending: true })
-          .limit(200)
-      : Promise.resolve({ data: [] }),
-    block.ads.enabled
-      ? dataClient
-          .from("instagram_ads_daily")
-          .select("valor_gasto, impressoes, alcance, cliques, leads, data_referencia")
-          .eq("tenant_id", tenantId)
-          .gte("data_referencia", adsPeriod.start.slice(0, 10))
-          .lt("data_referencia", adsPeriod.end.slice(0, 10))
-          .limit(2000)
-      : Promise.resolve({ data: [] }),
-    block.objetivos.enabled
-      ? dataClient
-          .from("objetivos_metas")
-          .select("id, titulo, modulo, periodo_tipo, meta_alcancavel, updated_at")
-          .eq("tenant_id", tenantId)
-          .eq("ativo", true)
-          .limit(30)
-      : Promise.resolve({ data: [] }),
-    block.atividades.enabled
-      ? dataClient
-          .from("atividades_tarefas")
-          .select("id, titulo, time_responsavel, responsavel_nome, status, prioridade, prazo, validacao_obrigatoria")
-          .eq("tenant_id", tenantId)
-          .not("status", "in", '("concluida","cancelada","ignorada")')
-          .gte("prazo", activitiesPeriod.start.slice(0, 10))
-          .lt("prazo", activitiesPeriod.end.slice(0, 10))
-          .order("prazo", { ascending: true })
-          .limit(30)
-      : Promise.resolve({ data: [] }),
-  ]);
-
-  const agendaEvents = agendaResult.data ?? [];
-  const openOccurrences = occurrencesResult.data ?? [];
-  const openInteractions = interactionsResult.data ?? [];
-  const financialRows = financialResult.data ?? [];
-  const adsRows = adsResult.data ?? [];
-  const goalsRows = goalsResult.data ?? [];
-  const activitiesRows = activitiesResult.data ?? [];
-
-  const entradas = financialRows
-    .filter((row: { tipo: string; status: string }) => row.tipo === "entrada" && row.status === "realizado")
-    .reduce((sum: number, row: { valor: unknown }) => sum + toNumber(row.valor), 0);
-  const saidas = financialRows
-    .filter((row: { tipo: string; status: string }) => row.tipo === "saida" && row.status === "realizado")
-    .reduce((sum: number, row: { valor: unknown }) => sum + toNumber(row.valor), 0);
-  const predictedPayables = financialRows
-    .filter((row: { tipo: string; status: string }) => row.tipo === "saida" && row.status === "previsto")
-    .reduce((sum: number, row: { valor: unknown }) => sum + toNumber(row.valor), 0);
-  const adsSpend = adsRows.reduce((sum: number, row: { valor_gasto: unknown }) => sum + toNumber(row.valor_gasto), 0);
-  const adsLeads = adsRows.reduce((sum: number, row: { leads?: unknown }) => sum + toNumber(row.leads), 0);
-  const urgentOccurrences = openOccurrences.filter((row: { prioridade: string }) => row.prioridade === "urgente").length;
-  const highPotentialInteractions = openInteractions.filter((row: { potential: string }) => row.potential === "alto").length;
-  const lateActivities = activitiesRows.filter((row: { prazo?: string | null }) => row.prazo && row.prazo < todayIso()).length;
-  const hasAlert =
-    tipoResumo === "lembrete_agendamento"
-      ? agendaEvents.length > 0
-      : urgentOccurrences > 0 || highPotentialInteractions > 0 || predictedPayables > 0 || agendaEvents.length > 0 || lateActivities > 0;
-
-  const subject =
-    tipoResumo === "lembrete_agendamento"
-      ? "Lembrete de agendamento"
-      : tipoResumo === "alerta_tecnico"
-        ? "Alertas tecnicos da plataforma"
-        : tipoResumo === "resumo_suporte"
-          ? "Prioridades operacionais do suporte"
-          : "Resumo executivo operacional";
-
-  const lines = [
-    `*${subject}*`,
-    `Destinatario: ${recipientName}`,
-    `Template: ${filters.template_key ?? "personalizado"}`,
-    `Atualizado em ${new Intl.DateTimeFormat("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "America/Sao_Paulo",
-    }).format(new Date())}`,
-    "",
-  ];
-
-  if (block.agenda.enabled) {
-    lines.push(`*Agenda*`);
-    lines.push(
-      tipoResumo === "lembrete_agendamento"
-        ? `Proximos ${filters.antecedencia_minutos ?? 60} min: ${agendaEvents.length} evento(s).`
-        : `${agendaPeriod.label}: ${agendaEvents.length} evento(s).`,
-    );
-    agendaEvents.slice(0, filters.nivel_detalhe === "detalhado" ? 10 : 5).forEach((event: { titulo: string; inicio: string; local?: string | null }) => {
-      lines.push(`- ${formatDateTime(event.inicio)} - ${event.titulo}${event.local ? ` (${event.local})` : ""}`);
-    });
-    lines.push("");
-  }
-
-  if (block.financeiro.enabled) {
-    lines.push(`*Financeiro operacional*`);
-    lines.push(`Periodo: ${financialPeriod.label}.`);
-    lines.push(`Entradas realizadas: ${formatMoney(entradas)}. Saidas realizadas: ${formatMoney(saidas)}.`);
-    lines.push(`A pagar previsto: ${formatMoney(predictedPayables)}.`);
-    financialRows
-      .filter((row: { tipo: string; status: string }) => row.tipo === "saida" && row.status === "previsto")
-      .slice(0, 4)
-      .forEach((row: { data_pagamento: string; descricao?: string | null; valor: unknown }) => {
-        lines.push(`- ${row.data_pagamento}: ${row.descricao ?? "Pagamento previsto"} (${formatMoney(toNumber(row.valor))})`);
-      });
-    lines.push("");
-  }
-
-  if (block.ocorrencias.enabled || block.instagram.enabled) {
-    lines.push(`*Atencoes operacionais*`);
-    if (block.ocorrencias.enabled) lines.push(`Ocorrencias abertas: ${openOccurrences.length} (${urgentOccurrences} urgente(s)).`);
-    if (block.instagram.enabled) lines.push(`Interacoes pendentes: ${openInteractions.length} (${highPotentialInteractions} alto potencial).`);
-    openOccurrences.slice(0, 4).forEach((item: { prioridade: string; tipo_falha?: string | null; erro_motivo: string }) => {
-      lines.push(`- ${item.prioridade.toUpperCase()}: ${item.tipo_falha ?? item.erro_motivo}`);
-    });
-    openInteractions.slice(0, 4).forEach((item: { potential: string; profile_username?: string | null; product_topic?: string | null; message_text?: string | null }) => {
-      lines.push(`- ${item.potential.toUpperCase()}: ${item.profile_username ?? "perfil"} - ${item.product_topic ?? item.message_text ?? "interacao"}`);
-    });
-    lines.push("");
-  }
-
-  if (block.atividades.enabled) {
-    lines.push(`*Atividades*`);
-    lines.push(`${activitiesPeriod.label}: ${activitiesRows.length} atividade(s), ${lateActivities} atrasada(s).`);
-    activitiesRows.slice(0, filters.nivel_detalhe === "detalhado" ? 10 : 5).forEach((item: { titulo: string; time_responsavel: string; responsavel_nome?: string | null; prioridade: string; prazo?: string | null }) => {
-      lines.push(`- ${item.prioridade.toUpperCase()}: ${item.titulo} (${item.time_responsavel}${item.responsavel_nome ? ` / ${item.responsavel_nome}` : ""}) - prazo ${item.prazo ?? "-"}`);
-    });
-    lines.push("");
-  }
-
-  if (block.ads.enabled || block.objetivos.enabled) {
-    lines.push(`*Ads e metas*`);
-    if (block.ads.enabled) lines.push(`Investimento Ads (${adsPeriod.label}): ${formatMoney(adsSpend)}. Leads registrados: ${adsLeads}.`);
-    if (block.objetivos.enabled) lines.push(`Metas cadastradas para monitorar: ${goalsRows.length}.`);
-    lines.push("");
-  }
-
-  const action =
-    urgentOccurrences > 0
-      ? "Acao sugerida: priorizar ocorrencias urgentes antes de novas demandas."
-      : highPotentialInteractions > 0
-        ? "Acao sugerida: responder interacoes de alto potencial ainda hoje."
-        : agendaEvents.length > 0
-          ? "Acao sugerida: confirmar agenda do dia e preparar materiais dos eventos."
-          : "Acao sugerida: revisar pendencias abertas e manter acompanhamento preventivo.";
-
-  lines.push(action);
-
-  return {
-    subject,
-    text: lines.join("\n"),
-    shouldSend: !filters.enviar_apenas_com_alerta || hasAlert,
-    metadata: {
-      templateKey: filters.template_key,
-      blocks: filters.blocos,
-      onlyAlert: Boolean(filters.enviar_apenas_com_alerta),
-      hasAlert,
-      agendaEvents: agendaEvents.length,
-      openOccurrences: openOccurrences.length,
-      urgentOccurrences,
-      openInteractions: openInteractions.length,
-      highPotentialInteractions,
-      activities: activitiesRows.length,
-      lateActivities,
-      entradas,
-      saidas,
-      predictedPayables,
-      adsSpend,
-      adsLeads,
-    },
-  };
-}
