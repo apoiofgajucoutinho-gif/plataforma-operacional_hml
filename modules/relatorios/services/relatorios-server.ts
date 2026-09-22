@@ -314,10 +314,10 @@ async function alunoBlock(client: AnyClient, tenantId: string, filters: Relatori
   if (!ids.length) throw new Error("Selecione pelo menos um aluno para usar Aluno 360.");
   const title = "👤 Aluno 360";
   const sourceName = "norwyn_customer_student_360";
-  const result = await source<any[]>(client.from(sourceName).select("customer_id, name, email, ltv_brl, purchase_count, product_count, last_purchase_at, last_activity_at").eq("tenant_id", tenantId).in("customer_id", ids).limit(5), []);
+  const result = await source<any[]>(client.from(sourceName).select("customer_id, display_name, email, ltv_brl, purchase_count, product_count, last_purchase_at, last_access_at").eq("tenant_id", tenantId).in("customer_id", ids).limit(5), []);
   if (result.status === "error") return blockError("aluno_360", title, sourceName, result.error, "alunos selecionados");
   if (!result.data.length) return blockEmpty("aluno_360", title, sourceName, "Aluno nao encontrado no recorte.", "alunos selecionados");
-  return { key: "aluno_360", title, source: sourceName, period: "alunos selecionados", status: "success", empty: "Aluno nao encontrado no recorte.", lines: result.data.flatMap((student) => ["• " + (student.name ?? student.email ?? student.customer_id), "  LTV: " + money(n(student.ltv_brl)) + " · " + n(student.purchase_count) + " compra(s) · " + n(student.product_count) + " produto(s)", "  Ultima compra: " + date(student.last_purchase_at) + " · Ultimo acesso: " + date(student.last_activity_at)]) };
+  return { key: "aluno_360", title, source: sourceName, period: "alunos selecionados", status: "success", empty: "Aluno nao encontrado no recorte.", lines: result.data.flatMap((student) => ["• " + (student.display_name ?? student.email ?? student.customer_id), "  LTV: " + money(n(student.ltv_brl)) + " · " + n(student.purchase_count) + " compra(s) · " + n(student.product_count) + " produto(s)", "  Ultima compra: " + date(student.last_purchase_at) + " · Ultimo acesso: " + date(student.last_access_at)]) };
 }
 function recommendationBlock(blocks: Block[]): Block {
   const presenceIssue = blocks.find((block) => block.key === "presence" && block.lines.some((line) => line.includes("⚠️")));
@@ -421,7 +421,7 @@ async function insertEnvioLog(client: AnyClient, payload: Record<string, unknown
   if (retry.error) throw retry.error;
   return retry.data as RelatorioEnvio;
 }
-async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean) {
+async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean, scheduleIdForLog: string | null = schedule.id) {
   const filters = filtersFor(schedule.filtros, schedule.tipo_resumo);
   const result = await buildBlocks(client, tenantId, filters);
   const text = message(schedule.tipo_resumo, result.rendered);
@@ -434,7 +434,7 @@ async function prepareDispatch(client: AnyClient, tenantId: string, schedule: Re
   const metadata = { recipient_name: recipient.nome, schedule_name: schedule.nome, requested_modules: requestedModules, rendered_modules: modules, block_diagnostics: result.diagnostics, block_counts: { requested: result.requested.length, rendered: renderedCount, empty: emptyCount, error: errorCount } };
   let log: RelatorioEnvio | null = null;
   if (createLog) {
-    log = await insertEnvioLog(client, { tenant_id: tenantId, agendamento_id: schedule.id, destinatario_id: recipient.id, tipo_resumo: schedule.tipo_resumo, canal: schedule.canal, destino: schedule.canal === "telegram" ? recipient.telegram_chat_id : recipient.email, status: "preparado", origem: origin, assunto: subject(schedule.tipo_resumo), resumo: summary, mensagem: text, modulos: modules, filtros: filters, metadata, generated_at: new Date().toISOString() });
+    log = await insertEnvioLog(client, { tenant_id: tenantId, agendamento_id: scheduleIdForLog, destinatario_id: recipient.id, tipo_resumo: schedule.tipo_resumo, canal: schedule.canal, destino: schedule.canal === "telegram" ? recipient.telegram_chat_id : recipient.email, status: "preparado", origem: origin, assunto: subject(schedule.tipo_resumo), resumo: summary, mensagem: text, modulos: modules, filtros: filters, metadata, generated_at: new Date().toISOString() });
   }
   return { schedule, recipient, log, subject: subject(schedule.tipo_resumo), text, summary, modules, requestedModules, filters, diagnostics: result.diagnostics, channel: schedule.canal, telegramChatId: recipient.telegram_chat_id };
 }
@@ -447,6 +447,16 @@ export async function getRelatorioPreviewFromDraft(payload: Partial<RelatorioAge
   if (!recipient) throw new Error("Destinatario do relatorio nao encontrado.");
   const draft = { ...payload, id: "preview", tenant_id: auth.tenantId, status: payload.status ?? "rascunho", ativo: payload.ativo ?? true, canal: payload.canal ?? "telegram", tipo_resumo: payload.tipo_resumo ?? "personalizado", filtros: payload.filtros ?? {}, incluir_modulos: payload.incluir_modulos ?? [] } as RelatorioAgendamento;
   return prepareDispatch(auth.dataClient, auth.tenantId, draft, recipient as RelatorioDestinatario, "preview", false);
+}
+export async function getRelatorioDispatchFromDraft(payload: Partial<RelatorioAgendamento>) {
+  const auth = await assertRelatoriosWriteAccess();
+  const recipientId = String(payload.destinatario_id ?? "");
+  if (!recipientId) throw new Error("Escolha um destino antes de enviar o relatorio.");
+  const { data: recipient, error: recipientError } = await auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).eq("id", recipientId).maybeSingle();
+  if (recipientError) throw recipientError;
+  if (!recipient) throw new Error("Destinatario do relatorio nao encontrado.");
+  const draft = { ...payload, id: "manual", tenant_id: auth.tenantId, status: "rascunho", ativo: false, canal: payload.canal ?? "telegram", tipo_resumo: payload.tipo_resumo ?? "personalizado", filtros: payload.filtros ?? {}, incluir_modulos: payload.incluir_modulos ?? [] } as RelatorioAgendamento;
+  return prepareDispatch(auth.dataClient, auth.tenantId, draft, recipient as RelatorioDestinatario, "manual", true, null);
 }
 export async function getRelatorioDispatchByScheduleId(scheduleId: string, options: DispatchOptions = {}) {
   const auth = await assertRelatoriosWriteAccess(); const origin = options.origin ?? "manual"; const createLog = options.createLog ?? true;

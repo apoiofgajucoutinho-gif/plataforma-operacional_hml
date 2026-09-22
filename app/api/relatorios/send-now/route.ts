@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { assertRelatoriosWriteAccess, getRelatorioDispatchByScheduleId, getRelatorioPreviewFromDraft, updateRelatorioEnvioStatus } from "@/modules/relatorios/services/relatorios-server";
+import { assertRelatoriosWriteAccess, getRelatorioDispatchByScheduleId, getRelatorioDispatchFromDraft, getRelatorioPreviewFromDraft, updateRelatorioEnvioStatus } from "@/modules/relatorios/services/relatorios-server";
 
 function normalizeTelegramError(errorText: string) {
   if (errorText.includes("bot can't send messages to the bot")) return "Telegram recusou o envio porque o Telegram chat ID configurado pertence a um bot. Use o chat ID de uma pessoa ou grupo onde o bot esteja presente.";
@@ -25,13 +25,15 @@ export async function POST(request: Request) {
   const scheduleId = String(body.scheduleId ?? "");
   const previewOnly = Boolean(body.previewOnly);
   const draftPayload = body.payload;
-  if (!scheduleId && !(previewOnly && draftPayload)) return NextResponse.json({ error: "scheduleId ou payload de preview obrigatorio." }, { status: 400 });
+  if (!scheduleId && !draftPayload) return NextResponse.json({ error: "scheduleId ou configuracao do relatorio obrigatoria." }, { status: 400 });
   let logId: string | null = null;
 
   try {
     const auth = await assertRelatoriosWriteAccess();
-    const dispatch = previewOnly && draftPayload
-      ? await getRelatorioPreviewFromDraft(draftPayload)
+    const dispatch = draftPayload
+      ? previewOnly
+        ? await getRelatorioPreviewFromDraft(draftPayload)
+        : await getRelatorioDispatchFromDraft(draftPayload)
       : await getRelatorioDispatchByScheduleId(scheduleId, { origin: previewOnly ? "preview" : "manual", createLog: !previewOnly, requireActive: false });
     logId = dispatch.log?.id ?? null;
 

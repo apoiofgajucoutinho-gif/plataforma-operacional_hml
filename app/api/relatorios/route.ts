@@ -17,6 +17,16 @@ function cleanPayload(payload: Record<string, unknown>) {
   );
 }
 
+function humanDatabaseError(message: string) {
+  if (message.includes("relatorio_agendamentos_frequencia_check")) {
+    return "Nao foi possivel salvar este agendamento. A frequencia escolhida ainda nao esta disponivel no ambiente de homologacao.";
+  }
+  if (message.includes("violates check constraint")) {
+    return "Nao foi possivel salvar este registro porque uma configuracao ainda nao e compativel com o ambiente de homologacao.";
+  }
+  return message;
+}
+
 export async function POST(request: Request) {
   const body = await request.json();
   const entity = String(body.entity ?? "");
@@ -35,7 +45,7 @@ export async function POST(request: Request) {
       if (!id) return NextResponse.json({ error: "ID obrigatorio." }, { status: 400 });
 
       const { error } = await auth.dataClient.from(table).delete().eq("tenant_id", auth.tenantId).eq("id", id);
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      if (error) return NextResponse.json({ error: humanDatabaseError(error.message) }, { status: 400 });
       return NextResponse.json({ ok: true });
     }
 
@@ -54,13 +64,19 @@ export async function POST(request: Request) {
         .select("*")
         .single();
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      if (error) {
+        console.error("[relatorios] update failed", { entity, code: error.code, constraint: error.message.match(/constraint \"([^\"]+)/)?.[1] ?? null });
+        return NextResponse.json({ error: humanDatabaseError(error.message) }, { status: 400 });
+      }
       return NextResponse.json({ data });
     }
 
     delete payload.id;
     const { data, error } = await auth.dataClient.from(table).insert(payload).select("*").single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error) {
+      console.error("[relatorios] insert failed", { entity, code: error.code, constraint: error.message.match(/constraint \"([^\"]+)/)?.[1] ?? null });
+      return NextResponse.json({ error: humanDatabaseError(error.message) }, { status: 400 });
+    }
     return NextResponse.json({ data });
   } catch (error) {
     return NextResponse.json(

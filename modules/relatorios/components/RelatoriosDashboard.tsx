@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   Bell,
   CalendarClock,
   CheckCircle2,
@@ -13,6 +15,7 @@ import {
   History,
   Loader2,
   Mail,
+  MoreHorizontal,
   Pause,
   Pencil,
   Play,
@@ -41,7 +44,9 @@ import type {
 } from "@/modules/relatorios/types";
 
 type TabKey = "overview" | "schedules" | "compose" | "history" | "destinations";
-type StepKey = "content" | "filters" | "recipient" | "when" | "preview";
+type StepKey = "content" | "filters" | "recipient" | "when";
+type ComposeMode = "now" | "schedule";
+type StudentOption = { customer_id: string; name: string | null; email: string | null };
 
 type DraftSchedule = {
   destinatario_id: string;
@@ -77,13 +82,19 @@ const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
   { key: "destinations", label: "Destinos", icon: <UserRound className="h-4 w-4" /> },
 ];
 
-const steps: Array<{ key: StepKey; label: string }> = [
-  { key: "content", label: "1. O que enviar" },
+const baseSteps: Array<{ key: StepKey; label: string }> = [
+  { key: "content", label: "1. Conteudo" },
   { key: "filters", label: "2. Filtros" },
-  { key: "recipient", label: "3. Para quem" },
-  { key: "when", label: "4. Quando" },
-  { key: "preview", label: "5. Pre-visualizacao" },
+  { key: "recipient", label: "3. Destino" },
 ];
+
+const scheduleFrequencyOptions: Array<[RelatorioFrequencia, string]> = [
+  ["diario", "Diario"],
+  ["semanal", "Semanal"],
+  ["mensal", "Mensal"],
+];
+
+const scheduleTypeOptions = new Set<RelatorioTipoResumo>(["resumo_executivo", "resumo_suporte", "alerta_tecnico", "agenda", "ocorrencias", "financeiro", "lembrete_agendamento"]);
 
 const tipoLabels: Record<string, string> = {
   resumo_executivo: "Resumo executivo",
@@ -197,6 +208,7 @@ const initialRecipient: RecipientDraft = {
 export function RelatoriosDashboard({ context }: { context: RelatoriosContext }) {
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [activeStep, setActiveStep] = useState<StepKey>("content");
+  const [composeMode, setComposeMode] = useState<ComposeMode>("now");
   const [destinatarios, setDestinatarios] = useState(context.destinatarios);
   const [agendamentos, setAgendamentos] = useState(context.agendamentos);
   const [envios, setEnvios] = useState(context.envios);
@@ -213,6 +225,11 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const [apiPreview, setApiPreview] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<StepKey, string>>>({});
+  const [studentQuery, setStudentQuery] = useState("");
+  const [studentResults, setStudentResults] = useState<StudentOption[]>([]);
+  const [selectedStudents, setSelectedStudents] = useState<StudentOption[]>([]);
+  const [searchingStudents, setSearchingStudents] = useState(false);
 
   const canWrite = context.canWrite;
   const activeSchedules = agendamentos.filter(scheduleActive);
@@ -225,6 +242,8 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   const selectedBlocks = Object.entries(scheduleForm.filtros.blocos ?? {}).filter(([, config]) => config?.enabled).map(([key]) => key);
   const localPreview = buildPreview(scheduleForm, destinatarios);
   const previewText = apiPreview ?? localPreview;
+  const composeSteps = composeMode === "schedule" ? [...baseSteps, { key: "when" as StepKey, label: "4. Frequencia" }] : baseSteps;
+  const previewSignature = useMemo(() => JSON.stringify({ destinatario_id: scheduleForm.destinatario_id, tipo_resumo: scheduleForm.tipo_resumo, incluir_modulos: scheduleForm.incluir_modulos, filtros: scheduleForm.filtros }), [scheduleForm.destinatario_id, scheduleForm.tipo_resumo, scheduleForm.incluir_modulos, scheduleForm.filtros]);
 
   useEffect(() => {
     void fetch("/api/adoption/track", {
@@ -235,6 +254,44 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     });
   }, [activeTab]);
 
+  useEffect(() => {
+    const ids = scheduleForm.filtros.customer_ids ?? [];
+    const missing = ids.filter((id) => !selectedStudents.some((student) => student.customer_id === id));
+    if (!missing.length) return;
+    const params = new URLSearchParams();
+    missing.slice(0, 20).forEach((id) => params.append("id", id));
+    void fetch(`/api/relatorios/students?${params.toString()}`)
+      .then((response) => response.json())
+      .then((result) => setSelectedStudents((current) => [...current, ...(result.data ?? []).filter((item: StudentOption) => !current.some((student) => student.customer_id === item.customer_id))]))
+      .catch(() => undefined);
+  }, [scheduleForm.filtros.customer_ids, selectedStudents]);
+
+  useEffect(() => {
+    const query = studentQuery.trim();
+    if (query.length < 2) { setStudentResults([]); return; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearchingStudents(true);
+      try {
+        const response = await fetch(`/api/relatorios/students?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+        const result = await response.json();
+        if (response.ok) setStudentResults(result.data ?? []);
+      } finally {
+        setSearchingStudents(false);
+      }
+    }, 350);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [studentQuery]);
+
+  useEffect(() => {
+    setApiPreview(null);
+    const payload = payloadForSchedule();
+    if (!payload.destinatario_id || !payload.incluir_modulos.length) return;
+    if (payload.incluir_modulos.includes("aluno_360") && !(payload.filtros.customer_ids ?? []).length) return;
+    const timer = window.setTimeout(() => { void previewSchedule({ silent: true }); }, 650);
+    return () => window.clearTimeout(timer);
+  }, [previewSignature]);
+
   function mergedFilters() {
     return {
       ...defaultFilters,
@@ -244,13 +301,16 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   }
 
   function setBlock(key: string, patch: Partial<{ enabled: boolean; periodo: RelatorioPeriodo; empty_behavior: "omit" | "show_empty" }>) {
+    if (key === "aluno_360" && patch.enabled === false) setSelectedStudents([]);
     setScheduleForm((current) => {
       const currentFilters = { ...defaultFilters, ...(current.filtros ?? {}), blocos: { ...defaultFilters.blocos, ...(current.filtros?.blocos ?? {}) } };
       const currentBlock = currentFilters.blocos?.[key] ?? { enabled: false, periodo: blockOptions.find((item) => item.key === key)?.defaultPeriod ?? "hoje" };
       const blocos = { ...(currentFilters.blocos ?? {}), [key]: { ...currentBlock, ...patch } };
       const incluir_modulos = Object.entries(blocos).filter(([, config]) => config?.enabled).map(([blockKey]) => blockKey);
-      return { ...current, incluir_modulos, filtros: { ...currentFilters, blocos } };
+      const customer_ids = key === "aluno_360" && patch.enabled === false ? [] : currentFilters.customer_ids;
+      return { ...current, incluir_modulos, filtros: { ...currentFilters, customer_ids, blocos } };
     });
+    setFieldErrors((current) => ({ ...current, content: undefined, filters: undefined }));
   }
 
   function setFilterPatch(patch: Partial<RelatorioFiltros>) {
@@ -275,6 +335,62 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     };
   }
 
+  function validateStep(step: StepKey) {
+    const payload = payloadForSchedule();
+    if (step === "content" && !payload.incluir_modulos.length) return "Escolha pelo menos um bloco para continuar.";
+    if (step === "filters" && payload.incluir_modulos.includes("aluno_360") && !(payload.filtros.customer_ids ?? []).length) return "Selecione pelo menos um aluno para usar Aluno 360.";
+    if (step === "recipient" && !payload.destinatario_id) return "Escolha o destino Telegram antes de continuar.";
+    if (step === "when" && !scheduleFrequencyOptions.some(([value]) => value === payload.frequencia)) return "Escolha uma frequencia disponivel no ambiente de homologacao.";
+    return null;
+  }
+
+  function goToStep(step: StepKey) {
+    const currentIndex = composeSteps.findIndex((item) => item.key === activeStep);
+    const targetIndex = composeSteps.findIndex((item) => item.key === step);
+    if (targetIndex > currentIndex) {
+      for (let index = 0; index < targetIndex; index += 1) {
+        const error = validateStep(composeSteps[index].key);
+        if (error) { setFieldErrors((current) => ({ ...current, [composeSteps[index].key]: error })); setActiveStep(composeSteps[index].key); return; }
+      }
+    }
+    setFieldErrors((current) => ({ ...current, [step]: undefined }));
+    setActiveStep(step);
+  }
+
+  function moveStep(direction: -1 | 1) {
+    const index = composeSteps.findIndex((item) => item.key === activeStep);
+    if (direction > 0) {
+      const error = validateStep(activeStep);
+      if (error) { setFieldErrors((current) => ({ ...current, [activeStep]: error })); return; }
+    }
+    const next = composeSteps[index + direction];
+    if (next) goToStep(next.key);
+  }
+
+  function changeComposeMode(mode: ComposeMode) {
+    setComposeMode(mode);
+    setMessage(null);
+    setFieldErrors({});
+    setActiveStep("content");
+    if (mode === "schedule" && !scheduleTypeOptions.has(scheduleForm.tipo_resumo)) {
+      setScheduleForm((current) => ({ ...current, tipo_resumo: "resumo_executivo", frequencia: "diario" }));
+    }
+  }
+
+  function selectStudent(student: StudentOption) {
+    setSelectedStudents((current) => current.some((item) => item.customer_id === student.customer_id) ? current : [...current, student]);
+    const ids = Array.from(new Set([...(scheduleForm.filtros.customer_ids ?? []), student.customer_id]));
+    setFilterPatch({ customer_ids: ids });
+    setStudentQuery("");
+    setStudentResults([]);
+    setFieldErrors((current) => ({ ...current, filters: undefined }));
+  }
+
+  function removeStudent(customerId: string) {
+    setSelectedStudents((current) => current.filter((item) => item.customer_id !== customerId));
+    setFilterPatch({ customer_ids: (scheduleForm.filtros.customer_ids ?? []).filter((id) => id !== customerId) });
+  }
+
   async function saveEntity(entity: "destinatario" | "agendamento", payload: Record<string, unknown>, id?: string | null) {
     setMessage("Salvando...");
     const response = await fetch("/api/relatorios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity, action: id ? "update" : "create", id, payload }) });
@@ -284,16 +400,38 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     return result.data;
   }
 
-  async function saveSchedule(event?: FormEvent<HTMLFormElement>, options: { stay?: boolean; sendAfter?: boolean } = {}) {
+  async function saveSchedule(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (!scheduleForm.destinatario_id) { setMessage("Escolha um destino antes de salvar."); return null; }
+    for (const step of composeSteps) {
+      const error = validateStep(step.key);
+      if (error) { setFieldErrors((current) => ({ ...current, [step.key]: error })); setActiveStep(step.key); return null; }
+    }
     const payload = payloadForSchedule();
     const saved = await saveEntity("agendamento", payload, editingScheduleId);
     if (!saved) return null;
     setAgendamentos((items) => (editingScheduleId ? items.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...items]));
-    if (!options.stay) { setScheduleForm(initialSchedule); setEditingScheduleId(null); setActiveTab("schedules"); }
-    if (options.sendAfter) await sendNow(saved.id);
+    setScheduleForm(initialSchedule);
+    setEditingScheduleId(null);
+    setActiveTab("schedules");
     return saved as RelatorioAgendamento;
+  }
+
+  async function sendDraftNow() {
+    for (const step of baseSteps) {
+      const error = validateStep(step.key);
+      if (error) { setFieldErrors((current) => ({ ...current, [step.key]: error })); setActiveStep(step.key); return; }
+    }
+    const payload = payloadForSchedule({ frequencia: "sob_demanda", ativo: false });
+    setSendingId("draft");
+    setMessage("Enviando no Telegram...");
+    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ payload }) });
+    const result = await response.json();
+    setSendingId(null);
+    if (!response.ok) { setMessage(result.error ?? "Nao foi possivel enviar agora."); return; }
+    if (result.data) setEnvios((items) => [result.data, ...items]);
+    const destination = recipientName(scheduleForm.destinatario_id, destinatarios);
+    const timestamp = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date());
+    setMessage(`Relatorio enviado para ${destination} as ${timestamp}.`);
   }
 
   async function saveRecipient(event: FormEvent<HTMLFormElement>) {
@@ -336,21 +474,17 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     setMessage("Relatorio enviado no Telegram.");
   }
 
-  async function previewSchedule(scheduleId?: string) {
-    const id = scheduleId ?? editingScheduleId;
+  async function previewSchedule(options: { silent?: boolean } = {}) {
     const payload = payloadForSchedule();
     const selected = Object.entries(payload.filtros?.blocos ?? {}).filter(([, config]) => config?.enabled).map(([key]) => key);
-    if (!selected.length) { setMessage("Escolha ao menos um bloco para gerar a pre-visualizacao."); return; }
-    if (selected.includes("aluno_360") && !(payload.filtros.customer_ids ?? []).length) { setMessage("Selecione pelo menos um aluno para usar Aluno 360."); return; }
-    if (!payload.destinatario_id) { setMessage("Escolha um destino antes de gerar a pre-visualizacao real."); return; }
-    setPreviewingId(id ?? "draft");
-    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(id ? { scheduleId: id, previewOnly: true } : { previewOnly: true, payload }) });
+    if (!selected.length || (selected.includes("aluno_360") && !(payload.filtros.customer_ids ?? []).length) || !payload.destinatario_id) return;
+    setPreviewingId("draft");
+    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ previewOnly: true, payload }) });
     const result = await response.json();
     setPreviewingId(null);
-    if (!response.ok) { setMessage(result.error ?? "Nao foi possivel gerar preview real."); return; }
+    if (!response.ok) { if (!options.silent) setMessage(result.error ?? "Nao foi possivel gerar preview real."); return; }
     setApiPreview(result.preview?.text ?? null);
-    setMessage(result.preview?.summary ?? "Pre-visualizacao gerada com dados reais.");
-    setActiveStep("preview");
+    if (!options.silent) setMessage(result.preview?.summary ?? "Pre-visualizacao atualizada com dados reais.");
   }
 
   async function loadHistory(page = historyPage) {
@@ -370,6 +504,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     const filters = { ...defaultFilters, ...(item.filtros ?? {}), blocos: { ...defaultFilters.blocos, ...(item.filtros?.blocos ?? {}) } };
     setScheduleForm({ destinatario_id: item.destinatario_id, nome: item.nome, descricao: item.descricao ?? "", tipo_resumo: item.tipo_resumo, canal: item.canal, frequencia: item.frequencia, horario: item.horario?.slice(0, 5) ?? "", incluir_modulos: item.incluir_modulos ?? [], filtros: filters, ativo: item.ativo !== false });
     setEditingScheduleId(item.id);
+    setComposeMode("schedule");
     setApiPreview(null);
     setActiveTab("compose");
     setActiveStep("content");
@@ -379,6 +514,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     const filters = { ...defaultFilters, ...(item.filtros ?? {}), blocos: { ...defaultFilters.blocos, ...(item.filtros?.blocos ?? {}) } };
     setScheduleForm({ destinatario_id: item.destinatario_id, nome: `${item.nome} (copia)`, descricao: item.descricao ?? "", tipo_resumo: item.tipo_resumo, canal: item.canal, frequencia: item.frequencia, horario: item.horario?.slice(0, 5) ?? "", incluir_modulos: item.incluir_modulos ?? [], filtros: filters, ativo: false });
     setEditingScheduleId(null);
+    setComposeMode("schedule");
     setApiPreview(null);
     setActiveTab("compose");
     setActiveStep("content");
@@ -406,7 +542,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
       <Header updatedAt={context.updatedAt} />
       <div className="flex flex-wrap gap-2 rounded-[22px] border border-brand-sand/80 bg-white p-2.5 shadow-soft">
         {tabs.map((tab) => (
-          <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`inline-flex items-center gap-2 rounded-[18px] px-5 py-3 text-[15px] font-black transition ${activeTab === tab.key ? "bg-brand-teal text-white shadow-sm" : "text-brand-teal hover:bg-brand-cream"}`}>
+          <button key={tab.key} type="button" onClick={() => { setActiveTab(tab.key); setMessage(null); setFieldErrors({}); }} className={`inline-flex items-center gap-2 rounded-[18px] px-5 py-3 text-[15px] font-black transition ${activeTab === tab.key ? "bg-brand-teal text-white shadow-sm" : "text-brand-teal hover:bg-brand-cream"}`}>
             {tab.icon}{tab.label}
           </button>
         ))}
@@ -414,15 +550,15 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
       {message ? <p className="rounded-md bg-brand-cream px-4 py-3 text-sm font-bold text-brand-teal">{message}</p> : null}
 
       {activeTab === "overview" ? (
-        <OverviewTab activeSchedules={activeSchedules.length} sentToday={sentToday} nextSchedule={nextSchedule} errors={errors} activeRecipients={activeRecipients.length} agendamentos={agendamentos} envios={envios} destinatarios={destinatarios} onCreate={() => { setActiveTab("compose"); setActiveStep("content"); }} onOpenHistory={(envio) => { setSelectedEnvio(envio); setActiveTab("history"); }} />
+        <OverviewTab activeSchedules={activeSchedules.length} sentToday={sentToday} nextSchedule={nextSchedule} errors={errors} activeRecipients={activeRecipients.length} agendamentos={agendamentos} envios={envios} destinatarios={destinatarios} onCreate={() => { setComposeMode("now"); setActiveTab("compose"); setActiveStep("content"); }} onOpenHistory={(envio) => { setSelectedEnvio(envio); setActiveTab("history"); }} />
       ) : null}
 
       {activeTab === "schedules" ? (
-        <SchedulesTab agendamentos={agendamentos} destinatarios={destinatarios} sendingId={sendingId} canWrite={canWrite} onCreate={() => { setScheduleForm(initialSchedule); setEditingScheduleId(null); setActiveTab("compose"); }} onEdit={editSchedule} onDuplicate={duplicateSchedule} onToggle={toggleSchedule} onSendNow={sendNow} onDelete={(id) => deleteEntity("agendamento", id)} />
+        <SchedulesTab agendamentos={agendamentos} destinatarios={destinatarios} sendingId={sendingId} canWrite={canWrite} onCreate={() => { setScheduleForm(initialSchedule); setEditingScheduleId(null); setComposeMode("schedule"); setActiveTab("compose"); setActiveStep("content"); }} onEdit={editSchedule} onDuplicate={duplicateSchedule} onToggle={toggleSchedule} onSendNow={sendNow} onDelete={(id) => deleteEntity("agendamento", id)} />
       ) : null}
 
       {activeTab === "compose" ? (
-        <ComposeTab activeStep={activeStep} setActiveStep={setActiveStep} scheduleForm={scheduleForm} setScheduleForm={setScheduleForm} destinatarios={destinatarios} selectedBlocks={selectedBlocks} setBlock={setBlock} setFilterPatch={setFilterPatch} mergedFilters={mergedFilters} previewText={previewText} apiPreview={apiPreview} canWrite={canWrite} editingScheduleId={editingScheduleId} previewingId={previewingId} sendingId={sendingId} onPreview={() => previewSchedule()} onSave={saveSchedule} onSendAfterSave={() => saveSchedule(undefined, { sendAfter: true })} onCancel={() => { setEditingScheduleId(null); setScheduleForm(initialSchedule); setApiPreview(null); }} />
+        <ComposeTab mode={composeMode} onModeChange={changeComposeMode} steps={composeSteps} activeStep={activeStep} onStepChange={goToStep} onMoveStep={moveStep} scheduleForm={scheduleForm} setScheduleForm={setScheduleForm} destinatarios={destinatarios} selectedBlocks={selectedBlocks} setBlock={setBlock} setFilterPatch={setFilterPatch} mergedFilters={mergedFilters} previewText={previewText} canWrite={canWrite} editingScheduleId={editingScheduleId} previewingId={previewingId} sendingId={sendingId} fieldErrors={fieldErrors} studentQuery={studentQuery} setStudentQuery={setStudentQuery} studentResults={studentResults} selectedStudents={selectedStudents} searchingStudents={searchingStudents} onSelectStudent={selectStudent} onRemoveStudent={removeStudent} onPreview={() => previewSchedule()} onSave={saveSchedule} onSendNow={sendDraftNow} onCancel={() => { setEditingScheduleId(null); setScheduleForm(initialSchedule); setSelectedStudents([]); setApiPreview(null); setFieldErrors({}); }} />
       ) : null}
 
       {activeTab === "history" ? (
@@ -533,16 +669,23 @@ function SchedulesTab({ agendamentos, destinatarios, sendingId, canWrite, onCrea
   );
 }
 
-function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, destinatarios, selectedBlocks, setBlock, setFilterPatch, mergedFilters, previewText, apiPreview, canWrite, editingScheduleId, previewingId, sendingId, onPreview, onSave, onSendAfterSave, onCancel }: { activeStep: StepKey; setActiveStep: (step: StepKey) => void; scheduleForm: DraftSchedule; setScheduleForm: React.Dispatch<React.SetStateAction<DraftSchedule>>; destinatarios: RelatorioDestinatario[]; selectedBlocks: string[]; setBlock: (key: string, patch: Partial<{ enabled: boolean; periodo: RelatorioPeriodo; empty_behavior: "omit" | "show_empty" }>) => void; setFilterPatch: (patch: Partial<RelatorioFiltros>) => void; mergedFilters: () => RelatorioFiltros; previewText: string; apiPreview: string | null; canWrite: boolean; editingScheduleId: string | null; previewingId: string | null; sendingId: string | null; onPreview: () => void; onSave: (event?: FormEvent<HTMLFormElement>, options?: { stay?: boolean; sendAfter?: boolean }) => Promise<RelatorioAgendamento | null>; onSendAfterSave: () => void; onCancel: () => void; }) {
+function ComposeTab({ mode, onModeChange, steps, activeStep, onStepChange, onMoveStep, scheduleForm, setScheduleForm, destinatarios, selectedBlocks, setBlock, setFilterPatch, mergedFilters, previewText, canWrite, editingScheduleId, previewingId, sendingId, fieldErrors, studentQuery, setStudentQuery, studentResults, selectedStudents, searchingStudents, onSelectStudent, onRemoveStudent, onPreview, onSave, onSendNow, onCancel }: { mode: ComposeMode; onModeChange: (mode: ComposeMode) => void; steps: Array<{ key: StepKey; label: string }>; activeStep: StepKey; onStepChange: (step: StepKey) => void; onMoveStep: (direction: -1 | 1) => void; scheduleForm: DraftSchedule; setScheduleForm: React.Dispatch<React.SetStateAction<DraftSchedule>>; destinatarios: RelatorioDestinatario[]; selectedBlocks: string[]; setBlock: (key: string, patch: Partial<{ enabled: boolean; periodo: RelatorioPeriodo; empty_behavior: "omit" | "show_empty" }>) => void; setFilterPatch: (patch: Partial<RelatorioFiltros>) => void; mergedFilters: () => RelatorioFiltros; previewText: string; canWrite: boolean; editingScheduleId: string | null; previewingId: string | null; sendingId: string | null; fieldErrors: Partial<Record<StepKey, string>>; studentQuery: string; setStudentQuery: (value: string) => void; studentResults: StudentOption[]; selectedStudents: StudentOption[]; searchingStudents: boolean; onSelectStudent: (student: StudentOption) => void; onRemoveStudent: (customerId: string) => void; onPreview: () => void; onSave: (event?: FormEvent<HTMLFormElement>) => Promise<RelatorioAgendamento | null>; onSendNow: () => void; onCancel: () => void; }) {
   const filters = mergedFilters();
+  const currentIndex = steps.findIndex((step) => step.key === activeStep);
+  const isLastStep = currentIndex === steps.length - 1;
+  const typeEntries = Object.entries(tipoLabels).filter(([value]) => mode === "now" || scheduleTypeOptions.has(value as RelatorioTipoResumo));
   return (
-    <form onSubmit={(event) => onSave(event)} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.72fr)]">
-      <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
+    <form onSubmit={(event) => { event.preventDefault(); if (mode === "schedule") void onSave(event); else void onSendNow(); }} className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.8fr)]">
+      <Card className="rounded-[var(--ds-radius-lg)] border-[color:var(--ds-border)] bg-[color:var(--ds-surface)] p-5 shadow-[var(--ds-shadow-sm)] sm:p-6">
         <div className="flex flex-col gap-5">
-          <SectionTitle icon={<Send className="h-4 w-4" />} title={editingScheduleId ? "Editar relatorio" : "Novo envio"} subtitle="Monte a mensagem, escolha o destino e envie pelo Telegram." />
-          <div className="flex flex-wrap gap-2 rounded-[22px] border border-brand-sand/80 bg-brand-cream/45 p-2.5">
+          <SectionTitle icon={<Send className="h-4 w-4" />} title={editingScheduleId ? "Editar agendamento" : mode === "now" ? "Enviar agora" : "Criar agendamento"} subtitle={mode === "now" ? "Monte a mensagem e envie sem criar um agendamento." : "Configure uma recorrencia compativel com o ambiente atual."} />
+          <div className="grid grid-cols-2 gap-2 rounded-[22px] bg-[color:var(--ds-bg-soft)] p-2">
+            <button type="button" disabled={Boolean(editingScheduleId)} onClick={() => onModeChange("now")} className={`min-h-12 rounded-[16px] px-5 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-45 ${mode === "now" ? "bg-brand-teal text-white shadow-sm" : "bg-white text-brand-teal"}`}><Send className="mr-2 inline h-4 w-4" />Enviar agora</button>
+            <button type="button" onClick={() => onModeChange("schedule")} className={`min-h-12 rounded-[16px] px-5 text-sm font-black transition ${mode === "schedule" ? "bg-brand-teal text-white shadow-sm" : "bg-white text-brand-teal"}`}><CalendarClock className="mr-2 inline h-4 w-4" />Agendar</button>
+          </div>
+          <div className="flex flex-wrap gap-2 rounded-[22px] border border-[color:var(--ds-border)] bg-[color:var(--ds-bg-soft)] p-2.5">
             {steps.map((step) => (
-              <button key={step.key} type="button" onClick={() => setActiveStep(step.key)} className={`rounded-[18px] px-4 py-3 text-sm font-black transition ${activeStep === step.key ? "bg-brand-teal text-white shadow-sm" : "bg-white text-brand-teal hover:bg-brand-cream"}`}>{step.label}</button>
+              <button key={step.key} type="button" onClick={() => onStepChange(step.key)} className={`rounded-[18px] px-4 py-3 text-sm font-black transition ${activeStep === step.key ? "bg-brand-teal text-white shadow-sm" : "bg-white text-brand-teal hover:bg-brand-cream"}`}>{step.label}</button>
             ))}
           </div>
         </div>
@@ -551,7 +694,7 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
           <div className="mt-5 space-y-5">
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="Nome do relatorio"><input value={scheduleForm.nome} onChange={(e) => setScheduleForm((c) => ({ ...c, nome: e.target.value }))} className="input-like min-h-12 text-[15px]" placeholder="Daily da Ju" /></Field>
-              <Field label="Tipo"><select value={scheduleForm.tipo_resumo} onChange={(e) => setScheduleForm((c) => ({ ...c, tipo_resumo: e.target.value as RelatorioTipoResumo }))} className="input-like min-h-12 text-[15px]">{Object.entries(tipoLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+              <Field label="Tipo"><select value={scheduleForm.tipo_resumo} onChange={(e) => setScheduleForm((c) => ({ ...c, tipo_resumo: e.target.value as RelatorioTipoResumo }))} className="input-like min-h-12 text-[15px]">{typeEntries.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
             </div>
             <Field label="Descricao curta"><textarea value={scheduleForm.descricao} onChange={(e) => setScheduleForm((c) => ({ ...c, descricao: e.target.value }))} className="input-like min-h-28 text-[15px]" placeholder="Resumo para orientar quem vai receber." /></Field>
             <div>
@@ -560,7 +703,7 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
                 {blockOptions.map((block) => {
                   const active = selectedBlocks.includes(block.key);
                   return (
-                    <button key={block.key} type="button" onClick={() => setBlock(block.key, { enabled: !active, periodo: filters.blocos?.[block.key]?.periodo ?? block.defaultPeriod })} className={`rounded-[22px] border p-5 text-left shadow-sm transition ${active ? "border-brand-sky bg-brand-sky/15 ring-2 ring-brand-sky/20" : "border-brand-sand/80 bg-white hover:bg-brand-cream/40"}`}>
+                    <button key={block.key} type="button" onClick={() => setBlock(block.key, { enabled: !active, periodo: filters.blocos?.[block.key]?.periodo ?? block.defaultPeriod })} className={`min-h-[118px] rounded-[22px] border p-5 text-left shadow-sm transition ${active ? "border-brand-sky bg-brand-sky/15 ring-2 ring-brand-sky/20" : "border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] hover:bg-[color:var(--ds-bg-soft)]"}`}>
                       <div className="flex items-start gap-3">
                         <IconBubble tone={active ? "blue" : "neutral"}>{block.icon}</IconBubble>
                         <div><p className="text-lg font-black text-brand-teal">{block.label}</p><p className="mt-1.5 text-sm font-semibold text-brand-teal/70">{block.helper}</p></div>
@@ -569,6 +712,7 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
                   );
                 })}
               </div>
+              {fieldErrors.content ? <InlineError>{fieldErrors.content}</InlineError> : null}
             </div>
           </div>
         ) : null}
@@ -585,41 +729,52 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
               ))}
             </div>
             {selectedBlocks.includes("aluno_360") ? (
-              <Field label="Aluno 360 · IDs canonicos"><textarea value={(filters.customer_ids ?? []).join("\n")} onChange={(e) => setFilterPatch({ customer_ids: e.target.value.split(/[\n,;]/).map((item) => item.trim()).filter(Boolean) })} className="input-like min-h-28" placeholder="Cole um customer_id por linha. Busca visual pode entrar em uma proxima iteracao sem mudar o motor." /></Field>
+              <div className="rounded-[22px] border border-[color:var(--ds-border)] bg-[color:var(--ds-bg-soft)] p-5">
+                <p className="text-base font-black text-brand-teal">Buscar aluno</p>
+                <p className="mt-1 text-sm font-semibold text-brand-teal/65">Pesquise por nome ou e-mail. Voce pode selecionar mais de um.</p>
+                <div className="relative mt-4">
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-teal/45" />
+                  <input value={studentQuery} onChange={(event) => setStudentQuery(event.target.value)} className="input-like min-h-12 w-full pl-11 text-[15px]" placeholder="Nome ou e-mail" />
+                </div>
+                {searchingStudents ? <p className="mt-3 text-sm font-bold text-brand-teal/60">Buscando alunos...</p> : null}
+                {studentResults.length ? <div className="mt-3 grid gap-2">{studentResults.map((student) => <button key={student.customer_id} type="button" onClick={() => onSelectStudent(student)} className="rounded-[16px] border border-[color:var(--ds-border)] bg-white p-3 text-left hover:bg-brand-cream"><span className="block text-sm font-black text-brand-teal">{student.name || "Nome nao informado"}</span><span className="mt-1 block text-xs font-semibold text-brand-teal/60">{student.email || student.customer_id}</span></button>)}</div> : null}
+                {selectedStudents.length ? <div className="mt-4 flex flex-wrap gap-2">{selectedStudents.map((student) => <span key={student.customer_id} className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-sky-50 px-3 py-2 text-sm font-black text-sky-800">{student.name || student.email || "Aluno"}<button type="button" onClick={() => onRemoveStudent(student.customer_id)} aria-label="Remover aluno"><X className="h-4 w-4" /></button></span>)}</div> : null}
+                {fieldErrors.filters ? <InlineError>{fieldErrors.filters}</InlineError> : null}
+              </div>
             ) : null}
           </div>
         ) : null}
 
         {activeStep === "recipient" ? (
           <div className="mt-5 space-y-4">
-            <Field label="Destino Telegram"><select value={scheduleForm.destinatario_id} onChange={(e) => setScheduleForm((c) => ({ ...c, destinatario_id: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Escolha um destino</option>{destinatarios.map((item) => <option key={item.id} value={item.id}>{item.nome} · {item.telegram_chat_id ?? "sem chat ID"}</option>)}</select></Field>
+            <Field label="Destino Telegram"><select value={scheduleForm.destinatario_id} onChange={(e) => setScheduleForm((c) => ({ ...c, destinatario_id: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Escolha um destino</option>{destinatarios.filter((item) => item.ativo !== false).map((item) => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></Field>
             <div className="grid gap-3 md:grid-cols-2">
-              {destinatarios.filter((item) => item.ativo !== false).slice(0, 6).map((item) => <div key={item.id} className="rounded-[20px] border border-brand-sand/80 bg-white p-5 shadow-sm"><p className="text-sm font-black text-brand-teal">{item.nome}</p><p className="mt-1 text-xs font-semibold text-brand-teal/60">{canalLabels[item.canal_preferencial] ?? item.canal_preferencial} · {item.telegram_chat_id ?? "sem Telegram"}</p></div>)}
+              {destinatarios.filter((item) => item.ativo !== false).slice(0, 6).map((item) => <button type="button" key={item.id} onClick={() => setScheduleForm((current) => ({ ...current, destinatario_id: item.id }))} className={`rounded-[20px] border p-5 text-left shadow-sm transition ${scheduleForm.destinatario_id === item.id ? "border-brand-sky bg-brand-sky/15 ring-2 ring-brand-sky/20" : "border-[color:var(--ds-border)] bg-white hover:bg-brand-cream"}`}><p className="text-sm font-black text-brand-teal">{item.nome}</p><p className="mt-1 text-xs font-semibold text-brand-teal/60">{canalLabels[item.canal_preferencial] ?? item.canal_preferencial}</p></button>)}
             </div>
+            {fieldErrors.recipient ? <InlineError>{fieldErrors.recipient}</InlineError> : null}
           </div>
         ) : null}
 
         {activeStep === "when" ? (
           <div className="mt-5 grid gap-3 md:grid-cols-2">
-            <Field label="Quando"><select value={scheduleForm.frequencia} onChange={(e) => setScheduleForm((c) => ({ ...c, frequencia: e.target.value as RelatorioFrequencia }))} className="input-like min-h-12 text-[15px]">{Object.entries(frequenciaLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+            <Field label="Frequencia"><select value={scheduleForm.frequencia} onChange={(e) => setScheduleForm((c) => ({ ...c, frequencia: e.target.value as RelatorioFrequencia }))} className="input-like min-h-12 text-[15px]">{scheduleFrequencyOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
             <Field label="Horario"><input type="time" value={scheduleForm.horario} onChange={(e) => setScheduleForm((c) => ({ ...c, horario: e.target.value }))} className="input-like min-h-12 text-[15px]" /></Field>
             <label className="flex items-center gap-3 rounded-md border border-brand-sand bg-white p-4 text-sm font-black text-brand-teal"><input type="checkbox" checked={scheduleForm.ativo} onChange={(e) => setScheduleForm((c) => ({ ...c, ativo: e.target.checked }))} /> Agendamento ativo</label>
-            <div className="rounded-md border border-brand-sand bg-brand-cream/40 p-4 text-sm font-semibold text-brand-teal/70">Canal funcional nesta fase: Telegram. PDF/e-mail ficam preparados no modelo, sem envio ativo.</div>
+            <div className="rounded-[18px] border border-amber-100 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-900">O HML atual aceita Diario, Semanal e Mensal. Frequencias da migration V2 permanecem ocultas ate a aplicacao segura no banco.</div>
+            {fieldErrors.when ? <div className="md:col-span-2"><InlineError>{fieldErrors.when}</InlineError></div> : null}
           </div>
         ) : null}
 
-        {activeStep === "preview" ? <div className="mt-5"><TelegramPreview text={apiPreview ?? previewText} /></div> : null}
-
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-brand-sand pt-4">
-          <button type="button" onClick={onCancel} className="inline-flex items-center gap-2 rounded-md border border-brand-sand bg-white px-4 py-2 text-sm font-black text-brand-teal"><X className="h-4 w-4" /> Limpar</button>
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--ds-border)] pt-4">
+          <div className="flex gap-2"><ActionButton type="button" onClick={onCancel} icon={<X className="h-4 w-4" />} label="Limpar" />{currentIndex > 0 ? <ActionButton type="button" onClick={() => onMoveStep(-1)} icon={<ArrowLeft className="h-4 w-4" />} label="Voltar" /> : null}</div>
           <div className="flex flex-wrap gap-2">
-            <ActionButton type="button" onClick={onPreview} icon={previewingId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />} label="Pre-visualizar" />
-            {canWrite ? <ActionButton type="submit" icon={<FileText className="h-4 w-4" />} label="Salvar agendamento" primary /> : null}
-            {canWrite ? <ActionButton type="button" onClick={onSendAfterSave} icon={sendingId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} label="Enviar agora" primary /> : null}
+            {!isLastStep ? <ActionButton type="button" onClick={() => onMoveStep(1)} icon={<ArrowRight className="h-4 w-4" />} label="Continuar" primary /> : null}
+            {isLastStep && canWrite && mode === "now" ? <ActionButton type="submit" icon={sendingId === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} label="Enviar agora" primary /> : null}
+            {isLastStep && canWrite && mode === "schedule" ? <ActionButton type="submit" icon={<FileText className="h-4 w-4" />} label="Salvar agendamento" primary /> : null}
           </div>
         </div>
       </Card>
-      <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft"><SectionTitle icon={<Smartphone className="h-4 w-4" />} title="Preview Telegram" subtitle="Representa a mensagem final com os blocos selecionados." /><div className="mt-4"><TelegramPreview text={apiPreview ?? previewText} /></div></Card>
+      <div className="xl:sticky xl:top-6 xl:self-start"><Card className="rounded-[var(--ds-radius-lg)] border-[color:var(--ds-border)] bg-[color:var(--ds-surface)] p-5 shadow-[var(--ds-shadow-sm)]"><div className="flex items-start justify-between gap-3"><SectionTitle icon={<Smartphone className="h-4 w-4" />} title="Preview Telegram" subtitle="Atualiza automaticamente com o mesmo motor do envio." /><button type="button" onClick={onPreview} className="rounded-full border border-[color:var(--ds-border)] bg-white p-2 text-brand-teal" title="Atualizar preview"><Eye className="h-4 w-4" /></button></div>{previewingId ? <p className="mt-4 text-sm font-bold text-sky-700">Atualizando preview...</p> : null}<div className="mt-4"><TelegramPreview text={previewText} /></div></Card></div>
     </form>
   );
 }
@@ -693,25 +848,22 @@ function DestinationsTab({ destinatarios, recipientForm, setRecipientForm, editi
 function ScheduleCard({ item, recipient, sending, canWrite, onEdit, onDuplicate, onToggle, onSendNow, onDelete }: { item: RelatorioAgendamento; recipient: string; sending: boolean; canWrite: boolean; onEdit: () => void; onDuplicate: () => void; onToggle: () => void; onSendNow: () => void; onDelete: () => void; }) {
   const active = scheduleActive(item);
   return (
-    <div className="rounded-[22px] border border-brand-sand/80 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-black text-brand-teal">{item.nome}</h3><Pill tone={active ? "green" : item.status === "rascunho" ? "amber" : "neutral"}>{active ? "Ativo" : item.status}</Pill><Pill tone="blue">{canalLabels[item.canal] ?? item.canal}</Pill></div>
+    <div className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-5 shadow-[var(--ds-shadow-sm)] transition hover:-translate-y-0.5 hover:shadow-soft">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-black text-brand-teal">{item.nome}</h3><Pill tone={active ? "green" : "neutral"}>{active ? "Ativo" : "Pausado"}</Pill><Pill tone="blue">Telegram</Pill></div>
           <p className="mt-2 text-[15px] font-semibold text-brand-teal/75">{recipient} · {frequenciaLabels[item.frequencia] ?? item.frequencia} · {item.horario?.slice(0, 5) ?? "sem horario"}</p>
-          <div className="mt-3 flex flex-wrap gap-2">{(item.incluir_modulos ?? []).map((key) => <Pill key={key} tone="neutral">{blockLabel(key)}</Pill>)}</div>
         </div>
-        <div className="grid grid-cols-2 gap-3 text-sm font-bold text-brand-teal/75 sm:grid-cols-3 lg:min-w-[360px]">
-          <span><strong className="block text-brand-teal">Proximo</strong>{dateTime(item.next_run_at)}</span>
-          <span><strong className="block text-brand-teal">Ultimo</strong>{dateTime(item.last_run_at)}</span>
-          <span><strong className="block text-brand-teal">Tipo</strong>{tipoLabels[item.tipo_resumo] ?? item.tipo_resumo}</span>
-        </div>
+        <span className="rounded-[16px] bg-[color:var(--ds-bg-soft)] px-4 py-3 text-sm font-bold text-brand-teal"><strong className="block text-xs text-brand-teal/55">Proximo envio</strong>{item.next_run_at ? dateTime(item.next_run_at) : active ? `Proximo ciclo, ${item.horario?.slice(0, 5) ?? "horario pendente"}` : "Pausado"}</span>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-brand-sand pt-3">
+      <div className="mt-4 flex flex-wrap gap-2">{(item.incluir_modulos ?? []).map((key) => <Pill key={key} tone="neutral">{blockLabel(key)}</Pill>)}</div>
+      <p className="mt-4 text-xs font-semibold text-brand-teal/55">Ultimo envio: {dateTime(item.last_run_at)} · {tipoLabels[item.tipo_resumo] ?? item.tipo_resumo}</p>
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[color:var(--ds-border)] pt-4">
         <ActionButton onClick={onEdit} icon={<Pencil className="h-4 w-4" />} label="Editar" />
         <ActionButton onClick={onDuplicate} icon={<Copy className="h-4 w-4" />} label="Duplicar" />
         <ActionButton onClick={onToggle} icon={active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />} label={active ? "Pausar" : "Reativar"} />
         <ActionButton onClick={onSendNow} icon={sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} label="Enviar agora" primary />
-        {canWrite ? <ActionButton onClick={onDelete} icon={<Trash2 className="h-4 w-4" />} label="Excluir" danger /> : null}
+        {canWrite ? <details className="relative ml-auto"><summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-[16px] border border-[color:var(--ds-border)] bg-white text-brand-teal"><MoreHorizontal className="h-5 w-5" /></summary><div className="absolute bottom-12 right-0 z-20 min-w-40 rounded-[16px] border border-red-100 bg-white p-2 shadow-soft"><button type="button" onClick={onDelete} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-black text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" />Excluir</button></div></details> : null}
       </div>
     </div>
   );
@@ -747,7 +899,8 @@ function HistoryDetails({ envio, destinatarios, onClose }: { envio: RelatorioEnv
 }
 
 function MetricCard({ icon, label, value, helper, tone }: { icon: ReactNode; label: string; value: string; helper: string; tone: "green" | "blue" | "amber" | "red" | "purple" }) {
-  return <Card className="rounded-[26px] border-brand-sand/80 bg-white p-6 shadow-soft"><div className="flex items-start gap-4"><IconBubble tone={tone}>{icon}</IconBubble><div><p className="text-sm font-black text-brand-teal/65">{label}</p><p className="mt-3 text-4xl font-black leading-none text-brand-teal">{value}</p><p className="mt-2 text-sm font-bold text-brand-teal/70">{helper}</p></div></div></Card>;
+  const accents = { green: "bg-emerald-500", blue: "bg-sky-500", amber: "bg-amber-500", red: "bg-rose-500", purple: "bg-violet-500" };
+  return <Card className="relative min-h-[154px] overflow-hidden rounded-[var(--ds-radius-md)] border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-5 shadow-[var(--ds-shadow-sm)]"><span className={`absolute left-5 top-0 h-1 w-16 rounded-b-full ${accents[tone]}`} /><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-[color:var(--ds-text-secondary)]">{label}</p><p className="mt-4 text-3xl font-semibold leading-none text-[color:var(--ds-text)]">{value}</p><p className="mt-3 text-xs font-medium text-[color:var(--ds-text-muted)]">{helper}</p></div><IconBubble tone={tone}>{icon}</IconBubble></div></Card>;
 }
 
 function SectionTitle({ icon, title, subtitle }: { icon: ReactNode; title: string; subtitle: string }) {
@@ -799,6 +952,10 @@ function EmptyState({ text }: { text: string }) {
 
 function InfoLine({ label, value, danger = false }: { label: string; value: string; danger?: boolean }) {
   return <div className="rounded-[18px] border border-brand-sand/80 bg-white p-4"><span className="block text-xs font-black text-brand-teal/60">{label}</span><span className={danger ? "text-red-700" : "text-brand-teal"}>{value}</span></div>;
+}
+
+function InlineError({ children }: { children: ReactNode }) {
+  return <p className="mt-3 rounded-[14px] border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{children}</p>;
 }
 
 function buildPreview(form: DraftSchedule, destinatarios: RelatorioDestinatario[]) {
