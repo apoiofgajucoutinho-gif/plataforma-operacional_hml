@@ -337,13 +337,18 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
 
   async function previewSchedule(scheduleId?: string) {
     const id = scheduleId ?? editingScheduleId;
-    if (!id) { setApiPreview(null); setActiveStep("preview"); return; }
-    setPreviewingId(id);
-    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scheduleId: id, previewOnly: true }) });
+    const payload = payloadForSchedule();
+    const selected = Object.entries(payload.filtros?.blocos ?? {}).filter(([, config]) => config?.enabled).map(([key]) => key);
+    if (!selected.length) { setMessage("Escolha ao menos um bloco para gerar a pre-visualizacao."); return; }
+    if (selected.includes("aluno_360") && !(payload.filtros.customer_ids ?? []).length) { setMessage("Selecione pelo menos um aluno para usar Aluno 360."); return; }
+    if (!payload.destinatario_id) { setMessage("Escolha um destino antes de gerar a pre-visualizacao real."); return; }
+    setPreviewingId(id ?? "draft");
+    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(id ? { scheduleId: id, previewOnly: true } : { previewOnly: true, payload }) });
     const result = await response.json();
     setPreviewingId(null);
     if (!response.ok) { setMessage(result.error ?? "Nao foi possivel gerar preview real."); return; }
     setApiPreview(result.preview?.text ?? null);
+    setMessage(result.preview?.summary ?? "Pre-visualizacao gerada com dados reais.");
     setActiveStep("preview");
   }
 
@@ -722,6 +727,7 @@ function EnvioRow({ envio, selected, onClick }: { envio: RelatorioEnvio; selecte
 
 function HistoryDetails({ envio, destinatarios, onClose }: { envio: RelatorioEnvio | null; destinatarios: RelatorioDestinatario[]; onClose: () => void }) {
   if (!envio) return <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft"><SectionTitle icon={<Eye className="h-4 w-4" />} title="Detalhe do envio" subtitle="Selecione um registro para ver conteudo, filtros e erros." /><EmptyState text="Nenhum envio selecionado." /></Card>;
+  const counts = (envio.metadata as any)?.block_counts;
   return (
     <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
       <div className="flex items-start justify-between gap-3"><SectionTitle icon={<Eye className="h-4 w-4" />} title="Detalhe do envio" subtitle={dateTime(envio.created_at)} /><button type="button" onClick={onClose} className="rounded-full border border-brand-sand bg-white p-2 text-brand-teal"><X className="h-4 w-4" /></button></div>
@@ -730,6 +736,7 @@ function HistoryDetails({ envio, destinatarios, onClose }: { envio: RelatorioEnv
         <InfoLine label="Origem" value={envio.origem} />
         <InfoLine label="Destino" value={envio.destino ?? recipientName(envio.destinatario_id ?? "", destinatarios)} />
         <InfoLine label="Blocos" value={(envio.modulos ?? []).map(blockLabel).join(" · ") || "Nao registrado"} />
+        {counts ? <InfoLine label="Diagnostico" value={`Solicitados: ${counts.requested ?? 0} · Renderizados: ${counts.rendered ?? 0} · Sem dados: ${counts.empty ?? 0} · Erro: ${counts.error ?? 0}`} /> : null}
         {envio.erro ? <InfoLine label="Erro" value={envio.erro} danger /> : null}
       </div>
       <div className="mt-4"><TelegramPreview text={envio.mensagem ?? "Conteudo nao registrado para este envio."} /></div>
@@ -766,7 +773,23 @@ function IconBubble({ children, tone = "neutral" }: { children: ReactNode; tone?
 }
 
 function TelegramPreview({ text }: { text: string }) {
-  return <div className="rounded-[26px] border border-[#17384a] bg-[#0b1f2d] p-6 shadow-soft"><pre className="max-h-[620px] overflow-auto whitespace-pre-wrap font-sans text-[15px] font-semibold leading-8 text-white/95">{text}</pre></div>;
+  return <div className="rounded-[26px] border border-[#17384a] bg-[#0b1f2d] p-6 shadow-soft"><div className="max-h-[620px] overflow-auto whitespace-pre-wrap font-sans text-[15px] font-semibold leading-8 text-white/95">{renderTelegramText(text)}</div></div>;
+}
+
+function renderTelegramText(text: string) {
+  return text.split("\n").map((line, index) => (
+    <div key={index} className={line ? undefined : "h-4"}>
+      {line ? renderMarkdownLine(line) : null}
+    </div>
+  ));
+}
+
+function renderMarkdownLine(line: string) {
+  const parts = line.split(/(\*[^*]+\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) return <strong key={index} className="font-black text-white">{part.slice(1, -1)}</strong>;
+    return <span key={index}>{part}</span>;
+  });
 }
 
 function EmptyState({ text }: { text: string }) {
@@ -834,6 +857,3 @@ function recipientName(id: string, destinatarios: RelatorioDestinatario[]) {
 function todayKey() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 }
-
-
-

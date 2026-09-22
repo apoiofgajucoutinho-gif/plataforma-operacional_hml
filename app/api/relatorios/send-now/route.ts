@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { assertRelatoriosWriteAccess, getRelatorioDispatchByScheduleId, updateRelatorioEnvioStatus } from "@/modules/relatorios/services/relatorios-server";
+import { assertRelatoriosWriteAccess, getRelatorioDispatchByScheduleId, getRelatorioPreviewFromDraft, updateRelatorioEnvioStatus } from "@/modules/relatorios/services/relatorios-server";
 
 function normalizeTelegramError(errorText: string) {
   if (errorText.includes("bot can't send messages to the bot")) return "Telegram recusou o envio porque o Telegram chat ID configurado pertence a um bot. Use o chat ID de uma pessoa ou grupo onde o bot esteja presente.";
@@ -24,16 +24,19 @@ export async function POST(request: Request) {
   const body = await request.json();
   const scheduleId = String(body.scheduleId ?? "");
   const previewOnly = Boolean(body.previewOnly);
-  if (!scheduleId) return NextResponse.json({ error: "scheduleId obrigatorio." }, { status: 400 });
+  const draftPayload = body.payload;
+  if (!scheduleId && !(previewOnly && draftPayload)) return NextResponse.json({ error: "scheduleId ou payload de preview obrigatorio." }, { status: 400 });
   let logId: string | null = null;
 
   try {
     const auth = await assertRelatoriosWriteAccess();
-    const dispatch = await getRelatorioDispatchByScheduleId(scheduleId, { origin: previewOnly ? "preview" : "manual", createLog: !previewOnly, requireActive: false });
+    const dispatch = previewOnly && draftPayload
+      ? await getRelatorioPreviewFromDraft(draftPayload)
+      : await getRelatorioDispatchByScheduleId(scheduleId, { origin: previewOnly ? "preview" : "manual", createLog: !previewOnly, requireActive: false });
     logId = dispatch.log?.id ?? null;
 
     if (dispatch.schedule.tenant_id !== auth.tenantId) return NextResponse.json({ error: "Agendamento nao pertence ao tenant atual." }, { status: 403 });
-    if (previewOnly) return NextResponse.json({ ok: true, preview: { subject: dispatch.subject, text: dispatch.text, summary: dispatch.summary, modules: dispatch.modules, filters: dispatch.filters } });
+    if (previewOnly) return NextResponse.json({ ok: true, preview: { subject: dispatch.subject, text: dispatch.text, summary: dispatch.summary, modules: dispatch.modules, requestedModules: dispatch.requestedModules, filters: dispatch.filters, diagnostics: dispatch.diagnostics } });
     if (!dispatch.log) return NextResponse.json({ error: "Falha ao criar historico do envio." }, { status: 400 });
 
     if (dispatch.channel !== "telegram") {
