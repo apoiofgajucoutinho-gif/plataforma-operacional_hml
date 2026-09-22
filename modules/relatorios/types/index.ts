@@ -27,6 +27,7 @@ export type RelatorioPeriodo =
   | "mes_atual"
   | "mes_anterior"
   | "ultimos_7d"
+  | "ultimos_15d"
   | "ultimos_30d"
   | "ultimos_90d"
   | "ano_atual"

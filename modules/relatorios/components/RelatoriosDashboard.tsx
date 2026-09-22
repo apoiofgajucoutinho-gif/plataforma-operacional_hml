@@ -128,6 +128,7 @@ const periodLabels: Record<string, string> = {
   mes_atual: "Mes atual",
   mes_anterior: "Mes anterior",
   ultimos_7d: "Ultimos 7 dias",
+  ultimos_15d: "Ultimos 15 dias",
   ultimos_30d: "Ultimos 30 dias",
   ultimos_90d: "Ultimos 90 dias",
   ano_atual: "Ano atual",

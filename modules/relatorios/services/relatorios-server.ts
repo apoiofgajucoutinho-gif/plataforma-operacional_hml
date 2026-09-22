@@ -93,6 +93,7 @@ function range(period?: RelatorioPeriodo) {
   if (period === "proximos_7d") return { from: t, to: plusDays(7), label: "Proximos 7 dias" };
   if (period === "proximos_15d") return { from: t, to: plusDays(15), label: "Proximos 15 dias" };
   if (period === "ultimos_7d") return { from: plusDays(-7), to: t, label: "Ultimos 7 dias" };
+  if (period === "ultimos_15d") return { from: plusDays(-15), to: t, label: "Ultimos 15 dias" };
   if (period === "ultimos_90d") return { from: plusDays(-90), to: t, label: "Ultimos 90 dias" };
   if (period === "mes_atual") return { from: t.slice(0, 8) + "01", to: t, label: "Mes atual" };
   if (period === "ano_atual") return { from: t.slice(0, 4) + "-01-01", to: t, label: "Ano atual" };
@@ -114,6 +115,15 @@ async function source<T>(query: PromiseLike<{ data: T | null; error: unknown }>,
     return { status: empty ? "empty" : "success", data: resolved };
   } catch (error) {
     return { status: "error", data: fallback, error: errorMessage(error) };
+  }
+}
+async function sourceCount(query: PromiseLike<{ count: number | null; error: unknown }>): Promise<SourceResult<number>> {
+  try {
+    const { count, error } = await query;
+    if (error) return { status: "error", data: 0, error: errorMessage(error) };
+    return { status: "success", data: count ?? 0 };
+  } catch (error) {
+    return { status: "error", data: 0, error: errorMessage(error) };
   }
 }
 function blockError(key: RelatorioBlocoKey, title: string, sourceName: string, error?: string, period?: string): Block {
@@ -257,23 +267,39 @@ async function financeBlock(client: AnyClient, tenantId: string, period: Relator
   const aPagar = rows.filter((row) => String(row.tipo).toLowerCase() === "saida" && String(row.status).toLowerCase() === "previsto").reduce((sum, row) => sum + n(row.valor), 0);
   return { key: "financeiro", title, source: sourceName, period: r.label, status: "success", empty: "Sem lancamentos em " + r.label.toLowerCase() + ".", lines: ["Periodo: " + r.label, "Entrou na conta: " + money(entradas), "Saiu da conta: " + money(saidas), "A receber: " + money(aReceber) + " · A pagar: " + money(aPagar)] };
 }
-async function interactionsBlock(client: AnyClient, tenantId: string): Promise<Block> {
-  const title = "💬 Interacoes";
-  const sourceName = "instagram_interactions + atividades_tarefas(source_module=suporte)";
-  const [ig, support] = await Promise.all([
-    source<any[]>(client.from("instagram_interactions").select("id, status, source, marketing_type").eq("tenant_id", tenantId).limit(300), []),
-    source<any[]>(client.from("atividades_tarefas").select("id, status, prioridade, source_module").eq("tenant_id", tenantId).eq("source_module", "suporte").limit(300), []),
+async function interactionsBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
+  const r = range(period);
+  const title = "💬 Interacoes - " + r.label;
+  const sourceName = "instagram_interactions + ocorrencias_chamados + norwyn_support_tickets";
+  const fromTs = r.from + "T00:00:00";
+  const toTs = r.to + "T23:59:59";
+  const fromDate = r.from;
+  const toDate = r.to;
+  const pendingInteraction = ["novo", "pendente", "open"];
+  const openOccurrence = ["aberto", "em_andamento", "reaberto"];
+  const openTicket = ["open", "waiting_student", "waiting_third_party"];
+  const [commentsTotal, commentsPending, directEver, directTotal, directPending, openOccurrences, openTickets] = await Promise.all([
+    sourceCount(client.from("instagram_interactions").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("source", "post_comment").gte("interaction_at", fromTs).lte("interaction_at", toTs)),
+    sourceCount(client.from("instagram_interactions").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("source", "post_comment").in("status", pendingInteraction).gte("interaction_at", fromTs).lte("interaction_at", toTs)),
+    sourceCount(client.from("instagram_interactions").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("source", "direct_message")),
+    sourceCount(client.from("instagram_interactions").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("source", "direct_message").gte("interaction_at", fromTs).lte("interaction_at", toTs)),
+    sourceCount(client.from("instagram_interactions").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("source", "direct_message").in("status", pendingInteraction).gte("interaction_at", fromTs).lte("interaction_at", toTs)),
+    sourceCount(client.from("ocorrencias_chamados").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).in("status", openOccurrence).gte("data_chamado", fromDate).lte("data_chamado", toDate)),
+    sourceCount(client.from("norwyn_support_tickets").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).in("status", openTicket).gte("updated_at", fromTs).lte("updated_at", toTs)),
   ]);
-  const errors = [ig, support].filter((item) => item.status === "error");
-  if (errors.length === 2) return blockError("interacoes", title, sourceName, errors.map((item) => item.error).join(" | "), "estado atual");
-  const pending = ["pendente", "open", "novo"];
-  const comments = ig.data.filter((row) => String(row.source ?? row.marketing_type).toLowerCase().includes("comment") && pending.includes(String(row.status).toLowerCase())).length;
-  const directs = ig.data.filter((row) => String(row.source ?? row.marketing_type).toLowerCase().includes("direct") && pending.includes(String(row.status).toLowerCase())).length;
-  const openSupport = support.data.filter((row) => !["resolvido", "fechado", "done", "closed"].includes(String(row.status).toLowerCase())).length;
-  const lines = [comments + " comentarios pendentes", directs + " directs pendentes", openSupport + " suporte/ocorrencias em aberto"];
-  if (errors.length) lines.push("Fonte parcial indisponivel: " + (errors[0].error ?? "erro desconhecido"));
-  if (!ig.data.length && !support.data.length && !errors.length) return blockEmpty("interacoes", title, sourceName, "Sem interacoes pendentes no recorte.", "estado atual");
-  return { key: "interacoes", title, source: sourceName, period: "estado atual", status: errors.length ? "error" : "success", reason: errors[0]?.error, empty: "Sem interacoes pendentes no recorte.", lines };
+  const results = [commentsTotal, commentsPending, directEver, directTotal, directPending, openOccurrences, openTickets];
+  const errors = results.filter((item) => item.status === "error");
+  if (errors.length === results.length) return blockError("interacoes", title, sourceName, errors.map((item) => item.error).join(" | "), r.label);
+  const supportOpen = openOccurrences.data + openTickets.data;
+  const lines = [commentsTotal.data + " comentarios", commentsPending.data + " pendentes de resposta"];
+  if (directEver.data > 0) {
+    lines.push(directTotal.data + " Directs", directPending.data + " Direct pendente(s)");
+  } else {
+    lines.push("Directs: nao disponivel nesta fonte");
+  }
+  lines.push(supportOpen + " ocorrencia(s) de suporte abertas");
+  if (errors.length) lines.push("Fonte parcial indisponivel: " + errors.map((item) => item.error ?? "erro desconhecido").join(" | "));
+  return { key: "interacoes", title, source: sourceName, period: r.label, status: errors.length ? "error" : "success", reason: errors.map((item) => item.error).filter(Boolean).join(" | ") || undefined, empty: "Sem interacoes pendentes no recorte.", lines };
 }
 async function activitiesBlock(client: AnyClient, tenantId: string): Promise<Block> {
   const title = "✅ Atividades";
@@ -314,7 +340,7 @@ async function buildBlocks(client: AnyClient, tenantId: string, filters: Relator
   if (enabled(filters, "marketing_ads")) requested.push(await adsBlock(client, tenantId, cfg(filters, "marketing_ads").periodo));
   if (enabled(filters, "comercial")) requested.push(await comercialBlock(client, tenantId, cfg(filters, "comercial").periodo));
   if (enabled(filters, "financeiro")) requested.push(await financeBlock(client, tenantId, cfg(filters, "financeiro").periodo));
-  if (enabled(filters, "interacoes")) requested.push(await interactionsBlock(client, tenantId));
+  if (enabled(filters, "interacoes")) requested.push(await interactionsBlock(client, tenantId, cfg(filters, "interacoes").periodo));
   if (enabled(filters, "atividades")) requested.push(await activitiesBlock(client, tenantId));
   if (enabled(filters, "aluno_360")) requested.push(await alunoBlock(client, tenantId, filters));
   if (enabled(filters, "recomendacoes")) requested.push(recommendationBlock(requested));
