@@ -392,15 +392,15 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   }
 
   if (context.diagnostic) {
-    return <section className="space-y-6"><Header updatedAt={context.updatedAt} /><Card className="p-8"><h2 className="text-xl font-black text-brand-teal">Relatorios indisponivel</h2><p className="mt-3 text-brand-teal/70">{context.diagnostic}</p></Card></section>;
+    return <section className="space-y-7"><Header updatedAt={context.updatedAt} /><Card className="p-8"><h2 className="text-xl font-black text-brand-teal">Relatorios indisponivel</h2><p className="mt-3 text-brand-teal/70">{context.diagnostic}</p></Card></section>;
   }
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-7">
       <Header updatedAt={context.updatedAt} />
-      <div className="flex flex-wrap gap-2 rounded-md border border-brand-sand bg-white/80 p-2 shadow-sm">
+      <div className="flex flex-wrap gap-2 rounded-[22px] border border-brand-sand/80 bg-white p-2.5 shadow-soft">
         {tabs.map((tab) => (
-          <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`inline-flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-black transition ${activeTab === tab.key ? "bg-brand-teal text-white shadow-sm" : "text-brand-teal hover:bg-brand-cream"}`}>
+          <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`inline-flex items-center gap-2 rounded-[18px] px-5 py-3 text-[15px] font-black transition ${activeTab === tab.key ? "bg-brand-teal text-white shadow-sm" : "text-brand-teal hover:bg-brand-cream"}`}>
             {tab.icon}{tab.label}
           </button>
         ))}
@@ -459,14 +459,14 @@ function OverviewTab({ activeSchedules, sentToday, nextSchedule, errors, activeR
         <MetricCard icon={<UserRound className="h-5 w-5" />} label="Destinos ativos" value={String(activeRecipients)} helper="Telegram primeiro" tone="purple" />
       </div>
       <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card className="p-5">
+        <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
           <div className="flex items-center justify-between gap-3">
             <SectionTitle icon={<CalendarClock className="h-4 w-4" />} title="Proximos agendamentos" subtitle="O que deve sair nos proximos ciclos." />
             <ActionButton onClick={onCreate} icon={<Plus className="h-4 w-4" />} label="Criar relatorio" primary />
           </div>
           <div className="mt-4 grid gap-3">
             {upcoming.length ? upcoming.map((item) => (
-              <div key={item.id} className="rounded-md border border-brand-sand bg-brand-cream/35 p-4">
+              <div key={item.id} className="rounded-[20px] border border-brand-sand/80 bg-brand-cream/45 p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-black text-brand-teal">{item.nome}</p>
@@ -479,11 +479,11 @@ function OverviewTab({ activeSchedules, sentToday, nextSchedule, errors, activeR
             )) : <EmptyState text="Nenhum agendamento ativo no momento." />}
           </div>
         </Card>
-        <Card className="p-5">
+        <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
           <SectionTitle icon={<History className="h-4 w-4" />} title="Ultimos envios" subtitle="Historico recente, manual e agendado." />
           <div className="mt-4 grid gap-3">
             {latest.length ? latest.map((envio) => (
-              <button key={envio.id} type="button" onClick={() => onOpenHistory(envio)} className="rounded-md border border-brand-sand bg-white p-4 text-left transition hover:border-brand-sky hover:bg-brand-cream/40">
+              <button key={envio.id} type="button" onClick={() => onOpenHistory(envio)} className="rounded-[20px] border border-brand-sand/80 bg-white p-5 text-left shadow-sm transition hover:border-brand-sky hover:bg-brand-cream/40">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-black text-brand-teal">{envio.assunto ?? tipoLabels[envio.tipo_resumo] ?? envio.tipo_resumo}</p>
@@ -491,14 +491,14 @@ function OverviewTab({ activeSchedules, sentToday, nextSchedule, errors, activeR
                   </div>
                   <Pill tone={envio.status === "erro" ? "red" : envio.status === "enviado" ? "green" : "blue"}>{envio.status}</Pill>
                 </div>
-                <p className="mt-2 line-clamp-2 text-xs font-semibold text-brand-teal/65">{envio.resumo ?? envio.destino ?? "Sem resumo registrado."}</p>
+                <p className="mt-2 line-clamp-2 text-sm font-semibold text-brand-teal/70">{envio.resumo ?? envio.destino ?? "Sem resumo registrado."}</p>
               </button>
             )) : <EmptyState text="Nenhum envio registrado ainda." />}
           </div>
         </Card>
       </div>
       {errors.length ? (
-        <Card className="border-red-100 bg-red-50/60 p-5">
+        <Card className="rounded-[24px] border-red-100 bg-red-50/70 p-6 shadow-soft">
           <SectionTitle icon={<XCircle className="h-4 w-4" />} title="Precisa de atencao" subtitle="Falhas recentes de envio." />
           <div className="mt-4 grid gap-2">
             {errors.slice(0, 4).map((envio) => (
@@ -513,12 +513,12 @@ function OverviewTab({ activeSchedules, sentToday, nextSchedule, errors, activeR
 
 function SchedulesTab({ agendamentos, destinatarios, sendingId, canWrite, onCreate, onEdit, onDuplicate, onToggle, onSendNow, onDelete }: { agendamentos: RelatorioAgendamento[]; destinatarios: RelatorioDestinatario[]; sendingId: string | null; canWrite: boolean; onCreate: () => void; onEdit: (item: RelatorioAgendamento) => void; onDuplicate: (item: RelatorioAgendamento) => void; onToggle: (item: RelatorioAgendamento) => void; onSendNow: (id: string) => void; onDelete: (id: string) => void; }) {
   return (
-    <Card className="p-5">
+    <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <SectionTitle icon={<CalendarClock className="h-4 w-4" />} title="Agendamentos" subtitle="Recorrentes, unicos e envios sob demanda." />
         {canWrite ? <ActionButton onClick={onCreate} icon={<Plus className="h-4 w-4" />} label="Novo agendamento" primary /> : null}
       </div>
-      <div className="mt-5 grid gap-3">
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
         {agendamentos.length ? agendamentos.map((item) => (
           <ScheduleCard key={item.id} item={item} recipient={recipientName(item.destinatario_id, destinatarios)} sending={sendingId === item.id} canWrite={canWrite} onEdit={() => onEdit(item)} onDuplicate={() => onDuplicate(item)} onToggle={() => onToggle(item)} onSendNow={() => onSendNow(item.id)} onDelete={() => onDelete(item.id)} />
         )) : <EmptyState text="Ainda nao ha agendamentos configurados." />}
@@ -530,13 +530,13 @@ function SchedulesTab({ agendamentos, destinatarios, sendingId, canWrite, onCrea
 function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, destinatarios, selectedBlocks, setBlock, setFilterPatch, mergedFilters, previewText, apiPreview, canWrite, editingScheduleId, previewingId, sendingId, onPreview, onSave, onSendAfterSave, onCancel }: { activeStep: StepKey; setActiveStep: (step: StepKey) => void; scheduleForm: DraftSchedule; setScheduleForm: React.Dispatch<React.SetStateAction<DraftSchedule>>; destinatarios: RelatorioDestinatario[]; selectedBlocks: string[]; setBlock: (key: string, patch: Partial<{ enabled: boolean; periodo: RelatorioPeriodo; empty_behavior: "omit" | "show_empty" }>) => void; setFilterPatch: (patch: Partial<RelatorioFiltros>) => void; mergedFilters: () => RelatorioFiltros; previewText: string; apiPreview: string | null; canWrite: boolean; editingScheduleId: string | null; previewingId: string | null; sendingId: string | null; onPreview: () => void; onSave: (event?: FormEvent<HTMLFormElement>, options?: { stay?: boolean; sendAfter?: boolean }) => Promise<RelatorioAgendamento | null>; onSendAfterSave: () => void; onCancel: () => void; }) {
   const filters = mergedFilters();
   return (
-    <form onSubmit={(event) => onSave(event)} className="grid gap-5 xl:grid-cols-[1fr_0.8fr]">
-      <Card className="p-5">
-        <div className="flex flex-col gap-4">
+    <form onSubmit={(event) => onSave(event)} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.72fr)]">
+      <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
+        <div className="flex flex-col gap-5">
           <SectionTitle icon={<Send className="h-4 w-4" />} title={editingScheduleId ? "Editar relatorio" : "Novo envio"} subtitle="Monte a mensagem, escolha o destino e envie pelo Telegram." />
-          <div className="flex flex-wrap gap-2 rounded-md border border-brand-sand bg-brand-cream/35 p-2">
+          <div className="flex flex-wrap gap-2 rounded-[22px] border border-brand-sand/80 bg-brand-cream/45 p-2.5">
             {steps.map((step) => (
-              <button key={step.key} type="button" onClick={() => setActiveStep(step.key)} className={`rounded-md px-3 py-2 text-xs font-black transition ${activeStep === step.key ? "bg-brand-teal text-white" : "bg-white text-brand-teal hover:bg-brand-cream"}`}>{step.label}</button>
+              <button key={step.key} type="button" onClick={() => setActiveStep(step.key)} className={`rounded-[18px] px-4 py-3 text-sm font-black transition ${activeStep === step.key ? "bg-brand-teal text-white shadow-sm" : "bg-white text-brand-teal hover:bg-brand-cream"}`}>{step.label}</button>
             ))}
           </div>
         </div>
@@ -544,20 +544,20 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
         {activeStep === "content" ? (
           <div className="mt-5 space-y-5">
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Nome do relatorio"><input value={scheduleForm.nome} onChange={(e) => setScheduleForm((c) => ({ ...c, nome: e.target.value }))} className="input-like" placeholder="Daily da Ju" /></Field>
-              <Field label="Tipo"><select value={scheduleForm.tipo_resumo} onChange={(e) => setScheduleForm((c) => ({ ...c, tipo_resumo: e.target.value as RelatorioTipoResumo }))} className="input-like">{Object.entries(tipoLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+              <Field label="Nome do relatorio"><input value={scheduleForm.nome} onChange={(e) => setScheduleForm((c) => ({ ...c, nome: e.target.value }))} className="input-like min-h-12 text-[15px]" placeholder="Daily da Ju" /></Field>
+              <Field label="Tipo"><select value={scheduleForm.tipo_resumo} onChange={(e) => setScheduleForm((c) => ({ ...c, tipo_resumo: e.target.value as RelatorioTipoResumo }))} className="input-like min-h-12 text-[15px]">{Object.entries(tipoLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
             </div>
-            <Field label="Descricao curta"><textarea value={scheduleForm.descricao} onChange={(e) => setScheduleForm((c) => ({ ...c, descricao: e.target.value }))} className="input-like min-h-20" placeholder="Resumo para orientar quem vai receber." /></Field>
+            <Field label="Descricao curta"><textarea value={scheduleForm.descricao} onChange={(e) => setScheduleForm((c) => ({ ...c, descricao: e.target.value }))} className="input-like min-h-28 text-[15px]" placeholder="Resumo para orientar quem vai receber." /></Field>
             <div>
-              <p className="text-sm font-black text-brand-teal">Blocos do relatorio</p>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <p className="text-base font-black text-brand-teal">Blocos do relatorio</p>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
                 {blockOptions.map((block) => {
                   const active = selectedBlocks.includes(block.key);
                   return (
-                    <button key={block.key} type="button" onClick={() => setBlock(block.key, { enabled: !active, periodo: filters.blocos?.[block.key]?.periodo ?? block.defaultPeriod })} className={`rounded-md border p-4 text-left transition ${active ? "border-brand-sky bg-brand-sky/10" : "border-brand-sand bg-white hover:bg-brand-cream/40"}`}>
+                    <button key={block.key} type="button" onClick={() => setBlock(block.key, { enabled: !active, periodo: filters.blocos?.[block.key]?.periodo ?? block.defaultPeriod })} className={`rounded-[22px] border p-5 text-left shadow-sm transition ${active ? "border-brand-sky bg-brand-sky/15 ring-2 ring-brand-sky/20" : "border-brand-sand/80 bg-white hover:bg-brand-cream/40"}`}>
                       <div className="flex items-start gap-3">
                         <IconBubble tone={active ? "blue" : "neutral"}>{block.icon}</IconBubble>
-                        <div><p className="text-sm font-black text-brand-teal">{block.label}</p><p className="mt-1 text-xs font-semibold text-brand-teal/60">{block.helper}</p></div>
+                        <div><p className="text-lg font-black text-brand-teal">{block.label}</p><p className="mt-1.5 text-sm font-semibold text-brand-teal/70">{block.helper}</p></div>
                       </div>
                     </button>
                   );
@@ -570,12 +570,12 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
         {activeStep === "filters" ? (
           <div className="mt-5 space-y-5">
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Nivel de detalhe"><select value={filters.nivel_detalhe ?? "normal"} onChange={(e) => setFilterPatch({ nivel_detalhe: e.target.value as RelatorioNivelDetalhe })} className="input-like"><option value="curto">Curto</option><option value="normal">Normal</option><option value="detalhado">Detalhado</option></select></Field>
-              <Field label="Recomendacao Norwyn"><select value={filters.include_recommendation === false ? "nao" : "sim"} onChange={(e) => setFilterPatch({ include_recommendation: e.target.value === "sim" })} className="input-like"><option value="sim">Incluir</option><option value="nao">Nao incluir</option></select></Field>
+              <Field label="Nivel de detalhe"><select value={filters.nivel_detalhe ?? "normal"} onChange={(e) => setFilterPatch({ nivel_detalhe: e.target.value as RelatorioNivelDetalhe })} className="input-like min-h-12 text-[15px]"><option value="curto">Curto</option><option value="normal">Normal</option><option value="detalhado">Detalhado</option></select></Field>
+              <Field label="Recomendacao Norwyn"><select value={filters.include_recommendation === false ? "nao" : "sim"} onChange={(e) => setFilterPatch({ include_recommendation: e.target.value === "sim" })} className="input-like min-h-12 text-[15px]"><option value="sim">Incluir</option><option value="nao">Nao incluir</option></select></Field>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               {selectedBlocks.map((key) => (
-                <Field key={key} label={`Periodo · ${blockLabel(key)}`}><select value={filters.blocos?.[key]?.periodo ?? "hoje"} onChange={(e) => setBlock(key, { periodo: e.target.value as RelatorioPeriodo })} className="input-like">{Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+                <Field key={key} label={`Periodo · ${blockLabel(key)}`}><select value={filters.blocos?.[key]?.periodo ?? "hoje"} onChange={(e) => setBlock(key, { periodo: e.target.value as RelatorioPeriodo })} className="input-like min-h-12 text-[15px]">{Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
               ))}
             </div>
             {selectedBlocks.includes("aluno_360") ? (
@@ -586,17 +586,17 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
 
         {activeStep === "recipient" ? (
           <div className="mt-5 space-y-4">
-            <Field label="Destino Telegram"><select value={scheduleForm.destinatario_id} onChange={(e) => setScheduleForm((c) => ({ ...c, destinatario_id: e.target.value }))} className="input-like"><option value="">Escolha um destino</option>{destinatarios.map((item) => <option key={item.id} value={item.id}>{item.nome} · {item.telegram_chat_id ?? "sem chat ID"}</option>)}</select></Field>
+            <Field label="Destino Telegram"><select value={scheduleForm.destinatario_id} onChange={(e) => setScheduleForm((c) => ({ ...c, destinatario_id: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Escolha um destino</option>{destinatarios.map((item) => <option key={item.id} value={item.id}>{item.nome} · {item.telegram_chat_id ?? "sem chat ID"}</option>)}</select></Field>
             <div className="grid gap-3 md:grid-cols-2">
-              {destinatarios.filter((item) => item.ativo !== false).slice(0, 6).map((item) => <div key={item.id} className="rounded-md border border-brand-sand bg-white p-4"><p className="text-sm font-black text-brand-teal">{item.nome}</p><p className="mt-1 text-xs font-semibold text-brand-teal/60">{canalLabels[item.canal_preferencial] ?? item.canal_preferencial} · {item.telegram_chat_id ?? "sem Telegram"}</p></div>)}
+              {destinatarios.filter((item) => item.ativo !== false).slice(0, 6).map((item) => <div key={item.id} className="rounded-[20px] border border-brand-sand/80 bg-white p-5 shadow-sm"><p className="text-sm font-black text-brand-teal">{item.nome}</p><p className="mt-1 text-xs font-semibold text-brand-teal/60">{canalLabels[item.canal_preferencial] ?? item.canal_preferencial} · {item.telegram_chat_id ?? "sem Telegram"}</p></div>)}
             </div>
           </div>
         ) : null}
 
         {activeStep === "when" ? (
           <div className="mt-5 grid gap-3 md:grid-cols-2">
-            <Field label="Quando"><select value={scheduleForm.frequencia} onChange={(e) => setScheduleForm((c) => ({ ...c, frequencia: e.target.value as RelatorioFrequencia }))} className="input-like">{Object.entries(frequenciaLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
-            <Field label="Horario"><input type="time" value={scheduleForm.horario} onChange={(e) => setScheduleForm((c) => ({ ...c, horario: e.target.value }))} className="input-like" /></Field>
+            <Field label="Quando"><select value={scheduleForm.frequencia} onChange={(e) => setScheduleForm((c) => ({ ...c, frequencia: e.target.value as RelatorioFrequencia }))} className="input-like min-h-12 text-[15px]">{Object.entries(frequenciaLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+            <Field label="Horario"><input type="time" value={scheduleForm.horario} onChange={(e) => setScheduleForm((c) => ({ ...c, horario: e.target.value }))} className="input-like min-h-12 text-[15px]" /></Field>
             <label className="flex items-center gap-3 rounded-md border border-brand-sand bg-white p-4 text-sm font-black text-brand-teal"><input type="checkbox" checked={scheduleForm.ativo} onChange={(e) => setScheduleForm((c) => ({ ...c, ativo: e.target.checked }))} /> Agendamento ativo</label>
             <div className="rounded-md border border-brand-sand bg-brand-cream/40 p-4 text-sm font-semibold text-brand-teal/70">Canal funcional nesta fase: Telegram. PDF/e-mail ficam preparados no modelo, sem envio ativo.</div>
           </div>
@@ -613,7 +613,7 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
           </div>
         </div>
       </Card>
-      <Card className="p-5"><SectionTitle icon={<Smartphone className="h-4 w-4" />} title="Preview Telegram" subtitle="Representa a mensagem final com os blocos selecionados." /><div className="mt-4"><TelegramPreview text={apiPreview ?? previewText} /></div></Card>
+      <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft"><SectionTitle icon={<Smartphone className="h-4 w-4" />} title="Preview Telegram" subtitle="Representa a mensagem final com os blocos selecionados." /><div className="mt-4"><TelegramPreview text={apiPreview ?? previewText} /></div></Card>
     </form>
   );
 }
@@ -621,19 +621,19 @@ function ComposeTab({ activeStep, setActiveStep, scheduleForm, setScheduleForm, 
 function HistoryTab({ envios, total, page, filters, setFilters, loading, destinatarios, selectedEnvio, setSelectedEnvio, onLoad, onPage }: { envios: RelatorioEnvio[]; total: number; page: number; filters: { q: string; status: string; origin: string; channel: string; from: string; to: string }; setFilters: React.Dispatch<React.SetStateAction<{ q: string; status: string; origin: string; channel: string; from: string; to: string }>>; loading: boolean; destinatarios: RelatorioDestinatario[]; selectedEnvio: RelatorioEnvio | null; setSelectedEnvio: (envio: RelatorioEnvio | null) => void; onLoad: () => void; onPage: (page: number) => void; }) {
   const maxPage = Math.max(1, Math.ceil(total / 25));
   return (
-    <div className="grid gap-5 xl:grid-cols-[1fr_0.8fr]">
-      <Card className="p-5">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.72fr)]">
+      <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
         <SectionTitle icon={<History className="h-4 w-4" />} title="Historico de envios" subtitle="Completo, paginado e sem limite artificial de 1000 registros." />
         <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <Field label="Busca"><input value={filters.q ?? ""} onChange={(e) => setFilters((c) => ({ ...c, q: e.target.value }))} className="input-like" placeholder="Assunto, destino..." /></Field>
-          <Field label="Status"><select value={filters.status ?? ""} onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))} className="input-like"><option value="">Todos</option><option value="enviado">Enviado</option><option value="preparado">Preparado</option><option value="erro">Erro</option><option value="ignorado">Ignorado</option></select></Field>
-          <Field label="Origem"><select value={filters.origin ?? ""} onChange={(e) => setFilters((c) => ({ ...c, origin: e.target.value }))} className="input-like"><option value="">Todas</option><option value="manual">Manual</option><option value="agendado">Agendado</option><option value="preview">Preview</option></select></Field>
-          <Field label="Canal"><select value={filters.channel ?? ""} onChange={(e) => setFilters((c) => ({ ...c, channel: e.target.value }))} className="input-like"><option value="">Todos</option><option value="telegram">Telegram</option></select></Field>
-          <Field label="De"><input type="date" value={filters.from ?? ""} onChange={(e) => setFilters((c) => ({ ...c, from: e.target.value }))} className="input-like" /></Field>
-          <Field label="Ate"><input type="date" value={filters.to ?? ""} onChange={(e) => setFilters((c) => ({ ...c, to: e.target.value }))} className="input-like" /></Field>
+          <Field label="Busca"><input value={filters.q ?? ""} onChange={(e) => setFilters((c) => ({ ...c, q: e.target.value }))} className="input-like min-h-12 text-[15px]" placeholder="Assunto, destino..." /></Field>
+          <Field label="Status"><select value={filters.status ?? ""} onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Todos</option><option value="enviado">Enviado</option><option value="preparado">Preparado</option><option value="erro">Erro</option><option value="ignorado">Ignorado</option></select></Field>
+          <Field label="Origem"><select value={filters.origin ?? ""} onChange={(e) => setFilters((c) => ({ ...c, origin: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Todas</option><option value="manual">Manual</option><option value="agendado">Agendado</option><option value="preview">Preview</option></select></Field>
+          <Field label="Canal"><select value={filters.channel ?? ""} onChange={(e) => setFilters((c) => ({ ...c, channel: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Todos</option><option value="telegram">Telegram</option></select></Field>
+          <Field label="De"><input type="date" value={filters.from ?? ""} onChange={(e) => setFilters((c) => ({ ...c, from: e.target.value }))} className="input-like min-h-12 text-[15px]" /></Field>
+          <Field label="Ate"><input type="date" value={filters.to ?? ""} onChange={(e) => setFilters((c) => ({ ...c, to: e.target.value }))} className="input-like min-h-12 text-[15px]" /></Field>
         </div>
         <div className="mt-3 flex justify-end"><ActionButton onClick={onLoad} icon={loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} label="Filtrar" /></div>
-        <div className="mt-5 grid gap-3">
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
           {envios.length ? envios.map((envio) => <EnvioRow key={envio.id} envio={envio} selected={selectedEnvio?.id === envio.id} onClick={() => setSelectedEnvio(envio)} />) : <EmptyState text="Nenhum envio encontrado para os filtros." />}
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm font-bold text-brand-teal/70"><span>{total} registro(s) · pagina {page} de {maxPage}</span><div className="flex gap-2"><button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)} className="rounded-md border border-brand-sand bg-white px-3 py-2 disabled:opacity-40">Anterior</button><button type="button" disabled={page >= maxPage} onClick={() => onPage(page + 1)} className="rounded-md border border-brand-sand bg-white px-3 py-2 disabled:opacity-40">Proxima</button></div></div>
@@ -645,44 +645,56 @@ function HistoryTab({ envios, total, page, filters, setFilters, loading, destina
 
 function DestinationsTab({ destinatarios, recipientForm, setRecipientForm, editingRecipientId, canWrite, onSubmit, onEdit, onDelete, onCancel }: { destinatarios: RelatorioDestinatario[]; recipientForm: RecipientDraft; setRecipientForm: React.Dispatch<React.SetStateAction<RecipientDraft>>; editingRecipientId: string | null; canWrite: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onEdit: (item: RelatorioDestinatario) => void; onDelete: (id: string) => void; onCancel: () => void; }) {
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.85fr_1fr]">
-      <Card className="p-5">
-        <SectionTitle icon={<UserRound className="h-4 w-4" />} title={editingRecipientId ? "Editar destino" : "Novo destino"} subtitle="Grupos, chats e destinatarios para Telegram." />
-        <form onSubmit={onSubmit} className="mt-4 grid gap-3">
-          <Field label="Nome"><input value={recipientForm.nome} onChange={(e) => setRecipientForm((c) => ({ ...c, nome: e.target.value }))} className="input-like" /></Field>
-          <div className="grid gap-3 md:grid-cols-2"><Field label="Tipo"><select value={recipientForm.tipo_destino} onChange={(e) => setRecipientForm((c) => ({ ...c, tipo_destino: e.target.value }))} className="input-like"><option value="grupo">Grupo</option><option value="individual">Individual</option><option value="canal">Canal</option><option value="outro">Outro</option></select></Field><Field label="Perfil"><select value={recipientForm.perfil_alvo} onChange={(e) => setRecipientForm((c) => ({ ...c, perfil_alvo: e.target.value }))} className="input-like"><option value="ju">Especialista</option><option value="suporte">Suporte</option><option value="operacional">Operacional</option><option value="marketing">Marketing</option><option value="comercial">Comercial</option><option value="jeff">Admin</option></select></Field></div>
-          <Field label="Telegram chat ID"><input value={recipientForm.telegram_chat_id} onChange={(e) => setRecipientForm((c) => ({ ...c, telegram_chat_id: e.target.value }))} className="input-like" placeholder="-100..." /></Field>
-          <Field label="Observacao"><textarea value={recipientForm.observacao} onChange={(e) => setRecipientForm((c) => ({ ...c, observacao: e.target.value }))} className="input-like min-h-20" /></Field>
-          <label className="flex items-center gap-3 rounded-md border border-brand-sand bg-white p-3 text-sm font-black text-brand-teal"><input type="checkbox" checked={recipientForm.ativo} onChange={(e) => setRecipientForm((c) => ({ ...c, ativo: e.target.checked }))} /> Destino ativo</label>
-          <div className="flex flex-wrap gap-2 pt-2">{canWrite ? <ActionButton type="submit" icon={<CheckCircle2 className="h-4 w-4" />} label="Salvar destino" primary /> : null}<ActionButton type="button" onClick={onCancel} icon={<X className="h-4 w-4" />} label="Cancelar" /></div>
-        </form>
-      </Card>
-      <Card className="p-5">
-        <SectionTitle icon={<Mail className="h-4 w-4" />} title="Destinos cadastrados" subtitle="Mantem compatibilidade com os destinos atuais." />
-        <div className="mt-4 grid gap-3">
+    <div className="grid gap-5 xl:grid-cols-[1fr_0.72fr]">
+      <Card className="order-1 rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <SectionTitle icon={<Mail className="h-4 w-4" />} title="Destinos cadastrados" subtitle="Grupos e chats disponiveis para os envios." />
+          {canWrite ? <ActionButton onClick={onCancel} icon={<Plus className="h-4 w-4" />} label="Novo destino" primary /> : null}
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
           {destinatarios.length ? destinatarios.map((item) => (
-            <div key={item.id} className="rounded-md border border-brand-sand bg-white p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-black text-brand-teal">{item.nome}</p><p className="mt-1 text-xs font-semibold text-brand-teal/60">{item.tipo_destino} · {item.telegram_chat_id ?? "sem chat ID"} · ultimo envio {dateTime(item.last_sent_at)}</p></div><Pill tone={item.ativo === false ? "neutral" : "green"}>{item.ativo === false ? "Inativo" : "Ativo"}</Pill></div>
-              <div className="mt-3 flex flex-wrap gap-2"><ActionButton onClick={() => onEdit(item)} icon={<Pencil className="h-4 w-4" />} label="Editar" />{canWrite ? <ActionButton onClick={() => onDelete(item.id)} icon={<Trash2 className="h-4 w-4" />} label="Excluir" danger /> : null}</div>
+            <div key={item.id} className="rounded-[20px] border border-brand-sand/80 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-lg font-black text-brand-teal">{item.nome}</p>
+                  <p className="mt-1 text-sm font-semibold text-brand-teal/70">{item.tipo_destino} · {item.telegram_chat_id ?? "sem chat ID"}</p>
+                  <p className="mt-1 text-sm font-semibold text-brand-teal/60">Ultimo envio: {dateTime(item.last_sent_at)}</p>
+                </div>
+                <Pill tone={item.ativo === false ? "neutral" : "green"}>{item.ativo === false ? "Inativo" : "Ativo"}</Pill>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-brand-sand pt-3">
+                <ActionButton onClick={() => onEdit(item)} icon={<Pencil className="h-4 w-4" />} label="Editar" />
+                {canWrite ? <ActionButton onClick={() => onDelete(item.id)} icon={<Trash2 className="h-4 w-4" />} label="Excluir" danger /> : null}
+              </div>
             </div>
           )) : <EmptyState text="Nenhum destino configurado." />}
         </div>
       </Card>
+      <Card className="order-2 rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
+        <SectionTitle icon={<UserRound className="h-4 w-4" />} title={editingRecipientId ? "Editar destino" : "Novo destino"} subtitle="Use este painel quando precisar cadastrar ou ajustar um destino." />
+        <form onSubmit={onSubmit} className="mt-5 grid gap-4">
+          <Field label="Nome"><input value={recipientForm.nome} onChange={(e) => setRecipientForm((c) => ({ ...c, nome: e.target.value }))} className="input-like min-h-12 text-[15px]" /></Field>
+          <div className="grid gap-4 md:grid-cols-2"><Field label="Tipo"><select value={recipientForm.tipo_destino} onChange={(e) => setRecipientForm((c) => ({ ...c, tipo_destino: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="grupo">Grupo</option><option value="individual">Individual</option><option value="canal">Canal</option><option value="outro">Outro</option></select></Field><Field label="Perfil"><select value={recipientForm.perfil_alvo} onChange={(e) => setRecipientForm((c) => ({ ...c, perfil_alvo: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="ju">Especialista</option><option value="suporte">Suporte</option><option value="operacional">Operacional</option><option value="marketing">Marketing</option><option value="comercial">Comercial</option><option value="jeff">Admin</option></select></Field></div>
+          <Field label="Telegram chat ID"><input value={recipientForm.telegram_chat_id} onChange={(e) => setRecipientForm((c) => ({ ...c, telegram_chat_id: e.target.value }))} className="input-like min-h-12 text-[15px]" placeholder="-100..." /></Field>
+          <Field label="Observacao"><textarea value={recipientForm.observacao} onChange={(e) => setRecipientForm((c) => ({ ...c, observacao: e.target.value }))} className="input-like min-h-28 text-[15px]" /></Field>
+          <label className="flex min-h-12 items-center gap-3 rounded-[16px] border border-brand-sand bg-white px-4 py-3 text-sm font-black text-brand-teal"><input type="checkbox" checked={recipientForm.ativo} onChange={(e) => setRecipientForm((c) => ({ ...c, ativo: e.target.checked }))} /> Destino ativo</label>
+          <div className="flex flex-wrap gap-2 pt-2">{canWrite ? <ActionButton type="submit" icon={<CheckCircle2 className="h-4 w-4" />} label="Salvar destino" primary /> : null}<ActionButton type="button" onClick={onCancel} icon={<X className="h-4 w-4" />} label="Cancelar" /></div>
+        </form>
+      </Card>
     </div>
   );
 }
-
 function ScheduleCard({ item, recipient, sending, canWrite, onEdit, onDuplicate, onToggle, onSendNow, onDelete }: { item: RelatorioAgendamento; recipient: string; sending: boolean; canWrite: boolean; onEdit: () => void; onDuplicate: () => void; onToggle: () => void; onSendNow: () => void; onDelete: () => void; }) {
   const active = scheduleActive(item);
   return (
-    <div className="rounded-md border border-brand-sand bg-white p-4 shadow-sm">
+    <div className="rounded-[22px] border border-brand-sand/80 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-soft">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-black text-brand-teal">{item.nome}</h3><Pill tone={active ? "green" : item.status === "rascunho" ? "amber" : "neutral"}>{active ? "Ativo" : item.status}</Pill><Pill tone="blue">{canalLabels[item.canal] ?? item.canal}</Pill></div>
-          <p className="mt-2 text-sm font-semibold text-brand-teal/65">{recipient} · {frequenciaLabels[item.frequencia] ?? item.frequencia} · {item.horario?.slice(0, 5) ?? "sem horario"}</p>
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-black text-brand-teal">{item.nome}</h3><Pill tone={active ? "green" : item.status === "rascunho" ? "amber" : "neutral"}>{active ? "Ativo" : item.status}</Pill><Pill tone="blue">{canalLabels[item.canal] ?? item.canal}</Pill></div>
+          <p className="mt-2 text-[15px] font-semibold text-brand-teal/75">{recipient} · {frequenciaLabels[item.frequencia] ?? item.frequencia} · {item.horario?.slice(0, 5) ?? "sem horario"}</p>
           <div className="mt-3 flex flex-wrap gap-2">{(item.incluir_modulos ?? []).map((key) => <Pill key={key} tone="neutral">{blockLabel(key)}</Pill>)}</div>
         </div>
-        <div className="grid grid-cols-2 gap-3 text-xs font-bold text-brand-teal/65 sm:grid-cols-3 lg:min-w-[360px]">
+        <div className="grid grid-cols-2 gap-3 text-sm font-bold text-brand-teal/75 sm:grid-cols-3 lg:min-w-[360px]">
           <span><strong className="block text-brand-teal">Proximo</strong>{dateTime(item.next_run_at)}</span>
           <span><strong className="block text-brand-teal">Ultimo</strong>{dateTime(item.last_run_at)}</span>
           <span><strong className="block text-brand-teal">Tipo</strong>{tipoLabels[item.tipo_resumo] ?? item.tipo_resumo}</span>
@@ -701,17 +713,17 @@ function ScheduleCard({ item, recipient, sending, canWrite, onEdit, onDuplicate,
 
 function EnvioRow({ envio, selected, onClick }: { envio: RelatorioEnvio; selected: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`rounded-md border p-4 text-left transition ${selected ? "border-brand-sky bg-brand-sky/10" : "border-brand-sand bg-white hover:bg-brand-cream/40"}`}>
+    <button type="button" onClick={onClick} className={`rounded-[20px] border p-5 text-left shadow-sm transition ${selected ? "border-brand-sky bg-brand-sky/15 ring-2 ring-brand-sky/20" : "border-brand-sand/80 bg-white hover:bg-brand-cream/40"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-black text-brand-teal">{envio.assunto ?? tipoLabels[envio.tipo_resumo] ?? envio.tipo_resumo}</p><p className="mt-1 text-xs font-semibold text-brand-teal/60">{dateTime(envio.created_at)} · {envio.destino ?? "sem destino"} · {envio.origem}</p></div><Pill tone={envio.status === "erro" ? "red" : envio.status === "enviado" ? "green" : "blue"}>{envio.status}</Pill></div>
-      <p className="mt-2 line-clamp-2 text-xs font-semibold text-brand-teal/65">{envio.resumo ?? envio.erro ?? "Sem resumo."}</p>
+      <p className="mt-2 line-clamp-2 text-sm font-semibold text-brand-teal/70">{envio.resumo ?? envio.erro ?? "Sem resumo."}</p>
     </button>
   );
 }
 
 function HistoryDetails({ envio, destinatarios, onClose }: { envio: RelatorioEnvio | null; destinatarios: RelatorioDestinatario[]; onClose: () => void }) {
-  if (!envio) return <Card className="p-5"><SectionTitle icon={<Eye className="h-4 w-4" />} title="Detalhe do envio" subtitle="Selecione um registro para ver conteudo, filtros e erros." /><EmptyState text="Nenhum envio selecionado." /></Card>;
+  if (!envio) return <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft"><SectionTitle icon={<Eye className="h-4 w-4" />} title="Detalhe do envio" subtitle="Selecione um registro para ver conteudo, filtros e erros." /><EmptyState text="Nenhum envio selecionado." /></Card>;
   return (
-    <Card className="p-5">
+    <Card className="rounded-[24px] border-brand-sand/80 bg-white p-6 shadow-soft">
       <div className="flex items-start justify-between gap-3"><SectionTitle icon={<Eye className="h-4 w-4" />} title="Detalhe do envio" subtitle={dateTime(envio.created_at)} /><button type="button" onClick={onClose} className="rounded-full border border-brand-sand bg-white p-2 text-brand-teal"><X className="h-4 w-4" /></button></div>
       <div className="mt-4 grid gap-3 text-sm font-semibold text-brand-teal/70">
         <InfoLine label="Status" value={envio.status} />
@@ -727,42 +739,42 @@ function HistoryDetails({ envio, destinatarios, onClose }: { envio: RelatorioEnv
 }
 
 function MetricCard({ icon, label, value, helper, tone }: { icon: ReactNode; label: string; value: string; helper: string; tone: "green" | "blue" | "amber" | "red" | "purple" }) {
-  return <Card className="p-5"><div className="flex items-start gap-4"><IconBubble tone={tone}>{icon}</IconBubble><div><p className="text-xs font-bold text-brand-teal/55">{label}</p><p className="mt-2 text-2xl font-black leading-none text-brand-teal">{value}</p><p className="mt-2 text-xs font-semibold text-brand-teal/55">{helper}</p></div></div></Card>;
+  return <Card className="rounded-[26px] border-brand-sand/80 bg-white p-6 shadow-soft"><div className="flex items-start gap-4"><IconBubble tone={tone}>{icon}</IconBubble><div><p className="text-sm font-black text-brand-teal/65">{label}</p><p className="mt-3 text-4xl font-black leading-none text-brand-teal">{value}</p><p className="mt-2 text-sm font-bold text-brand-teal/70">{helper}</p></div></div></Card>;
 }
 
 function SectionTitle({ icon, title, subtitle }: { icon: ReactNode; title: string; subtitle: string }) {
-  return <div className="flex items-start gap-3"><IconBubble tone="blue">{icon}</IconBubble><div><h2 className="text-lg font-black leading-tight text-brand-teal">{title}</h2><p className="mt-1 text-sm font-semibold text-brand-teal/60">{subtitle}</p></div></div>;
+  return <div className="flex items-start gap-3"><IconBubble tone="blue">{icon}</IconBubble><div><h2 className="text-xl font-black leading-tight text-brand-teal">{title}</h2><p className="mt-1.5 text-[15px] font-semibold text-brand-teal/70">{subtitle}</p></div></div>;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="grid gap-1.5 text-xs font-black text-brand-teal/70"><span>{label}</span>{children}</label>;
+  return <label className="grid gap-2 text-sm font-black text-brand-teal/80"><span>{label}</span>{children}</label>;
 }
 
 function ActionButton({ icon, label, onClick, primary = false, danger = false, type = "button" }: { icon: ReactNode; label: string; onClick?: () => void; primary?: boolean; danger?: boolean; type?: "button" | "submit" }) {
   const color = primary ? "bg-brand-teal text-white hover:bg-brand-teal/90" : danger ? "border-red-100 bg-red-50 text-red-700 hover:bg-red-100" : "border-brand-sand bg-white text-brand-teal hover:bg-brand-cream";
-  return <button type={type} onClick={onClick} className={`inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-black transition ${color}`}>{icon}{label}</button>;
+  return <button type={type} onClick={onClick} className={`inline-flex min-h-11 items-center gap-2 rounded-[16px] border px-4 py-2.5 text-sm font-black transition ${color}`}>{icon}{label}</button>;
 }
 
 function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "green" | "blue" | "amber" | "red" | "purple" | "neutral" }) {
   const colors: Record<string, string> = { green: "bg-emerald-50 text-emerald-700 border-emerald-100", blue: "bg-sky-50 text-sky-700 border-sky-100", amber: "bg-amber-50 text-amber-700 border-amber-100", red: "bg-red-50 text-red-700 border-red-100", purple: "bg-violet-50 text-violet-700 border-violet-100", neutral: "bg-brand-cream text-brand-teal/75 border-brand-sand" };
-  return <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-black ${colors[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black ${colors[tone]}`}>{children}</span>;
 }
 
 function IconBubble({ children, tone = "neutral" }: { children: ReactNode; tone?: "green" | "blue" | "amber" | "red" | "purple" | "neutral" }) {
   const colors: Record<string, string> = { green: "bg-emerald-100 text-emerald-700", blue: "bg-sky-100 text-sky-700", amber: "bg-amber-100 text-amber-700", red: "bg-red-100 text-red-700", purple: "bg-violet-100 text-violet-700", neutral: "bg-brand-cream text-brand-teal" };
-  return <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md ${colors[tone]}`}>{children}</span>;
+  return <span className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] ${colors[tone]}`}>{children}</span>;
 }
 
 function TelegramPreview({ text }: { text: string }) {
-  return <div className="rounded-[18px] border border-brand-sand bg-[#0b1f2d] p-4 shadow-sm"><pre className="max-h-[560px] overflow-auto whitespace-pre-wrap font-sans text-sm font-semibold leading-7 text-white/90">{text}</pre></div>;
+  return <div className="rounded-[26px] border border-[#17384a] bg-[#0b1f2d] p-6 shadow-soft"><pre className="max-h-[620px] overflow-auto whitespace-pre-wrap font-sans text-[15px] font-semibold leading-8 text-white/95">{text}</pre></div>;
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="rounded-md border border-dashed border-brand-sand bg-brand-cream/25 p-5 text-sm font-bold text-brand-teal/60">{text}</div>;
+  return <div className="rounded-[20px] border border-dashed border-brand-sand bg-brand-cream/35 p-6 text-[15px] font-bold text-brand-teal/70">{text}</div>;
 }
 
 function InfoLine({ label, value, danger = false }: { label: string; value: string; danger?: boolean }) {
-  return <div className="rounded-md border border-brand-sand bg-white p-3"><span className="block text-xs font-black text-brand-teal/50">{label}</span><span className={danger ? "text-red-700" : "text-brand-teal"}>{value}</span></div>;
+  return <div className="rounded-[18px] border border-brand-sand/80 bg-white p-4"><span className="block text-xs font-black text-brand-teal/60">{label}</span><span className={danger ? "text-red-700" : "text-brand-teal"}>{value}</span></div>;
 }
 
 function buildPreview(form: DraftSchedule, destinatarios: RelatorioDestinatario[]) {
@@ -822,3 +834,6 @@ function recipientName(id: string, destinatarios: RelatorioDestinatario[]) {
 function todayKey() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 }
+
+
+
