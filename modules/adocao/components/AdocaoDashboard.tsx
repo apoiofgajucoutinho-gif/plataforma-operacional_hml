@@ -1,382 +1,112 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { BarChart3, CalendarDays, Eye, Users } from "lucide-react";
-import { Card } from "@/components/ui/Card";
-import { ExportButtons } from "@/components/ui/ExportButtons";
-import type { ExportColumn } from "@/lib/client/table-export";
+import { Activity, AlertTriangle, BarChart3, CalendarDays, Clock3, Eye, Gauge, LayoutGrid, Users, UsersRound } from "lucide-react";
+import { DataFreshness, EmptyState, IconPill, MetricCard, PageHeader, SectionHeader, StatusBadge, Surface } from "@/components/ui/norwyn-design-system";
+import type { AdoptionAnalytics, AdoptionPeriodKey, AdoptionPerson, AdoptionSnapshot } from "@/modules/adocao/types";
 
-type PeriodFilter = "7d" | "15d" | "30d" | "all";
-const ACTIVITY_PAGE_SIZE = 20;
+type Tab = "overview" | "people" | "modules" | "experience";
+const periods: Array<{ key: AdoptionPeriodKey; label: string }> = [{ key: "today", label: "Hoje" }, { key: "7d", label: "7 dias" }, { key: "15d", label: "15 dias" }, { key: "30d", label: "30 dias" }, { key: "90d", label: "90 dias" }];
+const tabs: Array<{ key: Tab; label: string }> = [{ key: "overview", label: "Visão Geral" }, { key: "people", label: "Pessoas" }, { key: "modules", label: "Módulos" }, { key: "experience", label: "Experiência" }];
 
-type AdoptionEvent = {
-  id: string;
-  module: string;
-  page_path: string;
-  event_name: string;
-  user_id: string | null;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-};
-
-const periodFilters: Array<{ value: PeriodFilter; label: string }> = [
-  { value: "7d", label: "7 dias" },
-  { value: "15d", label: "15 dias" },
-  { value: "30d", label: "30 dias" },
-  { value: "all", label: "Tudo" },
-];
-
-const moduleLabels: Record<string, string> = {
-  agenda: "Agenda",
-  instagram: "Instagram",
-  ads: "Ads",
-  objetivos: "Objetivos",
-  adocao: "Adocao",
-  financeiro: "Financeiro",
-  atividades: "Atividades",
-  relatorios: "Relatorios",
-  admin: "Admin",
-};
-
-function numberFormat(value: number) {
-  return new Intl.NumberFormat("pt-BR").format(value);
+export function AdocaoDashboard({ analytics, diagnostic, updatedAt }: { analytics: AdoptionAnalytics | null; diagnostic: string | null; updatedAt: string | null }) {
+  const [period, setPeriod] = useState<AdoptionPeriodKey>("30d");
+  const [tab, setTab] = useState<Tab>("overview");
+  const [selectedUser, setSelectedUser] = useState("all");
+  const snapshot = analytics?.snapshots[period] ?? null;
+  const visibleActivity = useMemo(() => snapshot?.recentActivity.filter((item) => selectedUser === "all" || item.userId === selectedUser) ?? [], [selectedUser, snapshot]);
+  return <div className="norwyn-ds-page space-y-5">
+    <PageHeader eyebrow="Norwyn" title="Adoção" description="Uso da plataforma e saúde da experiência, com leitura por pessoa, módulo e página." aside={<DataFreshness label={updatedAt ? `Atualizado em ${dateTime(updatedAt)}` : "Sem eventos registrados"} stale={!updatedAt} />} />
+    {diagnostic ? <Surface><p className="font-semibold text-[color:var(--ds-text)]">{diagnostic}</p></Surface> : null}
+    {!snapshot ? <Surface><EmptyState title="Adoção ainda sem dados">O tracking começará a aparecer após navegações autenticadas.</EmptyState></Surface> : <>
+      <Surface className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap gap-2">{tabs.map((item) => <FilterButton key={item.key} active={tab === item.key} onClick={() => setTab(item.key)}>{item.label}</FilterButton>)}</div>
+        <div className="flex flex-wrap gap-2">{periods.map((item) => <FilterButton key={item.key} active={period === item.key} onClick={() => setPeriod(item.key)}>{item.label}</FilterButton>)}</div>
+      </Surface>
+      {tab === "overview" ? <Overview snapshot={snapshot} onSelectUser={(id) => { setSelectedUser(id); setTab("people"); }} /> : null}
+      {tab === "people" ? <People snapshot={snapshot} selectedUser={selectedUser} setSelectedUser={setSelectedUser} activity={visibleActivity} /> : null}
+      {tab === "modules" ? <Modules snapshot={snapshot} /> : null}
+      {tab === "experience" ? <Experience snapshot={snapshot} /> : null}
+    </>}
+  </div>;
 }
 
-function dateTimeFormat(value: string | null) {
-  if (!value) return "Sem atualizacao registrada";
-
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+function Overview({ snapshot, onSelectUser }: { snapshot: AdoptionSnapshot; onSelectUser: (id: string) => void }) {
+  return <>
+    <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <MetricCard label="Usuários ativos" value={formatNumber(snapshot.usersActive)} period={snapshot.periodLabel} icon={Users} tone="primary" />
+      <MetricCard label="Sessões" value={formatNumber(snapshot.sessions)} period="janela de 30 min" icon={Clock3} tone="info" />
+      <MetricCard label="Dias com uso" value={formatNumber(snapshot.activeDays)} period={snapshot.periodLabel} icon={CalendarDays} tone="success" />
+      <MetricCard label="Page views" value={formatNumber(snapshot.pageViews)} period="duplicatas exatas removidas" icon={Eye} tone="primary" />
+      <MetricCard label="Módulos usados" value={formatNumber(snapshot.modulesUsed)} period={`${snapshot.unusedModules.length} sem uso`} icon={LayoutGrid} tone="warning" />
+      <MetricCard label="Erros" value={formatNumber(snapshot.errors)} period={snapshot.experience.measuredNavigations ? "instrumentação ativa" : "coleta iniciada"} icon={AlertTriangle} tone={snapshot.errors ? "danger" : "success"} />
+    </section>
+    <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+      <Surface><SectionHeader title="Utilização por pessoa" description="Último acesso real e atividade no período." /><div className="mt-4 grid gap-3 sm:grid-cols-2">{snapshot.people.map((person) => <PersonCard key={person.userId} person={person} onClick={() => onSelectUser(person.userId)} />)}</div></Surface>
+      <Surface><SectionHeader title="Atividade" description="Page views por dia no período selecionado." /><ActivityBars snapshot={snapshot} /></Surface>
+    </section>
+    <section className="grid gap-4 xl:grid-cols-2"><Ranking title="Módulos mais usados" rows={snapshot.modules} /><Ranking title="Páginas mais acessadas" rows={snapshot.pages} /></section>
+  </>;
 }
 
-function applyPeriod(events: AdoptionEvent[], period: PeriodFilter) {
-  if (period === "all") return events;
-
-  const days = period === "7d" ? 7 : period === "15d" ? 15 : 30;
-  const start = new Date();
-  start.setDate(start.getDate() - days + 1);
-  start.setHours(0, 0, 0, 0);
-
-  return events.filter((event) => new Date(event.created_at) >= start);
+function People({ snapshot, selectedUser, setSelectedUser, activity }: { snapshot: AdoptionSnapshot; selectedUser: string; setSelectedUser: (id: string) => void; activity: AdoptionSnapshot["recentActivity"] }) {
+  const selected = snapshot.people.find((person) => person.userId === selectedUser) ?? null;
+  return <div className="space-y-4">
+    <Surface><SectionHeader title="Pessoas" description="Distribuição de uso por usuário autenticado." action={<select className="h-10 rounded-full border border-[color:var(--ds-border)] bg-white px-4 text-sm font-semibold text-[color:var(--ds-text)]" value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}><option value="all">Todos os usuários</option>{snapshot.people.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}</select>} /><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{snapshot.people.map((person) => <PersonCard key={person.userId} person={person} onClick={() => setSelectedUser(person.userId)} selected={selectedUser === person.userId} />)}</div></Surface>
+    {selected ? <><section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><MetricCard label="Último acesso" value={relativeDate(selected.lastAccess)} icon={Activity} tone={statusTone(selected.status)} /><MetricCard label="Dias ativos" value={String(selected.activeDays)} period={snapshot.periodLabel} icon={CalendarDays} /><MetricCard label="Sessões" value={String(selected.sessions)} icon={Clock3} /><MetricCard label="Page views" value={String(selected.pageViews)} icon={Eye} /><MetricCard label="Mais usado" value={selected.topModule ?? "Sem uso"} icon={BarChart3} /></section><section className="grid gap-4 xl:grid-cols-2"><CompactRanking title="Módulos mais usados" rows={selected.topModules} /><CompactRanking title="Páginas mais acessadas" rows={selected.topPages} /></section></> : null}
+    <Surface><SectionHeader title={selected ? `Atividade recente — ${selected.name}` : "Atividade recente"} description="Navegação e ações operacionais relevantes; eventos técnicos repetitivos são omitidos." /><Timeline items={activity} /></Surface>
+  </div>;
 }
 
-function pageLabel(event: AdoptionEvent) {
-  const value = event.metadata?.page_label;
-  if (typeof value === "string" && value.trim()) {
-    if (event.module === "financeiro" && (value === "/financeiro" || !value.includes(":"))) {
-      return "Financeiro: Início";
-    }
-    if (event.module === "ads" && (value === "/ads" || !value.includes(":"))) {
-      return "Ads: Visão Geral";
-    }
-    if (event.module === "objetivos" && (value === "/objetivos" || !value.includes(":"))) {
-      return "Objetivos: Visao Geral";
-    }
-    return value;
-  }
-
-  if (event.module === "agenda") return "Agenda";
-  if (event.module === "adocao") return "Adocao";
-  if (event.module === "instagram") return "Instagram: Insights";
-  if (event.module === "ads") return "Ads: Visão Geral";
-  if (event.module === "objetivos") return "Objetivos: Visao Geral";
-  if (event.module === "financeiro") return "Financeiro: Início";
-
-  return event.page_path;
+function Modules({ snapshot }: { snapshot: AdoptionSnapshot }) {
+  const low = snapshot.modules.filter((row) => row.views <= Math.max(2, snapshot.pageViews * 0.02));
+  return <div className="space-y-4"><Ranking title="Módulos mais acessados" rows={snapshot.modules} detailed /><section className="grid gap-4 xl:grid-cols-2"><Surface><SectionHeader title="Pouco utilizados" description="Baixo volume no período, sem interpretação automática." /><div className="mt-4 flex flex-wrap gap-2">{low.length ? low.map((row) => <StatusBadge key={row.key} tone="warning">{row.label} · {row.views}</StatusBadge>) : <EmptyState title="Nenhum módulo com uso muito baixo" />}</div></Surface><Surface><SectionHeader title="Sem uso no período" description="Módulos disponíveis sem page view no recorte." /><div className="mt-4 flex flex-wrap gap-2">{snapshot.unusedModules.map((label) => <StatusBadge key={label}>{label}</StatusBadge>)}</div></Surface></section></div>;
 }
 
-function userLabel(event: AdoptionEvent) {
-  const value = event.metadata?.user_email;
-  if (typeof value === "string" && value.trim()) return value;
-
-  return event.user_id ?? "Usuario nao identificado";
+function Experience({ snapshot }: { snapshot: AdoptionSnapshot }) {
+  const experience = snapshot.experience;
+  return <div className="space-y-4"><section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><MetricCard label="Navegações medidas" value={String(experience.measuredNavigations)} icon={Gauge} /><MetricCard label="Taxa de sucesso" value={experience.successRate == null ? "Coletando" : `${experience.successRate.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`} icon={Activity} tone="success" /><MetricCard label="Mediana da página" value={experience.medianPageLoadMs == null ? "Coletando" : duration(experience.medianPageLoadMs)} icon={Clock3} tone="info" /><MetricCard label="p95 da página" value={experience.p95PageLoadMs == null ? "Coletando" : duration(experience.p95PageLoadMs)} icon={Activity} tone="warning" /><MetricCard label="Carregamentos lentos" value={String(experience.slowLoads)} period="3s ou mais" icon={AlertTriangle} tone={experience.slowLoads ? "warning" : "success"} /><MetricCard label="Erros capturados" value={String(experience.errors)} icon={AlertTriangle} tone={experience.errors ? "danger" : "success"} /></section>{experience.measuredNavigations ? <section className="grid gap-4 xl:grid-cols-2"><Surface><SectionHeader title="Páginas mais lentas" description="Navigation Timing; não mistura duração de API." /><div className="mt-4 space-y-3">{experience.slowestPages.map((page) => <InfoRow key={page.label} label={page.label} value={`${duration(page.medianMs)} · ${page.samples} amostra(s)`} />)}</div></Surface><Surface><SectionHeader title="Erros recentes" description="Mensagens sanitizadas, sem stack ou conteúdo sensível." /><Timeline items={experience.recentErrors} /></Surface></section> : <Surface><EmptyState title="Medição de experiência iniciada">A base histórica não possuía duração de navegação nem erros de frontend. Mediana, p95 e taxa de sucesso aparecerão após novas navegações autenticadas.</EmptyState></Surface>}</div>;
 }
 
-function groupCount(items: string[]) {
-  const map = new Map<string, number>();
-  items.forEach((item) => map.set(item, (map.get(item) ?? 0) + 1));
-
-  return [...map.entries()]
-    .map(([label, total]) => ({ label, total }))
-    .sort((a, b) => b.total - a.total);
+function PersonCard({ person, onClick, selected = false }: { person: AdoptionPerson; onClick: () => void; selected?: boolean }) {
+  return <button type="button" onClick={onClick} className={`rounded-[var(--ds-radius-md)] border p-4 text-left shadow-[var(--ds-shadow-sm)] transition ${selected ? "border-[color:var(--ds-primary)] bg-[color:var(--ds-primary-soft)]" : "border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] hover:border-[color:var(--ds-border-strong)]"}`}><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 gap-3"><IconPill icon={UsersRound} tone={statusTone(person.status)} /><div className="min-w-0"><p className="truncate font-semibold text-[color:var(--ds-text)]">{person.name}</p><p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">{roleLabel(person.role)}</p></div></div><StatusBadge tone={statusTone(person.status)}>{statusLabel(person.status)}</StatusBadge></div><p className="mt-4 text-sm font-semibold text-[color:var(--ds-text)]">{relativeDate(person.lastAccess)}</p><div className="mt-3 grid grid-cols-3 gap-2 text-xs text-[color:var(--ds-text-secondary)]"><span><b className="block text-base text-[color:var(--ds-text)]">{person.activeDays}</b>dias ativos</span><span><b className="block text-base text-[color:var(--ds-text)]">{person.sessions}</b>sessões</span><span><b className="block text-base text-[color:var(--ds-text)]">{person.pageViews}</b>páginas</span></div><p className="mt-3 text-xs text-[color:var(--ds-text-muted)]">Mais usado: <b className="text-[color:var(--ds-text-secondary)]">{person.topModule ?? "Sem uso"}</b></p></button>;
 }
 
-export function AdocaoDashboard({
-  events,
-  diagnostic,
-  updatedAt,
-}: {
-  events: AdoptionEvent[];
-  diagnostic: string | null;
-  updatedAt: string | null;
-}) {
-  const [period, setPeriod] = useState<PeriodFilter>("all");
-  const [moduleFilter, setModuleFilter] = useState("all");
-  const [userFilter, setUserFilter] = useState("all");
-  const [activityPage, setActivityPage] = useState(1);
-
-  const modules = useMemo(() => {
-    return [...new Set(events.map((event) => event.module))].sort();
-  }, [events]);
-
-  const users = useMemo(() => {
-    return [...new Set(events.map(userLabel))].sort();
-  }, [events]);
-
-  const filteredEvents = useMemo(() => {
-    let nextEvents = applyPeriod(events, period);
-    if (moduleFilter !== "all") {
-      nextEvents = nextEvents.filter((event) => event.module === moduleFilter);
-    }
-    if (userFilter !== "all") {
-      nextEvents = nextEvents.filter((event) => userLabel(event) === userFilter);
-    }
-
-    return nextEvents;
-  }, [events, moduleFilter, period, userFilter]);
-
-  useEffect(() => {
-    setActivityPage(1);
-  }, [period, moduleFilter, userFilter]);
-
-  const totalViews = filteredEvents.length;
-  const activeUsers = new Set(filteredEvents.map(userLabel)).size;
-  const today = filteredEvents.filter((event) => new Date(event.created_at).toDateString() === new Date().toDateString()).length;
-  const moduleRows = groupCount(filteredEvents.map((event) => moduleLabels[event.module] ?? event.module));
-  const pageRows = groupCount(filteredEvents.map(pageLabel));
-  const userRows = groupCount(filteredEvents.map(userLabel));
-  const activityPageCount = Math.max(Math.ceil(filteredEvents.length / ACTIVITY_PAGE_SIZE), 1);
-  const currentActivityPage = Math.min(activityPage, activityPageCount);
-  const paginatedEvents = filteredEvents.slice(
-    (currentActivityPage - 1) * ACTIVITY_PAGE_SIZE,
-    currentActivityPage * ACTIVITY_PAGE_SIZE,
-  );
-  const activityColumns: ExportColumn<AdoptionEvent>[] = [
-    { header: "Data", value: (event) => dateTimeFormat(event.created_at) },
-    { header: "Usuario", value: (event) => userLabel(event) },
-    { header: "Modulo", value: (event) => moduleLabels[event.module] ?? event.module },
-    { header: "Pagina/Aba", value: (event) => pageLabel(event) },
-    { header: "Evento", value: (event) => event.event_name },
-  ];
-
-  return (
-    <div className="mx-auto max-w-[1500px] space-y-5 text-[15px]">
-      <header className="flex flex-col justify-between gap-3 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-xs font-bold uppercase text-brand-clay">Admin</p>
-          <h1 className="mt-1 text-2xl font-semibold text-brand-teal sm:text-3xl">Adocao da plataforma</h1>
-          <p className="mt-2 text-sm text-brand-teal/70">
-            Uso dos modulos, abas internas e paginas acessadas pelos usuarios.
-          </p>
-        </div>
-        <p className="text-xs font-semibold text-brand-teal/55">
-          Base atualizada em {dateTimeFormat(updatedAt)}
-        </p>
-      </header>
-
-      {diagnostic ? (
-        <Card className="p-5">
-          <p className="font-semibold text-brand-teal">{diagnostic}</p>
-        </Card>
-      ) : null}
-
-      <Card className="border-[#E9CBD1] bg-white/90 p-4 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-bold uppercase tracking-wide text-brand-clay">Periodo</span>
-          {periodFilters.map((item) => (
-            <PillButton key={item.value} isActive={period === item.value} onClick={() => setPeriod(item.value)}>
-              {item.label}
-            </PillButton>
-          ))}
-          <span className="mx-1 hidden h-7 w-px bg-[#E9CBD1] sm:block" />
-          <PillButton isActive={moduleFilter === "all"} onClick={() => setModuleFilter("all")}>
-            Todos modulos
-          </PillButton>
-          {modules.map((item) => (
-            <PillButton key={item} isActive={moduleFilter === item} onClick={() => setModuleFilter(item)}>
-              {moduleLabels[item] ?? item}
-            </PillButton>
-          ))}
-          <select
-            value={userFilter}
-            onChange={(event) => setUserFilter(event.target.value)}
-            className="h-9 min-w-[220px] rounded-md border border-[#E9CBD1] bg-white px-3 text-xs font-bold text-brand-teal outline-none"
-          >
-            <option value="all">Todos os usuarios</option>
-            {users.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </div>
-      </Card>
-
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric icon={<Eye className="h-5 w-5" />} label="Visualizacoes" value={totalViews} helper="no filtro aplicado" />
-        <Metric icon={<Users className="h-5 w-5" />} label="Usuarios ativos" value={activeUsers} helper="com acesso registrado" />
-        <Metric icon={<CalendarDays className="h-5 w-5" />} label="Hoje" value={today} helper="visualizacoes no dia" />
-        <Metric icon={<BarChart3 className="h-5 w-5" />} label="Modulos usados" value={moduleRows.length} helper="com algum acesso" />
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-3">
-        <RankingCard title="Modulos acessados" rows={moduleRows} />
-        <RankingCard title="Paginas acessadas" rows={pageRows} />
-        <RankingCard title="Usuarios" rows={userRows} />
-      </section>
-
-      <Card className="overflow-hidden border-[#E9CBD1] bg-white/95 shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-[#EFDDE1] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-base font-bold text-brand-teal">Atividades recentes</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-brand-clay">{numberFormat(filteredEvents.length)} acessos</span>
-            <ExportButtons
-              label="Exportar atividades recentes"
-              filename="adocao-atividades-recentes"
-              columns={activityColumns}
-              rows={filteredEvents}
-            />
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-sm">
-            <thead className="bg-[#F4DCE0] text-xs uppercase tracking-wide text-brand-clay">
-              <tr>
-                <th className="px-4 py-3">Data</th>
-                <th className="px-4 py-3">Usuario</th>
-                <th className="px-4 py-3">Modulo</th>
-                <th className="px-4 py-3">Pagina/Aba</th>
-                <th className="px-4 py-3">Evento</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#F0DDE1]">
-              {paginatedEvents.map((event) => (
-                <tr key={event.id} className="hover:bg-[#FFF7F8]">
-                  <td className="px-4 py-3 text-brand-teal/70">{dateTimeFormat(event.created_at)}</td>
-                  <td className="px-4 py-3 font-semibold text-brand-teal">{userLabel(event)}</td>
-                  <td className="px-4 py-3 text-brand-teal">{moduleLabels[event.module] ?? event.module}</td>
-                  <td className="px-4 py-3 text-brand-teal">{pageLabel(event)}</td>
-                  <td className="px-4 py-3 text-brand-teal/70">{event.event_name}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <Pagination
-          page={currentActivityPage}
-          pageCount={activityPageCount}
-          total={filteredEvents.length}
-          pageSize={ACTIVITY_PAGE_SIZE}
-          onPageChange={setActivityPage}
-        />
-      </Card>
-    </div>
-  );
+function Ranking({ title, rows, detailed = false }: { title: string; rows: AdoptionSnapshot["modules"]; detailed?: boolean }) {
+  const max = Math.max(...rows.map((row) => row.views), 1);
+  return <Surface><SectionHeader title={title} description="Contagem deduplicada por usuário, página e segundo." /><div className="mt-5 space-y-4">{rows.slice(0, detailed ? 20 : 8).map((row, index) => <div key={row.key}><div className="flex items-center justify-between gap-3 text-sm"><span className="min-w-0 truncate font-semibold text-[color:var(--ds-text)]">{index + 1}. {row.label}</span><span className="shrink-0 font-semibold text-[color:var(--ds-text-secondary)]">{row.views}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-[color:var(--ds-bg-soft)]"><div className="h-full rounded-full bg-[color:var(--ds-primary)]" style={{ width: `${Math.max(4, row.views / max * 100)}%` }} /></div>{detailed ? <p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">{row.users} usuário(s) · última utilização {relativeDate(row.lastUsedAt).toLowerCase()}</p> : null}</div>)}{!rows.length ? <EmptyState /> : null}</div></Surface>;
 }
 
-function PillButton({ children, isActive, onClick }: { children: ReactNode; isActive: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`h-9 rounded-full border px-4 text-xs font-bold transition ${
-        isActive ? "border-brand-clay bg-brand-clay text-white shadow-sm" : "border-[#E9CBD1] bg-white text-brand-teal hover:bg-[#FFF7F8]"
-      }`}
-    >
-      {children}
-    </button>
-  );
+function CompactRanking({ title, rows }: { title: string; rows: Array<{ label: string; views: number }> }) {
+  return <Surface><SectionHeader title={title} /><div className="mt-4 space-y-2">{rows.map((row, index) => <InfoRow key={`${row.label}-${index}`} label={`${index + 1}. ${row.label}`} value={`${row.views} acesso(s)`} />)}{!rows.length ? <EmptyState title="Sem uso no período" /> : null}</div></Surface>;
 }
 
-function Pagination({
-  page,
-  pageCount,
-  total,
-  pageSize,
-  onPageChange,
-}: {
-  page: number;
-  pageCount: number;
-  total: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-}) {
-  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, total);
-
-  return (
-    <div className="flex flex-col gap-3 border-t border-[#EFDDE1] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-xs font-bold text-brand-teal/60">
-        Exibindo {start}-{end} de {numberFormat(total)}
-      </p>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onPageChange(Math.max(page - 1, 1))}
-          disabled={page <= 1}
-          className="h-9 rounded-md border border-[#E9CBD1] bg-white px-3 text-xs font-bold text-brand-teal disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          Anterior
-        </button>
-        <span className="text-xs font-bold text-brand-teal/60">
-          Pagina {page} de {pageCount}
-        </span>
-        <button
-          type="button"
-          onClick={() => onPageChange(Math.min(page + 1, pageCount))}
-          disabled={page >= pageCount}
-          className="h-9 rounded-md border border-[#E9CBD1] bg-white px-3 text-xs font-bold text-brand-teal disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          Proxima
-        </button>
-      </div>
-    </div>
-  );
+function ActivityBars({ snapshot }: { snapshot: AdoptionSnapshot }) {
+  const width = 520;
+  const height = 190;
+  const values = snapshot.daily.map((day) => day.pageViews);
+  const max = Math.max(...values, 1);
+  const path = snapshot.daily.map((day, index) => {
+    const x = snapshot.daily.length === 1 ? 0 : index / (snapshot.daily.length - 1) * width;
+    const y = height - day.pageViews / max * (height - 24) - 12;
+    return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const area = `${path} L${width},${height} L0,${height} Z`;
+  const lastY = height - (values.at(-1) ?? 0) / max * (height - 24) - 12;
+  return <div className="mt-5"><svg className="h-48 w-full overflow-visible" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Evolução de page views em ${snapshot.periodLabel.toLowerCase()}`}><defs><linearGradient id="adoptionLine" x1="0" x2="1" y1="0" y2="0"><stop offset="0%" stopColor="#f59e0b" /><stop offset="45%" stopColor="#d62976" /><stop offset="100%" stopColor="#4f5bd5" /></linearGradient><linearGradient id="adoptionArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#d62976" stopOpacity="0.18" /><stop offset="100%" stopColor="#d62976" stopOpacity="0" /></linearGradient></defs><path d={area} fill="url(#adoptionArea)" /><path d={path} fill="none" stroke="url(#adoptionLine)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" /><circle cx={width} cy={lastY} r="5" fill="#d62976" /></svg><div className="mt-2 flex justify-between text-xs text-[color:var(--ds-text-muted)]"><span>{shortDate(snapshot.daily[0]?.date)}</span><span>{shortDate(snapshot.daily.at(-1)?.date)}</span></div></div>;
 }
 
-function Metric({ icon, label, value, helper }: { icon: ReactNode; label: string; value: number; helper: string }) {
-  return (
-    <Card className="border-[#E9CBD1] bg-white/95 p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-brand-clay/70">{label}</p>
-          <p className="mt-2 text-3xl font-black text-brand-teal">{numberFormat(value)}</p>
-          <p className="mt-1 text-xs text-brand-teal/55">{helper}</p>
-        </div>
-        <span className="flex h-10 w-10 items-center justify-center rounded-md bg-[#FFF7F8] text-brand-clay">
-          {icon}
-        </span>
-      </div>
-    </Card>
-  );
-}
-
-function RankingCard({ title, rows }: { title: string; rows: Array<{ label: string; total: number }> }) {
-  const max = Math.max(...rows.map((row) => row.total), 1);
-
-  return (
-    <Card className="border-[#E9CBD1] bg-white/95 p-5 shadow-sm">
-      <h2 className="text-base font-bold text-brand-teal">{title}</h2>
-      <div className="mt-4 space-y-3">
-        {rows.slice(0, 8).map((row) => (
-          <div key={row.label}>
-            <div className="flex justify-between gap-3 text-sm font-semibold text-brand-teal">
-              <span className="truncate">{row.label}</span>
-              <span>{numberFormat(row.total)}</span>
-            </div>
-            <div className="mt-1 h-2 rounded-full bg-[#F0D6DB]">
-              <div className="h-full rounded-full bg-brand-clay" style={{ width: `${Math.max((row.total / max) * 100, 6)}%` }} />
-            </div>
-          </div>
-        ))}
-        {rows.length === 0 ? <p className="text-sm text-brand-teal/70">Sem eventos registrados ainda.</p> : null}
-      </div>
-    </Card>
-  );
-}
+function Timeline({ items }: { items: AdoptionSnapshot["recentActivity"] }) { return <div className="mt-4 divide-y divide-[color:var(--ds-border)]">{items.slice(0, 20).map((item) => <div key={item.id} className="grid gap-1 py-3 text-sm sm:grid-cols-[120px_160px_1fr]"><span className="text-[color:var(--ds-text-muted)]">{dateTime(item.createdAt)}</span><span className="font-semibold text-[color:var(--ds-text)]">{item.userName}</span><span className="text-[color:var(--ds-text-secondary)]">{eventLabel(item.eventName)} · {item.pageLabel}</span></div>)}{!items.length ? <EmptyState title="Sem atividade no período" /> : null}</div>; }
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button type="button" onClick={onClick} className={`min-h-10 rounded-full border px-4 text-sm font-semibold transition ${active ? "border-[color:var(--ds-primary)] bg-[color:var(--ds-primary)] text-white" : "border-[color:var(--ds-border)] bg-white text-[color:var(--ds-text-secondary)] hover:bg-[color:var(--ds-bg-soft)]"}`}>{children}</button>; }
+function InfoRow({ label, value }: { label: string; value: string }) { return <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius-md)] bg-[color:var(--ds-bg-soft)] p-3 text-sm"><span className="font-semibold text-[color:var(--ds-text)]">{label}</span><span className="text-[color:var(--ds-text-secondary)]">{value}</span></div>; }
+function formatNumber(value: number) { return new Intl.NumberFormat("pt-BR").format(value); }
+function duration(value: number) { return value >= 1000 ? `${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}s` : `${value}ms`; }
+function dateTime(value: string) { return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(value)); }
+function shortDate(value?: string) { return value ? value.split("-").reverse().slice(0, 2).join("/") : "-"; }
+function relativeDate(value: string | null) { if (!value) return "Sem atividade recente"; const date = new Date(value); const day = localDay(date); const today = localDay(new Date()); const yesterdayDate = new Date(); yesterdayDate.setDate(yesterdayDate.getDate() - 1); const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(date); if (day === today) return `Hoje, ${time}`; if (day === localDay(yesterdayDate)) return `Ontem, ${time}`; return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(date); }
+function localDay(value: Date) { return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(value); }
+function statusTone(status: AdoptionPerson["status"]): "success" | "warning" | "neutral" { return status === "recent" ? "success" : status === "low" ? "warning" : "neutral"; }
+function statusLabel(status: AdoptionPerson["status"]) { return status === "recent" ? "Ativo recentemente" : status === "low" ? "Pouco ativo" : "Sem atividade recente"; }
+function roleLabel(role: string | null) { const labels: Record<string, string> = { ADMIN: "Admin", ESPECIALISTA: "Especialista", OPERACIONAL: "Operacional", SUPORTE: "Suporte" }; return role ? labels[role] ?? role : "Perfil não identificado"; }
+function eventLabel(event: string) { const labels: Record<string, string> = { page_view: "abriu", create: "criou", update: "atualizou", approve: "aprovou", delete: "excluiu", send: "enviou", run: "executou", search: "pesquisou", export: "exportou", error: "erro" }; return labels[event] ?? event; }

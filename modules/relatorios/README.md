@@ -83,6 +83,8 @@ Importe o arquivo:
 
 O workflow roda a cada 15 minutos, calcula o horario de Sao Paulo, pergunta para a plataforma quais reports estao previstos naquele horario e envia por Telegram.
 
+O node de envio deve manter `parse_mode` como `HTML`. A plataforma escapa o conteudo dinamico e usa a mesma composicao no preview, no envio imediato e no payload agendado.
+
 Se o mesmo report ja foi preparado ou enviado no dia, a plataforma nao duplica.
 
 ## Envio imediato

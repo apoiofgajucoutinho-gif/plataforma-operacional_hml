@@ -1,6 +1,7 @@
 import type { InstagramFollowerDailyMetric, InstagramFollowerGrowthSummary, InstagramInteraction, InstagramPostMetric } from "@/modules/instagram/types";
 import type { ContentCaptureStatus } from "./content-capture-status";
 import type { LandingApprovalSummary } from "@/modules/landing-pages/types";
+import type { AdoptionSnapshot } from "@/modules/adocao/types";
 
 export type NorwynCommercialSale = {
   id: string;
@@ -1078,6 +1079,7 @@ export type NorwynLifecycleInternalTestContact = {
 };
 
 export type NorwynContext = {
+  adoptionSummary?: AdoptionSnapshot | null;
   role?: string | null;
   user: { id: string; email: string | null; name: string | null; preferredName: string | null } | null;
   tenant: { id: string; nome: string } | null;

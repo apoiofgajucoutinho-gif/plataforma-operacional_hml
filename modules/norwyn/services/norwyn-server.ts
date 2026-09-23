@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
 import type { NorwynContext } from "@/modules/norwyn/types";
 import { getSpecialistLandingApprovalsForHome } from "@/modules/landing-pages/services/landing-pages-server";
+import { getCachedAdoptionAnalytics } from "@/modules/adocao/services/adoption-analytics";
 const commercialSalesSelect = "id, transaction_id, produto_id, hotmart_product_id, produto_nome, comprador_nome, comprador_email, status_original, status_normalizado, grupo_comercial, commercial_transaction, sale_confirmed, revenue_eligible, student_eligible, sale_comparable, event_class, forma_pagamento, moeda, valor_bruto, data_compra, data_aprovacao, data_reembolso, source_sck, imported_at, last_event_at, metadata";
 
 type SupabaseResult<T = any> = { data: T[] | null; error: any; pagination?: { pageSize: number; pages: number; rows: number } };
@@ -121,6 +122,7 @@ function emptyContext(partial?: Partial<NorwynContext>): NorwynContext {
     manychatSummary: null,
     telegramSchedules: [],
     telegramSends: [],
+    adoptionSummary: null,
     ...partial,
   };
 }
@@ -167,6 +169,10 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       diagnostic: "Seu perfil nao possui acesso ao modulo Norwyn.",
     });
   }
+
+  const adoptionPromise = membership.role === "ADMIN"
+    ? getCachedAdoptionAnalytics(dataClient, membership.tenant_id).then((analytics) => analytics.snapshots["30d"]).catch(() => null)
+    : Promise.resolve(null);
 
   const { data: tenant } = await dataClient
     .from("tenants")
@@ -651,6 +657,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
     },
     tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
     allowedModules,
+    adoptionSummary: await adoptionPromise,
     diagnostic: null,
     updatedAt,
     posts,

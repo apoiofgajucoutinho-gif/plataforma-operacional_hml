@@ -3,6 +3,7 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getCachedAdoptionAnalytics } from "@/modules/adocao/services/adoption-analytics";
 
 export async function getAdocaoContext() {
   const userClient = await createClient();
@@ -32,7 +33,8 @@ export async function getAdocaoContext() {
     return {
       allowedModules: [],
       tenant: null,
-      events: [],
+      analytics: null,
+      role: null,
       updatedAt: null,
       diagnostic: "Nenhum tenant ativo encontrado para este usuario.",
     };
@@ -44,7 +46,8 @@ export async function getAdocaoContext() {
     return {
       allowedModules,
       tenant: null,
-      events: [],
+      analytics: null,
+      role: membership.role,
       updatedAt: null,
       diagnostic: "Seu perfil nao possui acesso ao modulo Adocao.",
     };
@@ -56,25 +59,14 @@ export async function getAdocaoContext() {
     .eq("id", membership.tenant_id)
     .maybeSingle();
 
-  const { data: events } = await dataClient
-    .from("adoption_events")
-    .select("id, module, page_path, event_name, user_id, metadata, created_at")
-    .eq("tenant_id", membership.tenant_id)
-    .gte("created_at", new Date(Date.now() - 1000 * 60 * 60 * 24 * 365).toISOString())
-    .order("created_at", { ascending: false })
-    .limit(2000);
-
-  const updatedAt =
-    events?.reduce<string | null>((latest, event) => {
-      if (!latest || event.created_at > latest) return event.created_at;
-      return latest;
-    }, null) ?? null;
+  const analytics = await getCachedAdoptionAnalytics(dataClient, membership.tenant_id);
 
   return {
     allowedModules,
     tenant,
-    events: events ?? [],
-    updatedAt,
+    analytics,
+    role: membership.role,
+    updatedAt: analytics.updatedAt,
     diagnostic: null,
   };
 }

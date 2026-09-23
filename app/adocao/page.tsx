@@ -8,9 +8,9 @@ export default async function AdocaoPage() {
   const context = await getAdocaoContext();
 
   return (
-    <AppShell activeItem="adocao" allowedItems={context.allowedModules}>
+    <AppShell activeItem="adocao" allowedItems={context.allowedModules} role={context.role}>
       <AdocaoDashboard
-        events={context.events}
+        analytics={context.analytics}
         diagnostic={context.diagnostic}
         updatedAt={context.updatedAt}
       />

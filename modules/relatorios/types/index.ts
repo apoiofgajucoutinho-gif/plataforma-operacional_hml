@@ -57,6 +57,7 @@ export type RelatorioBlocoKey =
   | "atividades"
   | "financeiro"
   | "aluno_360"
+  | "adocao"
   | "recomendacoes";
 
 export type RelatorioBlocoConfig = {
@@ -74,6 +75,9 @@ export type RelatorioFiltros = {
   periodo?: RelatorioPeriodo;
   produto_id?: string | null;
   customer_ids?: string[];
+  adoption_user_id?: string | null;
+  adoption_role?: string | null;
+  adoption_sections?: Array<"access" | "active_days" | "sessions" | "pages" | "modules" | "actions" | "experience" | "errors">;
   include_recommendation?: boolean;
   blocos?: Partial<Record<RelatorioBlocoKey | string, RelatorioBlocoConfig>>;
 };
@@ -157,5 +161,6 @@ export type RelatoriosContext = {
   agendamentos: RelatorioAgendamento[];
   envios: RelatorioEnvio[];
   enviosTotal: number;
+  adoptionPeople: Array<{ userId: string; name: string; role: string | null }>;
   updatedAt: string | null;
 };

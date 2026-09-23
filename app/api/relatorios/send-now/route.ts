@@ -12,12 +12,9 @@ function normalizeTelegramError(errorText: string) {
 async function sendTelegramMessage(chatId: string, text: string) {
   if (!env.telegramBotToken) throw new Error("TELEGRAM_BOT_TOKEN nao configurado na Vercel.");
   const url = `https://api.telegram.org/bot${env.telegramBotToken}/sendMessage`;
-  const baseBody = { chat_id: chatId, text, disable_web_page_preview: true };
-  const markdownResponse = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...baseBody, parse_mode: "Markdown" }) });
-  if (markdownResponse.ok) return markdownResponse.json();
-  const plainResponse = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(baseBody) });
-  if (!plainResponse.ok) throw new Error(normalizeTelegramError(await plainResponse.text()));
-  return plainResponse.json();
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: true }) });
+  if (!response.ok) throw new Error(normalizeTelegramError(await response.text()));
+  return response.json();
 }
 
 export async function POST(request: Request) {

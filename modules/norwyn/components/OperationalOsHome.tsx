@@ -461,6 +461,8 @@ function JulianaHome({ snapshot, context, periodRange, goTo }: { snapshot: Retur
         <ExecutiveNumber icon={WalletCards} tone="gold" label="Resultado estimado" value={finance.estimated == null ? "Dados incompletos" : money(finance.estimated)} meta={finance.estimated == null ? "comparação indisponível" : "estimativa do período"} period={periodRange.label} />
       </section>
 
+      {context.role === "ADMIN" && context.adoptionSummary ? <AdoptionHomeCard snapshot={context.adoptionSummary} /> : null}
+
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <InstagramSpotlight instagram={instagram} />
         <Surface className="space-y-4 p-5 sm:p-6">
@@ -582,6 +584,34 @@ function RyanHome({ snapshot }: { snapshot: ReturnType<typeof buildOperationalOs
       </section>
     </div>
   );
+}
+
+function AdoptionHomeCard({ snapshot }: { snapshot: NonNullable<NorwynContext["adoptionSummary"]> }) {
+  const priorityPeople = [snapshot.people.find((person) => /\b(ju|juliana)\b/i.test(person.name)), snapshot.people.find((person) => /ryan/i.test(person.name))].filter((person): person is NonNullable<typeof person> => Boolean(person));
+  const people = priorityPeople.length ? priorityPeople : snapshot.people.slice(0, 2);
+  const experienceLabel = snapshot.experience.measuredNavigations
+    ? snapshot.errors || snapshot.experience.slowLoads ? "Requer atenção" : "Estável"
+    : "Medição iniciada";
+  return <Surface className="space-y-5 p-5 sm:p-6">
+    <DsSectionHeader eyebrow="Admin" title="Adoção" description="Quem está usando e como a experiência está respondendo." action={<ActionLink href="/adocao">Ver Adoção</ActionLink>} />
+    <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+      <div className="grid gap-3 sm:grid-cols-2">{people.map((person) => <div key={person.userId} className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4"><div className="flex items-center justify-between gap-2"><p className="font-semibold text-[color:var(--ds-text)]">{person.name}</p><StatusBadge tone={person.status === "recent" ? "success" : person.status === "low" ? "warning" : "neutral"}>{person.status === "recent" ? "Recente" : person.status === "low" ? "Pouco ativo" : "Sem atividade"}</StatusBadge></div><p className="mt-3 text-sm font-semibold text-[color:var(--ds-text-secondary)]">{adoptionRelativeDate(person.lastAccess)}</p><p className="mt-2 text-xs text-[color:var(--ds-text-muted)]">{person.activeDays} dia(s) ativos · {person.sessions} sessão(ões)</p><p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">Mais usado: {person.topModule ?? "Sem uso"}</p></div>)}</div>
+      <div className="grid gap-3 sm:grid-cols-2"><MiniDomainCard icon={UsersRound} tone="blue" label="30 dias" value={`${snapshot.sessions} sessões`} detail={`${snapshot.pageViews} page views · ${snapshot.modulesUsed} módulos`} /><MiniDomainCard icon={ShieldCheck} tone={snapshot.errors ? "coral" : "green"} label="Experiência" value={experienceLabel} detail={snapshot.experience.measuredNavigations ? `${snapshot.errors} erro(s) · ${snapshot.experience.slowLoads} lento(s)` : "coleta de performance iniciada"} /></div>
+    </div>
+  </Surface>;
+}
+
+function adoptionRelativeDate(value: string | null) {
+  if (!value) return "Sem atividade recente";
+  const date = new Date(value);
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" });
+  const day = formatter.format(date);
+  const today = formatter.format(new Date());
+  const yesterdayDate = new Date(); yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  const time = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(date);
+  if (day === today) return `Hoje, ${time}`;
+  if (day === formatter.format(yesterdayDate)) return `Ontem, ${time}`;
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
 function Product360Panel({ products, selected, selectedId, setSelectedId }: { products: Product360[]; selected: Product360 | null; selectedId: string; setSelectedId: (id: string) => void }) {

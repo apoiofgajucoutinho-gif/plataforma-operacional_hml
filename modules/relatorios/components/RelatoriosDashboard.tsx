@@ -5,6 +5,7 @@ import type { FormEvent, ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   Bell,
   CalendarClock,
   CheckCircle2,
@@ -30,6 +31,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
+import { formatTelegramDateTime, telegramGreetingHeader } from "@/modules/relatorios/utils/telegram-format";
 import type {
   RelatorioAgendamento,
   RelatorioCanal,
@@ -47,6 +49,15 @@ type TabKey = "overview" | "schedules" | "compose" | "history" | "destinations";
 type StepKey = "content" | "filters" | "recipient" | "when";
 type ComposeMode = "now" | "schedule";
 type StudentOption = { customer_id: string; name: string | null; email: string | null };
+
+function trackReportAction(eventName: "create" | "update" | "delete" | "send" | "run", entity: string, entityId?: string) {
+  void fetch("/api/adoption/track", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ module: "relatorios", pagePath: "/relatorios", pageLabel: "Relatórios", eventName, entity, entityId, outcome: "success" }),
+    keepalive: true,
+  }).catch(() => undefined);
+}
 
 type DraftSchedule = {
   destinatario_id: string;
@@ -145,6 +156,22 @@ const periodLabels: Record<string, string> = {
   ano_atual: "Ano atual",
   pendentes: "Pendentes",
 };
+const adoptionPeriodLabels: Partial<Record<RelatorioPeriodo, string>> = {
+  ultimos_7d: "Últimos 7 dias",
+  ultimos_15d: "Últimos 15 dias",
+  ultimos_30d: "Últimos 30 dias",
+  ultimos_90d: "Últimos 90 dias",
+};
+const adoptionSections: Array<[NonNullable<RelatorioFiltros["adoption_sections"]>[number], string]> = [
+  ["access", "Últimos acessos"],
+  ["active_days", "Dias ativos"],
+  ["sessions", "Sessões"],
+  ["pages", "Páginas mais acessadas"],
+  ["modules", "Módulos mais usados"],
+  ["actions", "Ações recentes"],
+  ["experience", "Experiência"],
+  ["errors", "Erros"],
+];
 
 const blockOptions: Array<{ key: string; label: string; helper: string; icon: ReactNode; defaultPeriod: RelatorioPeriodo }> = [
   { key: "agenda", label: "Agenda", helper: "Hoje, amanha e proximos dias", icon: <CalendarClock className="h-4 w-4" />, defaultPeriod: "hoje" },
@@ -155,6 +182,7 @@ const blockOptions: Array<{ key: string; label: string; helper: string; icon: Re
   { key: "comercial", label: "Comercial", helper: "Vendas confirmadas e receita validada", icon: <FileText className="h-4 w-4" />, defaultPeriod: "ultimos_30d" },
   { key: "interacoes", label: "Interacoes", helper: "Comentarios, directs e suporte", icon: <UserRound className="h-4 w-4" />, defaultPeriod: "ultimos_30d" },
   { key: "aluno_360", label: "Aluno 360", helper: "Aluno especifico ou lista selecionada", icon: <UserRound className="h-4 w-4" />, defaultPeriod: "ultimos_30d" },
+  { key: "adocao", label: "Adoção", helper: "Uso da plataforma, últimos acessos e experiência", icon: <BarChart3 className="h-4 w-4" />, defaultPeriod: "ultimos_30d" },
   { key: "recomendacoes", label: "Recomendacao Norwyn", helper: "Leitura executiva curta", icon: <Bell className="h-4 w-4" />, defaultPeriod: "hoje" },
 ];
 
@@ -165,6 +193,7 @@ const defaultFilters: RelatorioFiltros = {
   antecedencia_minutos: 60,
   include_recommendation: true,
   customer_ids: [],
+  adoption_sections: adoptionSections.map(([key]) => key),
   blocos: {
     agenda: { enabled: true, periodo: "hoje", empty_behavior: "show_empty" },
     decisoes: { enabled: true, periodo: "pendentes", empty_behavior: "omit" },
@@ -174,6 +203,7 @@ const defaultFilters: RelatorioFiltros = {
     comercial: { enabled: true, periodo: "ultimos_30d", empty_behavior: "omit" },
     interacoes: { enabled: true, periodo: "ultimos_30d", empty_behavior: "omit" },
     aluno_360: { enabled: false, periodo: "ultimos_30d", empty_behavior: "omit" },
+    adocao: { enabled: false, periodo: "ultimos_30d", empty_behavior: "omit" },
     recomendacoes: { enabled: true, periodo: "hoje", empty_behavior: "omit" },
   },
 };
@@ -396,6 +426,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     const response = await fetch("/api/relatorios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity, action: id ? "update" : "create", id, payload }) });
     const result = await response.json();
     if (!response.ok) { setMessage(result.error ?? "Nao foi possivel salvar."); return null; }
+    trackReportAction(id ? "update" : "create", entity, result.data?.id);
     setMessage("Registro salvo.");
     return result.data;
   }
@@ -429,6 +460,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     setSendingId(null);
     if (!response.ok) { setMessage(result.error ?? "Nao foi possivel enviar agora."); return; }
     if (result.data) setEnvios((items) => [result.data, ...items]);
+    trackReportAction("send", "relatorio_envio", result.data?.id);
     const destination = recipientName(scheduleForm.destinatario_id, destinatarios);
     const timestamp = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date());
     setMessage(`Relatorio enviado para ${destination} as ${timestamp}.`);
@@ -460,6 +492,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     if (!response.ok) { setMessage(result.error ?? "Nao foi possivel excluir."); return; }
     if (entity === "destinatario") setDestinatarios((items) => items.filter((item) => item.id !== id));
     else setAgendamentos((items) => items.filter((item) => item.id !== id));
+    trackReportAction("delete", entity, id);
     setMessage("Registro excluido.");
   }
 
@@ -471,6 +504,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     setSendingId(null);
     if (!response.ok) { setMessage(result.error ?? "Nao foi possivel enviar agora."); return; }
     if (result.data) setEnvios((items) => [result.data, ...items]);
+    trackReportAction("send", "relatorio_envio", result.data?.id);
     setMessage("Relatorio enviado no Telegram.");
   }
 
@@ -484,6 +518,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     setPreviewingId(null);
     if (!response.ok) { if (!options.silent) setMessage(result.error ?? "Nao foi possivel gerar preview real."); return; }
     setApiPreview(result.preview?.text ?? null);
+    if (!options.silent) trackReportAction("run", "relatorio_preview");
     if (!options.silent) setMessage(result.preview?.summary ?? "Pre-visualizacao atualizada com dados reais.");
   }
 
@@ -558,7 +593,7 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
       ) : null}
 
       {activeTab === "compose" ? (
-        <ComposeTab mode={composeMode} onModeChange={changeComposeMode} steps={composeSteps} activeStep={activeStep} onStepChange={goToStep} onMoveStep={moveStep} scheduleForm={scheduleForm} setScheduleForm={setScheduleForm} destinatarios={destinatarios} selectedBlocks={selectedBlocks} setBlock={setBlock} setFilterPatch={setFilterPatch} mergedFilters={mergedFilters} previewText={previewText} canWrite={canWrite} editingScheduleId={editingScheduleId} previewingId={previewingId} sendingId={sendingId} fieldErrors={fieldErrors} studentQuery={studentQuery} setStudentQuery={setStudentQuery} studentResults={studentResults} selectedStudents={selectedStudents} searchingStudents={searchingStudents} onSelectStudent={selectStudent} onRemoveStudent={removeStudent} onPreview={() => previewSchedule()} onSave={saveSchedule} onSendNow={sendDraftNow} onCancel={() => { setEditingScheduleId(null); setScheduleForm(initialSchedule); setSelectedStudents([]); setApiPreview(null); setFieldErrors({}); }} />
+        <ComposeTab mode={composeMode} onModeChange={changeComposeMode} steps={composeSteps} activeStep={activeStep} onStepChange={goToStep} onMoveStep={moveStep} scheduleForm={scheduleForm} setScheduleForm={setScheduleForm} destinatarios={destinatarios} adoptionPeople={context.adoptionPeople} selectedBlocks={selectedBlocks} setBlock={setBlock} setFilterPatch={setFilterPatch} mergedFilters={mergedFilters} previewText={previewText} canWrite={canWrite} editingScheduleId={editingScheduleId} previewingId={previewingId} sendingId={sendingId} fieldErrors={fieldErrors} studentQuery={studentQuery} setStudentQuery={setStudentQuery} studentResults={studentResults} selectedStudents={selectedStudents} searchingStudents={searchingStudents} onSelectStudent={selectStudent} onRemoveStudent={removeStudent} onPreview={() => previewSchedule()} onSave={saveSchedule} onSendNow={sendDraftNow} onCancel={() => { setEditingScheduleId(null); setScheduleForm(initialSchedule); setSelectedStudents([]); setApiPreview(null); setFieldErrors({}); }} />
       ) : null}
 
       {activeTab === "history" ? (
@@ -669,7 +704,7 @@ function SchedulesTab({ agendamentos, destinatarios, sendingId, canWrite, onCrea
   );
 }
 
-function ComposeTab({ mode, onModeChange, steps, activeStep, onStepChange, onMoveStep, scheduleForm, setScheduleForm, destinatarios, selectedBlocks, setBlock, setFilterPatch, mergedFilters, previewText, canWrite, editingScheduleId, previewingId, sendingId, fieldErrors, studentQuery, setStudentQuery, studentResults, selectedStudents, searchingStudents, onSelectStudent, onRemoveStudent, onPreview, onSave, onSendNow, onCancel }: { mode: ComposeMode; onModeChange: (mode: ComposeMode) => void; steps: Array<{ key: StepKey; label: string }>; activeStep: StepKey; onStepChange: (step: StepKey) => void; onMoveStep: (direction: -1 | 1) => void; scheduleForm: DraftSchedule; setScheduleForm: React.Dispatch<React.SetStateAction<DraftSchedule>>; destinatarios: RelatorioDestinatario[]; selectedBlocks: string[]; setBlock: (key: string, patch: Partial<{ enabled: boolean; periodo: RelatorioPeriodo; empty_behavior: "omit" | "show_empty" }>) => void; setFilterPatch: (patch: Partial<RelatorioFiltros>) => void; mergedFilters: () => RelatorioFiltros; previewText: string; canWrite: boolean; editingScheduleId: string | null; previewingId: string | null; sendingId: string | null; fieldErrors: Partial<Record<StepKey, string>>; studentQuery: string; setStudentQuery: (value: string) => void; studentResults: StudentOption[]; selectedStudents: StudentOption[]; searchingStudents: boolean; onSelectStudent: (student: StudentOption) => void; onRemoveStudent: (customerId: string) => void; onPreview: () => void; onSave: (event?: FormEvent<HTMLFormElement>) => Promise<RelatorioAgendamento | null>; onSendNow: () => void; onCancel: () => void; }) {
+function ComposeTab({ mode, onModeChange, steps, activeStep, onStepChange, onMoveStep, scheduleForm, setScheduleForm, destinatarios, adoptionPeople, selectedBlocks, setBlock, setFilterPatch, mergedFilters, previewText, canWrite, editingScheduleId, previewingId, sendingId, fieldErrors, studentQuery, setStudentQuery, studentResults, selectedStudents, searchingStudents, onSelectStudent, onRemoveStudent, onPreview, onSave, onSendNow, onCancel }: { mode: ComposeMode; onModeChange: (mode: ComposeMode) => void; steps: Array<{ key: StepKey; label: string }>; activeStep: StepKey; onStepChange: (step: StepKey) => void; onMoveStep: (direction: -1 | 1) => void; scheduleForm: DraftSchedule; setScheduleForm: React.Dispatch<React.SetStateAction<DraftSchedule>>; destinatarios: RelatorioDestinatario[]; adoptionPeople: RelatoriosContext["adoptionPeople"]; selectedBlocks: string[]; setBlock: (key: string, patch: Partial<{ enabled: boolean; periodo: RelatorioPeriodo; empty_behavior: "omit" | "show_empty" }>) => void; setFilterPatch: (patch: Partial<RelatorioFiltros>) => void; mergedFilters: () => RelatorioFiltros; previewText: string; canWrite: boolean; editingScheduleId: string | null; previewingId: string | null; sendingId: string | null; fieldErrors: Partial<Record<StepKey, string>>; studentQuery: string; setStudentQuery: (value: string) => void; studentResults: StudentOption[]; selectedStudents: StudentOption[]; searchingStudents: boolean; onSelectStudent: (student: StudentOption) => void; onRemoveStudent: (customerId: string) => void; onPreview: () => void; onSave: (event?: FormEvent<HTMLFormElement>) => Promise<RelatorioAgendamento | null>; onSendNow: () => void; onCancel: () => void; }) {
   const filters = mergedFilters();
   const currentIndex = steps.findIndex((step) => step.key === activeStep);
   const isLastStep = currentIndex === steps.length - 1;
@@ -725,9 +760,25 @@ function ComposeTab({ mode, onModeChange, steps, activeStep, onStepChange, onMov
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               {selectedBlocks.map((key) => (
-                <Field key={key} label={`Periodo · ${blockLabel(key)}`}><select value={filters.blocos?.[key]?.periodo ?? "hoje"} onChange={(e) => setBlock(key, { periodo: e.target.value as RelatorioPeriodo })} className="input-like min-h-12 text-[15px]">{Object.entries(periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+                <Field key={key} label={`Periodo · ${blockLabel(key)}`}><select value={filters.blocos?.[key]?.periodo ?? "hoje"} onChange={(e) => setBlock(key, { periodo: e.target.value as RelatorioPeriodo })} className="input-like min-h-12 text-[15px]">{Object.entries(key === "adocao" ? adoptionPeriodLabels : periodLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
               ))}
             </div>
+            {selectedBlocks.includes("adocao") ? (
+              <div className="rounded-[22px] border border-[color:var(--ds-border)] bg-[color:var(--ds-bg-soft)] p-5">
+                <p className="text-base font-black text-brand-teal">Configuração de Adoção</p>
+                <p className="mt-1 text-sm font-semibold text-brand-teal/65">Escolha uma pessoa ou perfil; sem filtro, o relatório considera todos do tenant.</p>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <Field label="Pessoa"><select value={filters.adoption_user_id ?? ""} onChange={(event) => setFilterPatch({ adoption_user_id: event.target.value || null })} className="input-like min-h-12 text-[15px]"><option value="">Todas as pessoas</option>{adoptionPeople.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}</select></Field>
+                  <Field label="Perfil"><select value={filters.adoption_role ?? ""} onChange={(event) => setFilterPatch({ adoption_role: event.target.value || null })} className="input-like min-h-12 text-[15px]"><option value="">Todos os perfis</option>{[...new Set(adoptionPeople.map((person) => person.role).filter(Boolean))].map((role) => <option key={role} value={role ?? ""}>{role}</option>)}</select></Field>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {adoptionSections.map(([key, label]) => {
+                    const selected = (filters.adoption_sections ?? []).includes(key);
+                    return <button key={key} type="button" onClick={() => setFilterPatch({ adoption_sections: selected ? (filters.adoption_sections ?? []).filter((item) => item !== key) : [...(filters.adoption_sections ?? []), key] })} className={`rounded-full border px-3 py-2 text-xs font-black ${selected ? "border-sky-200 bg-sky-100 text-sky-800" : "border-[color:var(--ds-border)] bg-white text-brand-teal/65"}`}>{label}</button>;
+                  })}
+                </div>
+              </div>
+            ) : null}
             {selectedBlocks.includes("aluno_360") ? (
               <div className="rounded-[22px] border border-[color:var(--ds-border)] bg-[color:var(--ds-bg-soft)] p-5">
                 <p className="text-base font-black text-brand-teal">Buscar aluno</p>
@@ -933,17 +984,21 @@ function TelegramPreview({ text }: { text: string }) {
 function renderTelegramText(text: string) {
   return text.split("\n").map((line, index) => (
     <div key={index} className={line ? undefined : "h-4"}>
-      {line ? renderMarkdownLine(line) : null}
+      {line ? renderTelegramHtmlLine(line) : null}
     </div>
   ));
 }
 
-function renderMarkdownLine(line: string) {
-  const parts = line.split(/(\*[^*]+\*)/g).filter(Boolean);
+function renderTelegramHtmlLine(line: string) {
+  const parts = line.split(/(<b>.*?<\/b>)/g).filter(Boolean);
   return parts.map((part, index) => {
-    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) return <strong key={index} className="font-black text-white">{part.slice(1, -1)}</strong>;
-    return <span key={index}>{part}</span>;
+    if (part.startsWith("<b>") && part.endsWith("</b>")) return <strong key={index} className="font-black text-white">{decodeTelegramHtml(part.slice(3, -4))}</strong>;
+    return <span key={index}>{decodeTelegramHtml(part)}</span>;
   });
+}
+
+function decodeTelegramHtml(value: string) {
+  return value.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
 function EmptyState({ text }: { text: string }) {
@@ -962,10 +1017,12 @@ function buildPreview(form: DraftSchedule, destinatarios: RelatorioDestinatario[
   const filters = { ...defaultFilters, ...(form.filtros ?? {}), blocos: { ...defaultFilters.blocos, ...(form.filtros?.blocos ?? {}) } };
   const selected = Object.entries(filters.blocos ?? {}).filter(([, config]) => config?.enabled).map(([key]) => key);
   const recipient = recipientName(form.destinatario_id, destinatarios);
+  const destination = destinatarios.find((item) => item.id === form.destinatario_id);
   const lines: string[] = [];
-  if (form.tipo_resumo === "aluno_360") lines.push("👤 Aluno 360 — Norwyn");
-  else lines.push("☀️ Bom dia — Norwyn");
-  lines.push(`📅 ${new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date())}`);
+  const now = new Date();
+  if (form.tipo_resumo === "aluno_360") lines.push("👤 <b>Aluno 360 — Norwyn</b>");
+  else lines.push(telegramGreetingHeader(now, destination?.tipo_destino === "individual" ? destination.nome : null));
+  lines.push(`📅 ${formatTelegramDateTime(now)}`);
   if (recipient !== "Destino nao definido") lines.push(`Para: ${recipient}`);
   lines.push("");
   for (const key of selected) {
@@ -981,6 +1038,7 @@ function buildPreview(form: DraftSchedule, destinatarios: RelatorioDestinatario[
       const count = filters.customer_ids?.length ?? 0;
       lines.push("👤 Aluno 360", count ? `• ${count} aluno(s) selecionado(s)` : "• Selecione um ou mais alunos para gerar o bloco", "");
     }
+    if (key === "adocao") lines.push("📊 <b>Adoção</b>", "Últimos acessos, dias ativos, sessões e experiência entram aqui", "");
     if (key === "recomendacoes") lines.push("💡 Norwyn recomenda", "Recomendacao executiva curta com base nos blocos selecionados", "");
   }
   if (!selected.length) lines.push("Escolha ao menos um bloco para montar o relatorio.", "");

@@ -3,7 +3,10 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getAdoptionDirectory, getCachedAdoptionAnalytics } from "@/modules/adocao/services/adoption-analytics";
+import type { AdoptionPeriodKey } from "@/modules/adocao/types";
 import type { RelatorioAgendamento, RelatorioBlocoKey, RelatorioDestinatario, RelatorioEnvio, RelatorioFiltros, RelatorioPeriodo, RelatoriosContext, RelatorioTipoResumo } from "@/modules/relatorios/types";
+import { escapeTelegramHtml, formatTelegramDateTime, telegramGreetingHeader } from "@/modules/relatorios/utils/telegram-format";
 
 type AnyClient = any;
 type SourceStatus = "success" | "empty" | "error";
@@ -43,6 +46,7 @@ const defaults: Partial<Record<RelatorioBlocoKey, { enabled: boolean; periodo: R
   financeiro: { enabled: false, periodo: "mes_atual" },
   atividades: { enabled: false, periodo: "pendentes" },
   aluno_360: { enabled: false, periodo: "ultimos_30d" },
+  adocao: { enabled: false, periodo: "ultimos_30d" },
   recomendacoes: { enabled: true, periodo: "hoje" },
 };
 const typeBlocks: Record<RelatorioTipoResumo, RelatorioBlocoKey[]> = {
@@ -155,6 +159,7 @@ async function agendaBlock(client: AnyClient, tenantId: string, period: Relatori
   const result = await source<any[]>(client.from(sourceName).select("titulo, inicio, descricao, local").eq("tenant_id", tenantId).gte("inicio", r.from + "T00:00:00").lte("inicio", r.to + "T23:59:59").order("inicio", { ascending: true }).limit(30), []);
   if (result.status === "error") return blockError("agenda", title, sourceName, result.error, r.label);
   const rows = result.data;
+  if (!rows.length) return blockEmpty("agenda", title, sourceName, "Sem compromissos nos proximos 2 dias.", r.label);
   const windows = [
     { label: "Hoje", from: today(), to: today() },
     { label: "Amanha", from: plusDays(1), to: plusDays(1) },
@@ -164,7 +169,7 @@ async function agendaBlock(client: AnyClient, tenantId: string, period: Relatori
     const items = rows.filter((e) => String(e.inicio ?? "").slice(0, 10) >= window.from && String(e.inicio ?? "").slice(0, 10) <= window.to);
     return [window.label, ...(items.length ? items.map((e) => "• " + datetime(e.inicio) + " - " + e.titulo + (e.descricao ? " (" + e.descricao + ")" : "")) : ["• Sem compromissos"]), ""];
   }).filter((line, index, array) => line !== "" || array[index + 1]);
-  return { key: "agenda", title, source: sourceName, period: r.label, status: rows.length ? "success" : "empty", empty: "Sem compromissos nos proximos 2 dias.", lines };
+  return { key: "agenda", title, source: sourceName, period: r.label, status: "success", empty: "Sem compromissos nos proximos 2 dias.", lines };
 }
 async function decisionsBlock(client: AnyClient, tenantId: string): Promise<Block> {
   const title = "🎯 Precisa de voce";
@@ -319,6 +324,58 @@ async function alunoBlock(client: AnyClient, tenantId: string, filters: Relatori
   if (!result.data.length) return blockEmpty("aluno_360", title, sourceName, "Aluno nao encontrado no recorte.", "alunos selecionados");
   return { key: "aluno_360", title, source: sourceName, period: "alunos selecionados", status: "success", empty: "Aluno nao encontrado no recorte.", lines: result.data.flatMap((student) => ["• " + (student.display_name ?? student.email ?? student.customer_id), "  LTV: " + money(n(student.ltv_brl)) + " · " + n(student.purchase_count) + " compra(s) · " + n(student.product_count) + " produto(s)", "  Ultima compra: " + date(student.last_purchase_at) + " · Ultimo acesso: " + date(student.last_access_at)]) };
 }
+function adoptionPeriod(period: RelatorioPeriodo): AdoptionPeriodKey {
+  if (period === "ultimos_7d") return "7d";
+  if (period === "ultimos_15d") return "15d";
+  if (period === "ultimos_90d") return "90d";
+  if (period === "hoje") return "today";
+  return "30d";
+}
+function lastAccessLabel(value: string | null) {
+  if (!value) return "sem atividade registrada";
+  const eventDay = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(value));
+  const label = eventDay === today() ? "hoje" : new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: tz }).format(new Date(value));
+  const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: tz }).format(new Date(value));
+  return `${label}, ${time}`;
+}
+async function adoptionBlock(client: AnyClient, tenantId: string, filters: RelatorioFiltros, compact: boolean): Promise<Block> {
+  const sourceName = "adoption_events";
+  try {
+    const analytics = await getCachedAdoptionAnalytics(client, tenantId);
+    const snapshot = analytics.snapshots[adoptionPeriod(cfg(filters, "adocao").periodo)];
+    const people = snapshot.people.filter((person) => (!filters.adoption_user_id || person.userId === filters.adoption_user_id) && (!filters.adoption_role || person.role === filters.adoption_role));
+    if (!people.length) return blockEmpty("adocao", `📊 Adoção — ${snapshot.periodLabel.toLowerCase()}`, sourceName, "Sem uso registrado para o filtro selecionado.", snapshot.periodLabel);
+    const selectedSections = filters.adoption_sections?.length ? new Set(filters.adoption_sections) : null;
+    const section = (key: NonNullable<RelatorioFiltros["adoption_sections"]>[number]) => !selectedSections || selectedSections.has(key);
+    const lines = people.flatMap((person) => {
+      if (compact) return [`👤 ${person.name}: ${lastAccessLabel(person.lastAccess)} · ${person.activeDays} dia(s) ativo(s) · ${person.sessions} sessão(ões)`];
+      const personLines = [`👤 ${person.name}${person.role ? ` · ${person.role}` : ""}`];
+      if (section("access")) personLines.push(`Último acesso: ${lastAccessLabel(person.lastAccess)}`);
+      const totals = [section("active_days") ? `${person.activeDays} dia(s) ativo(s)` : null, section("sessions") ? `${person.sessions} sessão(ões)` : null, section("pages") ? `${person.pageViews} página(s)` : null].filter(Boolean);
+      if (totals.length) personLines.push(totals.join(" · "));
+      if (section("modules") && person.topModules.length) personLines.push("Mais usados:", ...person.topModules.map((module) => `• ${module.label} — ${module.views}`));
+      personLines.push("");
+      return personLines;
+    });
+    if (compact && snapshot.modules[0]) lines.push(`Mais usado: ${snapshot.modules[0].label}`);
+    if (!compact && section("actions")) {
+      const actionItems = snapshot.recentActivity.filter((item) => item.eventName !== "page_view" && item.eventName !== "error" && (!filters.adoption_user_id || item.userId === filters.adoption_user_id)).slice(0, 5);
+      if (actionItems.length) lines.push("", "Ações recentes:", ...actionItems.map((item) => `• ${item.userName} · ${item.pageLabel}`));
+    }
+    if (section("experience") && snapshot.experience.measuredNavigations > 0) {
+      lines.push("", "⚡ Experiência", `${snapshot.experience.successRate == null ? "" : `✅ ${snapshot.experience.successRate.toFixed(1)}% das navegações sem erro`}`.trim(), `Mediana: ${Math.round((snapshot.experience.medianPageLoadMs ?? 0) / 100) / 10}s`, `⚠️ ${snapshot.experience.slowLoads} carregamento(s) lento(s)`, `🔴 ${snapshot.experience.errors} erro(s)`);
+    } else if (section("experience")) {
+      lines.push("", "⚡ Experiência", "Medição iniciada; ainda não há amostra suficiente.");
+    }
+    if (!compact && section("errors") && snapshot.experience.recentErrors.length) lines.push("", "Erros recentes:", ...snapshot.experience.recentErrors.slice(0, 5).map((item) => `• ${item.moduleLabel} · ${item.pageLabel}`));
+    if (!compact && people.length >= 2 && people[0]?.topModule && people[1]?.topModule && people[0].topModule !== people[1].topModule) {
+      lines.push("", "💡 Leitura", `${people[0].name} concentra o uso em ${people[0].topModule}; ${people[1].name}, em ${people[1].topModule}.`);
+    }
+    return { key: "adocao", title: `📊 Adoção — ${snapshot.periodLabel.toLowerCase()}`, source: sourceName, period: snapshot.periodLabel, status: "success", lines: lines.filter(Boolean) };
+  } catch (error) {
+    return blockError("adocao", "📊 Adoção", sourceName, errorMessage(error), "período selecionado");
+  }
+}
 function recommendationBlock(blocks: Block[]): Block {
   const presenceIssue = blocks.find((block) => block.key === "presence" && block.lines.some((line) => line.includes("⚠️")));
   const interactionIssue = blocks.find((block) => block.key === "interacoes" && block.lines.some((line) => !line.startsWith("0 ") && !line.startsWith("Fonte parcial")));
@@ -331,7 +388,7 @@ function shouldRenderBlock(block: Block, filters: RelatorioFiltros) {
   if (block.lines.length) return true;
   return cfg(filters, block.key).empty_behavior === "show_empty";
 }
-async function buildBlocks(client: AnyClient, tenantId: string, filters: RelatorioFiltros): Promise<{ requested: Block[]; rendered: Block[]; diagnostics: BlockDiagnostic[] }> {
+async function buildBlocks(client: AnyClient, tenantId: string, filters: RelatorioFiltros, tipo: RelatorioTipoResumo): Promise<{ requested: Block[]; rendered: Block[]; diagnostics: BlockDiagnostic[] }> {
   const requested: Block[] = [];
   if (enabled(filters, "agenda")) requested.push(await agendaBlock(client, tenantId, cfg(filters, "agenda").periodo));
   if (enabled(filters, "decisoes")) requested.push(await decisionsBlock(client, tenantId));
@@ -343,16 +400,19 @@ async function buildBlocks(client: AnyClient, tenantId: string, filters: Relator
   if (enabled(filters, "interacoes")) requested.push(await interactionsBlock(client, tenantId, cfg(filters, "interacoes").periodo));
   if (enabled(filters, "atividades")) requested.push(await activitiesBlock(client, tenantId));
   if (enabled(filters, "aluno_360")) requested.push(await alunoBlock(client, tenantId, filters));
+  if (enabled(filters, "adocao")) requested.push(await adoptionBlock(client, tenantId, filters, tipo === "resumo_executivo"));
   if (enabled(filters, "recomendacoes")) requested.push(recommendationBlock(requested));
   const rendered = requested.filter((block) => shouldRenderBlock(block, filters));
   const diagnostics = requested.map((block) => ({ key: block.key, title: block.title, status: block.status, rendered: rendered.includes(block), source: block.source, period: block.period, reason: block.reason ?? (block.status === "empty" ? block.empty : undefined), lines: block.lines.length }));
   return { requested, rendered, diagnostics };
 }
 function subject(tipo: RelatorioTipoResumo) { if (tipo === "aluno_360") return "Aluno 360"; if (tipo === "marketing") return "Relatorio de Marketing"; if (tipo === "comercial") return "Relatorio Comercial"; if (tipo === "presence") return "Saude digital"; if (tipo === "agenda" || tipo === "lembrete_agendamento") return "Agenda Norwyn"; return "Daily da Norwyn"; }
-function message(tipo: RelatorioTipoResumo, blocks: Block[]) {
-  const header = tipo === "aluno_360" ? `👤 *${subject(tipo)}*` : "☀️ *Bom dia — Norwyn*";
-  const lines = [header, `📅 ${new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: tz }).format(new Date())}`, ""];
-  for (const b of blocks) { lines.push(`*${b.title}*`); lines.push(...(b.lines.length ? b.lines : b.empty ? [b.empty] : [])); lines.push(""); }
+function message(tipo: RelatorioTipoResumo, blocks: Block[], recipient: RelatorioDestinatario) {
+  const now = new Date();
+  const personalName = recipient.tipo_destino === "individual" ? recipient.nome.trim() : "";
+  const header = tipo === "aluno_360" ? `👤 <b>${escapeTelegramHtml(subject(tipo))}</b>` : telegramGreetingHeader(now, personalName);
+  const lines = [header, `📅 ${formatTelegramDateTime(now)}`, ""];
+  for (const b of blocks) { lines.push(`<b>${escapeTelegramHtml(b.title)}</b>`); lines.push(...(b.lines.length ? b.lines.map(escapeTelegramHtml) : b.empty ? [escapeTelegramHtml(b.empty)] : [])); lines.push(""); }
   lines.push("Norwyn · Relatorio gerado automaticamente"); return lines.join("\n").trim();
 }
 function isActive(schedule: RelatorioAgendamento) { return schedule.ativo !== false && schedule.status === "ativo"; }
@@ -380,14 +440,15 @@ async function alreadyToday(client: AnyClient, tenantId: string, scheduleId: str
 
 export async function getRelatoriosContext(): Promise<RelatoriosContext> {
   const auth = await authContext(); const modules = allowed(auth.role);
-  if (!auth.tenantId) return { tenant: null, allowedModules: modules, diagnostic: "Usuario sem tenant ativo.", canWrite: false, destinatarios: [], agendamentos: [], envios: [], enviosTotal: 0, updatedAt: null };
-  const [tenant, recipients, schedules, sends] = await Promise.all([
+  if (!auth.tenantId) return { tenant: null, allowedModules: modules, diagnostic: "Usuario sem tenant ativo.", canWrite: false, destinatarios: [], agendamentos: [], envios: [], enviosTotal: 0, adoptionPeople: [], updatedAt: null };
+  const [tenant, recipients, schedules, sends, adoption] = await Promise.all([
     auth.dataClient.from("tenants").select("id, nome").eq("id", auth.tenantId).maybeSingle(),
     auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).order("nome", { ascending: true }),
     auth.dataClient.from("relatorio_agendamentos").select("*").eq("tenant_id", auth.tenantId).order("created_at", { ascending: false }),
     auth.dataClient.from("relatorio_envios").select("*", { count: "exact" }).eq("tenant_id", auth.tenantId).order("created_at", { ascending: false }).range(0, 24),
+    getAdoptionDirectory(auth.dataClient, auth.tenantId).catch(() => []),
   ]);
-  return { tenant: tenant.data ?? null, allowedModules: modules, diagnostic: tenant.error?.message ?? recipients.error?.message ?? schedules.error?.message ?? sends.error?.message ?? null, canWrite: canWrite(auth.role), destinatarios: recipients.data ?? [], agendamentos: schedules.data ?? [], envios: sends.data ?? [], enviosTotal: sends.count ?? sends.data?.length ?? 0, updatedAt: new Date().toISOString() };
+  return { tenant: tenant.data ?? null, allowedModules: modules, diagnostic: tenant.error?.message ?? recipients.error?.message ?? schedules.error?.message ?? sends.error?.message ?? null, canWrite: canWrite(auth.role), destinatarios: recipients.data ?? [], agendamentos: schedules.data ?? [], envios: sends.data ?? [], enviosTotal: sends.count ?? sends.data?.length ?? 0, adoptionPeople: adoption, updatedAt: new Date().toISOString() };
 }
 export async function assertRelatoriosWriteAccess() {
   const auth = await authContext(); if (!auth.tenantId) throw new Error("Usuario sem tenant ativo."); if (!canWrite(auth.role)) throw new Error("Perfil sem permissao para gerenciar relatorios.");
@@ -423,8 +484,8 @@ async function insertEnvioLog(client: AnyClient, payload: Record<string, unknown
 }
 async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean, scheduleIdForLog: string | null = schedule.id) {
   const filters = filtersFor(schedule.filtros, schedule.tipo_resumo);
-  const result = await buildBlocks(client, tenantId, filters);
-  const text = message(schedule.tipo_resumo, result.rendered);
+  const result = await buildBlocks(client, tenantId, filters, schedule.tipo_resumo);
+  const text = message(schedule.tipo_resumo, result.rendered, recipient);
   const modules = result.rendered.map((block) => block.key);
   const requestedModules = result.requested.map((block) => block.key);
   const renderedCount = result.diagnostics.filter((block) => block.rendered).length;

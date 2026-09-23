@@ -31,6 +31,7 @@ export async function GET(request: Request) {
       whatsapp: dispatch.recipient.whatsapp,
       subject: dispatch.subject,
       text: dispatch.text,
+      parseMode: "HTML",
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao preparar report." }, { status: 400 });
