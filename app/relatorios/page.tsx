@@ -8,7 +8,7 @@ export default async function RelatoriosPage() {
   const context = await getRelatoriosContext();
 
   return (
-    <AppShell activeItem="relatorios" allowedItems={context.allowedModules}>
+    <AppShell activeItem="relatorios" allowedItems={context.allowedModules} role={context.role}>
       <RelatoriosDashboard context={context} />
     </AppShell>
   );

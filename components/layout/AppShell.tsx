@@ -15,6 +15,7 @@ import {
   CircleDollarSign,
   ClipboardCheck,
   Compass,
+  FileText,
   LayoutDashboard,
   LineChart,
   LogOut,
@@ -43,6 +44,7 @@ type NavigationItem = {
   key: string;
   module: string;
   group: string;
+  adminOnly?: boolean;
 };
 
 const defaultNavigation: NavigationItem[] = [
@@ -63,13 +65,13 @@ const defaultNavigation: NavigationItem[] = [
   { label: "Suporte", href: "/ocorrencias", icon: AlertTriangle, key: "suporte", module: "ocorrencias", group: "Operação" },
   { label: "Alunos", href: "/produtos-alunos?view=students", icon: UsersRound, key: "alunos", module: "norwyn", group: "Operação" },
   { label: "Usuários", href: "/admin", icon: Settings, key: "admin", module: "admin", group: "Administração" },
-  { label: "Integrações", href: "/relatorios", icon: LayoutDashboard, key: "relatorios", module: "relatorios", group: "Administração" },
+  { label: "Relatórios", href: "/relatorios", icon: FileText, key: "relatorios", module: "relatorios", group: "Administração" },
+  { label: "Adoção", href: "/adocao", icon: Activity, key: "adocao", module: "adocao", group: "Administração", adminOnly: true },
   { label: "Configurações", href: "/admin?tab=settings", icon: Settings, key: "configuracoes", module: "admin", group: "Administração" },
   { label: "Lifecycle", href: "/norwyn?tab=guide", icon: LineChart, key: "lifecycle", module: "norwyn", group: "Avançado" },
   { label: "Product Identity", href: "/norwyn?tab=business", icon: BriefcaseBusiness, key: "product-identity", module: "norwyn", group: "Avançado" },
   { label: "QA", href: "/norwyn?tab=evidence", icon: BarChart3, key: "qa", module: "norwyn", group: "Avançado" },
   { label: "Lab", href: "/norwyn-lab/funnel-test", icon: LineChart, key: "advanced", module: "norwyn", group: "Avançado" },
-  { label: "Diagnósticos", href: "/relatorios", icon: LayoutDashboard, key: "diagnosticos", module: "relatorios", group: "Avançado" },
 ];
 
 const specialistNavigation: NavigationItem[] = [
@@ -81,6 +83,7 @@ const specialistNavigation: NavigationItem[] = [
   { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Trabalho" },
   { label: "Produtos & Alunos", href: "/produtos-alunos", icon: UsersRound, key: "produtos-alunos", module: "norwyn", group: "Trabalho" },
   { label: "Resultados", href: "/resultados", icon: BarChart3, key: "resultados", module: "norwyn", group: "Trabalho" },
+  { label: "Relatórios", href: "/relatorios", icon: FileText, key: "relatorios", module: "relatorios", group: "Trabalho" },
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Trabalho" },
   { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Trabalho" },
   { label: "Presença", href: "/presence", icon: MonitorSmartphone, key: "presence", module: "norwyn", group: "Trabalho" },
@@ -96,6 +99,7 @@ const operationalNavigation: NavigationItem[] = [
   { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Operação" },
   { label: "Produtos", href: "/produtos-alunos?view=products", icon: BriefcaseBusiness, key: "produtos", module: "norwyn", group: "Operação" },
   { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Operação" },
+  { label: "Relatórios", href: "/relatorios", icon: FileText, key: "relatorios", module: "relatorios", group: "Operação" },
   { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Operação" },
   { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Operação" },
 ];
@@ -141,9 +145,11 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
   const [userLabel, setUserLabel] = useState<string | null>(null);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const roleNavigation = navigationForRole(role);
-  const visibleNavigation = allowedItems
-    ? roleNavigation.filter((item) => allowedItems.includes(item.module) || allowedItems.includes(item.key) || allowedItems.includes("admin"))
-    : roleNavigation;
+  const functionalRole = functionalRoleFor(role);
+  const visibleNavigation = roleNavigation.filter((item) => {
+    if (item.adminOnly && functionalRole !== "ADMIN") return false;
+    return !allowedItems || allowedItems.includes(item.module) || allowedItems.includes(item.key) || allowedItems.includes("admin");
+  });
   const groups = groupedNavigation(visibleNavigation);
   const prefetchKey = visibleNavigation.map((item) => item.href).join("|");
   const pendingItem = pendingHref

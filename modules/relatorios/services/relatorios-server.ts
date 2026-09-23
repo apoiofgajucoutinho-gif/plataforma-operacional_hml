@@ -494,7 +494,7 @@ async function alreadyToday(client: AnyClient, tenantId: string, scheduleId: str
 
 export async function getRelatoriosContext(): Promise<RelatoriosContext> {
   const auth = await authContext(); const modules = allowed(auth.role);
-  if (!auth.tenantId) return { tenant: null, allowedModules: modules, diagnostic: "Usuario sem tenant ativo.", canWrite: false, destinatarios: [], agendamentos: [], envios: [], enviosTotal: 0, adoptionPeople: [], updatedAt: null };
+  if (!auth.tenantId) return { tenant: null, role: auth.role, allowedModules: modules, diagnostic: "Usuario sem tenant ativo.", canWrite: false, destinatarios: [], agendamentos: [], envios: [], enviosTotal: 0, adoptionPeople: [], updatedAt: null };
   const [tenant, recipients, schedules, sends, adoption] = await Promise.all([
     auth.dataClient.from("tenants").select("id, nome").eq("id", auth.tenantId).maybeSingle(),
     auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).order("nome", { ascending: true }),
@@ -502,7 +502,7 @@ export async function getRelatoriosContext(): Promise<RelatoriosContext> {
     auth.dataClient.from("relatorio_envios").select("*", { count: "exact" }).eq("tenant_id", auth.tenantId).order("created_at", { ascending: false }).range(0, 24),
     getAdoptionDirectory(auth.dataClient, auth.tenantId).catch(() => []),
   ]);
-  return { tenant: tenant.data ?? null, allowedModules: modules, diagnostic: tenant.error?.message ?? recipients.error?.message ?? schedules.error?.message ?? sends.error?.message ?? null, canWrite: canWrite(auth.role), destinatarios: recipients.data ?? [], agendamentos: schedules.data ?? [], envios: sends.data ?? [], enviosTotal: sends.count ?? sends.data?.length ?? 0, adoptionPeople: adoption, updatedAt: new Date().toISOString() };
+  return { tenant: tenant.data ?? null, role: auth.role, allowedModules: modules, diagnostic: tenant.error?.message ?? recipients.error?.message ?? schedules.error?.message ?? sends.error?.message ?? null, canWrite: canWrite(auth.role), destinatarios: recipients.data ?? [], agendamentos: schedules.data ?? [], envios: sends.data ?? [], enviosTotal: sends.count ?? sends.data?.length ?? 0, adoptionPeople: adoption, updatedAt: new Date().toISOString() };
 }
 export async function assertRelatoriosWriteAccess() {
   const auth = await authContext(); if (!auth.tenantId) throw new Error("Usuario sem tenant ativo."); if (!canWrite(auth.role)) throw new Error("Perfil sem permissao para gerenciar relatorios.");

@@ -158,6 +158,7 @@ export type RelatorioEnvio = {
 
 export type RelatoriosContext = {
   tenant: { id: string; nome: string } | null;
+  role: string | null;
   allowedModules: string[];
   diagnostic: string | null;
   canWrite: boolean;
