@@ -28,11 +28,14 @@ export type AdoptionPerson = {
 
 export type AdoptionRanking = {
   key: string;
+  module: string;
+  page?: string;
   label: string;
   views: number;
   users: number;
   lastUsedAt: string | null;
   share: number;
+  trendPercent: number | null;
 };
 
 export type AdoptionTimelineItem = {
@@ -45,6 +48,9 @@ export type AdoptionTimelineItem = {
   eventName: string;
   createdAt: string;
   outcome: string | null;
+  errorType: string | null;
+  statusCode: number | null;
+  message: string | null;
 };
 
 export type AdoptionExperience = {
@@ -52,10 +58,18 @@ export type AdoptionExperience = {
   medianPageLoadMs: number | null;
   p95PageLoadMs: number | null;
   slowLoads: number;
+  slowThresholdMs: number;
   errors: number;
-  successRate: number | null;
-  slowestPages: Array<{ label: string; medianMs: number; samples: number }>;
+  capturedErrors: number;
+  ignoredErrors: number;
+  indeterminateErrors: number;
+  navigationMeasured: number;
+  navigationSuccessRate: number | null;
+  apiMeasured: number;
+  apiSuccessRate: number | null;
+  slowestPages: Array<{ module: string; page: string; label: string; medianMs: number; p95Ms: number; maxMs: number; samples: number; slowLoads: number }>;
   recentErrors: AdoptionTimelineItem[];
+  errorAudit: Array<{ classification: "real" | "ignored" | "indeterminate"; type: string | null; module: string; pagePath: string; userId: string | null; userName: string | null; statusCode: number | null; message: string | null; total: number; firstAt: string; lastAt: string }>;
 };
 
 export type AdoptionSnapshot = {
@@ -70,6 +84,7 @@ export type AdoptionSnapshot = {
   modulesUsed: number;
   actions: number;
   errors: number;
+  topModule: string | null;
   people: AdoptionPerson[];
   modules: AdoptionRanking[];
   pages: AdoptionRanking[];
@@ -81,6 +96,7 @@ export type AdoptionSnapshot = {
 
 export type AdoptionAudit = {
   totalEvents: number;
+  users: number;
   firstEventAt: string | null;
   lastEventAt: string | null;
   exactDuplicateGroups: number;

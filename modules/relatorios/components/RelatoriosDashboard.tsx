@@ -190,8 +190,10 @@ const adoptionSections: Array<[NonNullable<RelatorioFiltros["adoption_sections"]
   ["access", "Últimos acessos"],
   ["active_days", "Dias ativos"],
   ["sessions", "Sessões"],
-  ["pages", "Páginas mais acessadas"],
-  ["modules", "Módulos mais usados"],
+  ["pages", "Page views"],
+  ["top_module", "Módulo mais usado"],
+  ["top_modules", "Top módulos"],
+  ["top_pages", "Páginas mais acessadas"],
   ["actions", "Ações recentes"],
   ["experience", "Experiência"],
   ["errors", "Erros"],
@@ -217,6 +219,10 @@ const defaultFilters: RelatorioFiltros = {
   antecedencia_minutos: 60,
   include_recommendation: true,
   customer_ids: [],
+  adoption_audience: "all",
+  adoption_sort: "recent",
+  adoption_detail: "summary",
+  adoption_user_ids: [],
   adoption_sections: adoptionSections.map(([key]) => key),
   blocos: {
     agenda: { enabled: true, periodo: "hoje", empty_behavior: "show_empty" },
@@ -821,11 +827,13 @@ function ComposeTab({ mode, onModeChange, steps, activeStep, onStepChange, onMov
             {selectedBlocks.includes("adocao") ? (
               <div className="rounded-[22px] border border-[color:var(--ds-border)] bg-[color:var(--ds-bg-soft)] p-5">
                 <p className="text-base font-black text-brand-teal">Configuração de Adoção</p>
-                <p className="mt-1 text-sm font-semibold text-brand-teal/65">Escolha uma pessoa ou perfil; sem filtro, o relatório considera todos do tenant.</p>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <Field label="Pessoa"><select value={filters.adoption_user_id ?? ""} onChange={(event) => setFilterPatch({ adoption_user_id: event.target.value || null })} className="input-like min-h-12 text-[15px]"><option value="">Todas as pessoas</option>{adoptionPeople.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}</select></Field>
-                  <Field label="Perfil"><select value={filters.adoption_role ?? ""} onChange={(event) => setFilterPatch({ adoption_role: event.target.value || null })} className="input-like min-h-12 text-[15px]"><option value="">Todos os perfis</option>{[...new Set(adoptionPeople.map((person) => person.role).filter(Boolean))].map((role) => <option key={role} value={role ?? ""}>{role}</option>)}</select></Field>
+                <p className="mt-1 text-sm font-semibold text-brand-teal/65">As contas permanecem separadas por usuário, mesmo quando os nomes são parecidos.</p>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <Field label="Público"><select value={filters.adoption_audience ?? "all"} onChange={(event) => setFilterPatch({ adoption_audience: event.target.value as NonNullable<RelatorioFiltros["adoption_audience"]>, adoption_user_ids: event.target.value === "specific" ? filters.adoption_user_ids ?? [] : [] })} className="input-like min-h-12 text-[15px]"><option value="all">Todos</option><option value="specialist">Apenas especialista</option><option value="operational">Apenas operacional</option><option value="specific">Usuários específicos</option></select></Field>
+                  <Field label="Ordenação"><select value={filters.adoption_sort ?? "recent"} onChange={(event) => setFilterPatch({ adoption_sort: event.target.value as NonNullable<RelatorioFiltros["adoption_sort"]> })} className="input-like min-h-12 text-[15px]"><option value="recent">Mais recentes primeiro</option><option value="role">Por perfil</option></select></Field>
+                  <Field label="Detalhamento"><select value={filters.adoption_detail ?? "summary"} onChange={(event) => setFilterPatch({ adoption_detail: event.target.value as NonNullable<RelatorioFiltros["adoption_detail"]> })} className="input-like min-h-12 text-[15px]"><option value="summary">Resumo, até 5 usuários</option><option value="detailed">Detalhado</option></select></Field>
                 </div>
+                {filters.adoption_audience === "specific" ? <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{adoptionPeople.map((person) => { const selected = (filters.adoption_user_ids ?? []).includes(person.userId); return <button key={person.userId} type="button" onClick={() => setFilterPatch({ adoption_user_ids: selected ? (filters.adoption_user_ids ?? []).filter((id) => id !== person.userId) : [...(filters.adoption_user_ids ?? []), person.userId] })} className={`rounded-[var(--ds-radius-md)] border p-3 text-left ${selected ? "border-sky-300 bg-sky-100" : "border-[color:var(--ds-border)] bg-white"}`}><span className="block font-black text-brand-teal">{person.name}</span><span className="mt-1 block truncate text-xs font-semibold text-brand-teal/60">{person.email ?? "Sem e-mail"} · {person.role ?? "Sem perfil"}</span></button>; })}</div> : null}
                 <div className="mt-4 flex flex-wrap gap-2">
                   {adoptionSections.map(([key, label]) => {
                     const selected = (filters.adoption_sections ?? []).includes(key);

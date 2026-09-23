@@ -587,19 +587,21 @@ function RyanHome({ snapshot }: { snapshot: ReturnType<typeof buildOperationalOs
 }
 
 function AdoptionHomeCard({ snapshot }: { snapshot: NonNullable<NorwynContext["adoptionSummary"]> }) {
-  const priorityPeople = [snapshot.people.find((person) => /\b(ju|juliana)\b/i.test(person.name)), snapshot.people.find((person) => /ryan/i.test(person.name))].filter((person): person is NonNullable<typeof person> => Boolean(person));
+  const byRecent = (role: string) => snapshot.people.filter((person) => person.role === role).toSorted((a, b) => (b.lastAccess ? new Date(b.lastAccess).getTime() : 0) - (a.lastAccess ? new Date(a.lastAccess).getTime() : 0))[0];
+  const priorityPeople = [byRecent("ESPECIALISTA"), byRecent("OPERACIONAL")].filter((person): person is NonNullable<typeof person> => Boolean(person));
   const people = priorityPeople.length ? priorityPeople : snapshot.people.slice(0, 2);
-  const experienceLabel = snapshot.experience.measuredNavigations
-    ? snapshot.errors || snapshot.experience.slowLoads ? "Requer atenção" : "Estável"
-    : "Medição iniciada";
+  const hasOutcomeCoverage = snapshot.experience.navigationMeasured > 0 || snapshot.experience.apiMeasured > 0;
+  const experienceLabel = snapshot.errors ? "Requer atenção" : hasOutcomeCoverage ? "Sem erro real" : "Cobertura parcial";
   return <Surface className="space-y-5 p-5 sm:p-6">
     <DsSectionHeader eyebrow="Admin" title="Adoção" description="Quem está usando e como a experiência está respondendo." action={<ActionLink href="/adocao">Ver Adoção</ActionLink>} />
     <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-      <div className="grid gap-3 sm:grid-cols-2">{people.map((person) => <div key={person.userId} className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4"><div className="flex items-center justify-between gap-2"><p className="font-semibold text-[color:var(--ds-text)]">{person.name}</p><StatusBadge tone={person.status === "recent" ? "success" : person.status === "low" ? "warning" : "neutral"}>{person.status === "recent" ? "Recente" : person.status === "low" ? "Pouco ativo" : "Sem atividade"}</StatusBadge></div><p className="mt-3 text-sm font-semibold text-[color:var(--ds-text-secondary)]">{adoptionRelativeDate(person.lastAccess)}</p><p className="mt-2 text-xs text-[color:var(--ds-text-muted)]">{person.activeDays} dia(s) ativos · {person.sessions} sessão(ões)</p><p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">Mais usado: {person.topModule ?? "Sem uso"}</p></div>)}</div>
-      <div className="grid gap-3 sm:grid-cols-2"><MiniDomainCard icon={UsersRound} tone="blue" label="30 dias" value={`${snapshot.sessions} sessões`} detail={`${snapshot.pageViews} page views · ${snapshot.modulesUsed} módulos`} /><MiniDomainCard icon={ShieldCheck} tone={snapshot.errors ? "coral" : "green"} label="Experiência" value={experienceLabel} detail={snapshot.experience.measuredNavigations ? `${snapshot.errors} erro(s) · ${snapshot.experience.slowLoads} lento(s)` : "coleta de performance iniciada"} /></div>
+      <div className="grid gap-3 sm:grid-cols-2">{people.map((person) => <div key={person.userId} className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4"><div className="flex items-center justify-between gap-2"><p className="font-semibold text-[color:var(--ds-text)]">{person.name}</p><StatusBadge tone={person.status === "recent" ? "success" : person.status === "low" ? "warning" : "neutral"}>{person.status === "recent" ? "Recente" : person.status === "low" ? "Pouco ativo" : "Sem atividade"}</StatusBadge></div><p className="mt-3 text-sm font-semibold text-[color:var(--ds-text-secondary)]">{adoptionRelativeDate(person.lastAccess)}</p><p className="mt-2 text-xs text-[color:var(--ds-text-muted)]">{homePlural(person.activeDays, "dia ativo", "dias ativos")} · {homePlural(person.sessions, "sessão", "sessões")}</p><p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">Mais usado: {person.topModule ?? "Sem uso"}</p></div>)}</div>
+      <div className="grid gap-3 sm:grid-cols-2"><MiniDomainCard icon={UsersRound} tone="blue" label="30 dias" value={homePlural(snapshot.sessions, "sessão", "sessões")} detail={`${snapshot.pageViews.toLocaleString("pt-BR")} page views · ${snapshot.modulesUsed} módulos · mais usado: ${snapshot.topModule ?? "sem uso"}`} /><MiniDomainCard icon={ShieldCheck} tone={snapshot.errors ? "coral" : "green"} label="Experiência" value={experienceLabel} detail={`${snapshot.errors} erros reais · ${snapshot.experience.slowLoads} carregamentos lentos`} /></div>
     </div>
   </Surface>;
 }
+
+function homePlural(value: number, singular: string, plural: string) { return `${value.toLocaleString("pt-BR")} ${value === 1 ? singular : plural}`; }
 
 function adoptionRelativeDate(value: string | null) {
   if (!value) return "Sem atividade recente";

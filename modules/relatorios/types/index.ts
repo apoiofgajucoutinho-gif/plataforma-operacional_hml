@@ -76,8 +76,12 @@ export type RelatorioFiltros = {
   produto_id?: string | null;
   customer_ids?: string[];
   adoption_user_id?: string | null;
+  adoption_user_ids?: string[];
   adoption_role?: string | null;
-  adoption_sections?: Array<"access" | "active_days" | "sessions" | "pages" | "modules" | "actions" | "experience" | "errors">;
+  adoption_audience?: "all" | "specialist" | "operational" | "specific";
+  adoption_sort?: "recent" | "role";
+  adoption_detail?: "summary" | "detailed";
+  adoption_sections?: Array<"access" | "active_days" | "sessions" | "pages" | "modules" | "top_module" | "top_modules" | "top_pages" | "actions" | "experience" | "errors">;
   include_recommendation?: boolean;
   blocos?: Partial<Record<RelatorioBlocoKey | string, RelatorioBlocoConfig>>;
 };
@@ -161,6 +165,6 @@ export type RelatoriosContext = {
   agendamentos: RelatorioAgendamento[];
   envios: RelatorioEnvio[];
   enviosTotal: number;
-  adoptionPeople: Array<{ userId: string; name: string; role: string | null }>;
+  adoptionPeople: Array<{ userId: string; name: string; email: string | null; role: string | null }>;
   updatedAt: string | null;
 };

@@ -31,13 +31,14 @@ type BlockDiagnostic = {
   lines: number;
 };
 type DispatchOptions = { origin?: "manual" | "agendado" | "preview" | "sistema"; createLog?: boolean; requireActive?: boolean; deadlineAt?: number };
-type AdoptionReportPerson = { userId: string; name: string; role: string | null; lastAccess: string | null; activeDays: number; sessions: number; pageViews: number; topModules: Array<{ module: string; views: number }> };
+type AdoptionReportPerson = { userId: string; name: string; role: string | null; lastAccess: string | null; activeDays: number; sessions: number; pageViews: number; modulesUsed: number; topModule: string | null; topModules: Array<{ module: string; views: number }>; topPages: Array<{ module: string; page: string; views: number }> };
 type AdoptionReportSummary = {
   people: AdoptionReportPerson[];
   topModule: { module: string; views: number } | null;
-  experience: { measuredNavigations: number; medianMs: number | null; slowLoads: number; errors: number; successRate: number | null };
+  modules: Array<{ module: string; views: number; users: number }>;
+  pages: Array<{ module: string; page: string; views: number }>;
+  experience: { measuredNavigations: number; medianMs: number | null; p95Ms: number | null; slowLoads: number; realErrors: number; capturedErrors: number; indeterminateErrors: number; navigationMeasured: number; navigationSuccessRate: number | null; apiMeasured: number; apiSuccessRate: number | null; recentErrors: Array<{ userName: string | null; module: string; pagePath: string; message?: string | null }> };
   recentActions: Array<{ userName: string | null; module: string; pagePath: string; eventName: string; createdAt: string }>;
-  recentErrors: Array<{ userName: string | null; module: string; pagePath: string; eventName: string; createdAt: string }>;
 };
 
 const tz = "America/Sao_Paulo";
@@ -345,51 +346,77 @@ function lastAccessLabel(value: string | null) {
   const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: tz }).format(new Date(value));
   return `${label}, ${time}`;
 }
+function countLabel(value: number, singular: string, plural: string) { return `${value.toLocaleString("pt-BR")} ${value === 1 ? singular : plural}`; }
+function decimal(value: number) { return value.toLocaleString("pt-BR", { maximumFractionDigits: 1 }); }
 async function adoptionBlock(client: AnyClient, tenantId: string, filters: RelatorioFiltros, compact: boolean): Promise<Block> {
-  const sourceName = "adoption_events";
+  const sourceName = "get_adoption_report_summary";
   const startedAt = performance.now();
   const period = adoptionPeriod(cfg(filters, "adocao").periodo);
   try {
+    const audienceRole = filters.adoption_audience === "specialist" ? "ESPECIALISTA" : filters.adoption_audience === "operational" ? "OPERACIONAL" : filters.adoption_role;
+    const selectedIds = new Set(filters.adoption_user_ids?.length ? filters.adoption_user_ids : filters.adoption_user_id ? [filters.adoption_user_id] : []);
+    const explicitSelection = filters.adoption_audience === "specific" || selectedIds.size > 0;
     const fromDay = plusDays(-(period.days - 1));
     const { data, error } = await client.rpc("get_adoption_report_summary", {
       p_tenant_id: tenantId,
       p_from: `${fromDay}T00:00:00-03:00`,
       p_to: new Date().toISOString(),
-      p_user_id: filters.adoption_user_id || null,
-      p_role: filters.adoption_role || null,
+      p_user_id: selectedIds.size === 1 ? [...selectedIds][0] : null,
+      p_role: audienceRole || null,
     });
     if (error) throw error;
-    const summary = (data ?? { people: [], topModule: null, experience: { measuredNavigations: 0, medianMs: null, slowLoads: 0, errors: 0, successRate: null }, recentActions: [], recentErrors: [] }) as AdoptionReportSummary;
-    const people = Array.isArray(summary.people) ? summary.people : [];
+    const summary = (data ?? { people: [], modules: [], pages: [], topModule: null, experience: {}, recentActions: [] }) as AdoptionReportSummary;
+    let people = (Array.isArray(summary.people) ? summary.people : []).filter((person) => {
+      if (audienceRole && person.role !== audienceRole) return false;
+      if (explicitSelection && !selectedIds.has(person.userId)) return false;
+      return explicitSelection || person.pageViews > 0 || person.sessions > 0;
+    });
+    people = people.toSorted(filters.adoption_sort === "role"
+      ? (a, b) => String(a.role).localeCompare(String(b.role)) || a.name.localeCompare(b.name)
+      : (a, b) => (b.lastAccess ? new Date(b.lastAccess).getTime() : 0) - (a.lastAccess ? new Date(a.lastAccess).getTime() : 0));
     if (!people.length) return blockEmpty("adocao", `📊 Adoção — ${period.label.toLowerCase()}`, sourceName, "Sem uso registrado para o filtro selecionado.", period.label);
     const selectedSections = filters.adoption_sections?.length ? new Set(filters.adoption_sections) : null;
     const section = (key: NonNullable<RelatorioFiltros["adoption_sections"]>[number]) => !selectedSections || selectedSections.has(key);
-    const lines = people.flatMap((person) => {
-      if (compact) return [`👤 ${person.name}: ${lastAccessLabel(person.lastAccess)} · ${person.activeDays} dia(s) ativo(s) · ${person.sessions} sessão(ões)`];
-      const personLines = [`👤 ${person.name}${person.role ? ` · ${person.role}` : ""}`];
+    const detailed = filters.adoption_detail === "detailed";
+    const personLimit = compact ? 2 : detailed ? 10 : 5;
+    const visiblePeople = people.slice(0, personLimit);
+    const aggregate = <T extends { views: number }>(items: T[], key: (item: T) => string) => [...items.reduce((map, item) => map.set(key(item), (map.get(key(item)) ?? 0) + Number(item.views)), new Map<string, number>())].map(([scopeKey, views]) => ({ scopeKey, views })).toSorted((a, b) => b.views - a.views);
+    const scopedModules = explicitSelection && selectedIds.size > 1 ? aggregate(people.flatMap((person) => person.topModules), (item) => item.module).map((item) => ({ module: item.scopeKey, views: item.views, users: 0 })) : summary.modules;
+    const scopedPages = explicitSelection && selectedIds.size > 1 ? aggregate(people.flatMap((person) => person.topPages), (item) => `${item.module}\u0000${item.page}`).map((item) => { const [module, page] = item.scopeKey.split("\u0000"); return { module, page, views: item.views }; }) : summary.pages;
+    const scopedTopModule = scopedModules[0] ?? summary.topModule;
+    const lines = visiblePeople.flatMap((person) => {
+      const personLines = [`👤 ${person.name}`, ""];
       if (section("access")) personLines.push(`Último acesso: ${lastAccessLabel(person.lastAccess)}`);
-      const totals = [section("active_days") ? `${person.activeDays} dia(s) ativo(s)` : null, section("sessions") ? `${person.sessions} sessão(ões)` : null, section("pages") ? `${person.pageViews} página(s)` : null].filter(Boolean);
+      const totals = [section("active_days") ? countLabel(person.activeDays, "dia ativo", "dias ativos") : null, section("sessions") ? countLabel(person.sessions, "sessão", "sessões") : null].filter(Boolean);
       if (totals.length) personLines.push(totals.join(" · "));
-      if (section("modules") && person.topModules.length) personLines.push("Mais usados:", ...person.topModules.map((module) => `• ${adoptionModuleLabels[module.module] ?? module.module} — ${module.views}`));
+      if (section("pages")) personLines.push(countLabel(person.pageViews, "página visualizada", "páginas visualizadas"));
+      if (section("top_module") || section("modules")) personLines.push(`Mais usado: ${person.topModule ? adoptionModuleLabels[person.topModule] ?? person.topModule : "sem uso no período"}`);
+      if (!compact && section("top_modules") && person.topModules.length) personLines.push("Top módulos:", ...person.topModules.slice(0, detailed ? 5 : 3).map((module, index) => `${index + 1}. ${adoptionModuleLabels[module.module] ?? module.module} — ${module.views}`));
+      if (!compact && section("top_pages") && person.topPages.length) personLines.push("Páginas:", ...person.topPages.slice(0, detailed ? 5 : 3).map((page) => `• ${adoptionModuleLabels[page.module] ?? page.module} / ${page.page} — ${page.views}`));
       personLines.push("");
       return personLines;
     });
-    if (compact && summary.topModule) lines.push(`Mais usado: ${adoptionModuleLabels[summary.topModule.module] ?? summary.topModule.module}`);
+    if (people.length > visiblePeople.length) lines.push(`+ ${countLabel(people.length - visiblePeople.length, "outro usuário com atividade", "outros usuários com atividade")}`, "");
+    if (section("top_modules") || (!selectedSections && !compact)) lines.push("📌 Módulos mais usados", "", ...scopedModules.slice(0, detailed ? 5 : 3).map((module, index) => `${index + 1}. ${adoptionModuleLabels[module.module] ?? module.module} — ${module.views}`), "");
+    if (!compact && section("top_pages")) lines.push("📄 Páginas mais acessadas", "", ...scopedPages.slice(0, detailed ? 8 : 5).map((page) => `• ${adoptionModuleLabels[page.module] ?? page.module} / ${page.page} — ${page.views}`), "");
+    if (compact && scopedTopModule) lines.push(`Mais usado geral: ${adoptionModuleLabels[scopedTopModule.module] ?? scopedTopModule.module}`, "");
     if (!compact && section("actions")) {
-      if (summary.recentActions.length) lines.push("", "Ações recentes:", ...summary.recentActions.map((item) => `• ${item.userName ?? "Usuário"} · ${adoptionModuleLabels[item.module] ?? item.pagePath}`));
+      if (summary.recentActions.length) lines.push("Ações recentes", "", ...summary.recentActions.map((item) => `• ${item.userName ?? "Usuário"} · ${adoptionModuleLabels[item.module] ?? item.pagePath}`), "");
     }
-    if (section("experience") && summary.experience.measuredNavigations > 0) {
-      lines.push("", "⚡ Experiência", `${summary.experience.successRate == null ? "" : `✅ ${summary.experience.successRate.toFixed(1)}% das navegações sem erro`}`.trim(), `Mediana: ${Math.round((summary.experience.medianMs ?? 0) / 100) / 10}s`, `⚠️ ${summary.experience.slowLoads} carregamento(s) lento(s)`, `🔴 ${summary.experience.errors} erro(s)`);
-    } else if (section("experience")) {
-      lines.push("", "⚡ Experiência", "Medição iniciada; ainda não há amostra suficiente.");
+    if (section("experience")) {
+      lines.push("⚡ Experiência", "");
+      lines.push(summary.experience.navigationSuccessRate == null ? "Navegação: dados ainda insuficientes" : `✅ Navegações sem erro: ${decimal(summary.experience.navigationSuccessRate)}%`);
+      lines.push(summary.experience.apiSuccessRate == null ? "API: dados ainda insuficientes" : `✅ APIs sem erro: ${decimal(summary.experience.apiSuccessRate)}%`);
+      if (summary.experience.medianMs != null) lines.push(`⏱ Tempo mediano de página: ${decimal(summary.experience.medianMs / 1000)}s`);
+      lines.push(`⚠️ Carregamentos lentos: ${summary.experience.slowLoads}`, `🔴 Erros reais: ${summary.experience.realErrors}`, "");
     }
-    if (!compact && section("errors") && summary.recentErrors.length) lines.push("", "Erros recentes:", ...summary.recentErrors.map((item) => `• ${adoptionModuleLabels[item.module] ?? item.module} · ${item.pagePath}`));
+    if (!compact && section("errors") && summary.experience.recentErrors?.length) lines.push("Erros reais recentes", "", ...summary.experience.recentErrors.map((item) => `• ${item.userName ?? "Usuário"} · ${adoptionModuleLabels[item.module] ?? item.module} / ${item.pagePath}`), "");
     const firstTop = people[0]?.topModules[0]?.module;
     const secondTop = people[1]?.topModules[0]?.module;
     if (!compact && people.length >= 2 && firstTop && secondTop && firstTop !== secondTop) {
-      lines.push("", "💡 Leitura", `${people[0].name} concentra o uso em ${adoptionModuleLabels[firstTop] ?? firstTop}; ${people[1].name}, em ${adoptionModuleLabels[secondTop] ?? secondTop}.`);
+      lines.push("💡 Leitura", "", `${people[0].name} utiliza principalmente ${adoptionModuleLabels[firstTop] ?? firstTop}, enquanto ${people[1].name} concentra o uso em ${adoptionModuleLabels[secondTop] ?? secondTop}.`, "");
     }
-    return { key: "adocao", title: `📊 Adoção — ${period.label.toLowerCase()}`, source: sourceName, period: period.label, status: "success", lines: lines.filter(Boolean) };
+    return { key: "adocao", title: `📊 Adoção — ${period.label.toLowerCase()}`, source: sourceName, period: period.label, status: "success", lines };
   } catch (error) {
     return blockError("adocao", "📊 Adoção", sourceName, errorMessage(error), "período selecionado");
   } finally {
