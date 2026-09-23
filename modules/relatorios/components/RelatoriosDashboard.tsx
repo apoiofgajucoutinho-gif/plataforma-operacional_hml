@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowLeft,
@@ -49,6 +49,30 @@ type TabKey = "overview" | "schedules" | "compose" | "history" | "destinations";
 type StepKey = "content" | "filters" | "recipient" | "when";
 type ComposeMode = "now" | "schedule";
 type StudentOption = { customer_id: string; name: string | null; email: string | null };
+
+class ReportRequestError extends Error {
+  constructor(message: string, public code?: string, public stage?: string) { super(message); }
+}
+
+async function reportRequest(url: string, init: RequestInit, controller: AbortController, timeoutMs = 30_000) {
+  let timedOut = false;
+  const timer = window.setTimeout(() => { timedOut = true; controller.abort("timeout"); }, timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const raw = await response.text();
+    let result: any = {};
+    if (raw) {
+      try { result = JSON.parse(raw); } catch { throw new ReportRequestError("O servidor retornou uma resposta inválida. Tente novamente.", "INVALID_RESPONSE", "response"); }
+    }
+    if (!response.ok) throw new ReportRequestError(result.error ?? "Não foi possível concluir o envio. Tente novamente.", result.code, result.stage);
+    return result;
+  } catch (error) {
+    if (timedOut) throw new ReportRequestError("Não foi possível concluir o envio. O tempo de espera foi excedido.", "CLIENT_TIMEOUT", "response");
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
 
 function trackReportAction(eventName: "create" | "update" | "delete" | "send" | "run", entity: string, entityId?: string) {
   void fetch("/api/adoption/track", {
@@ -260,6 +284,8 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   const [studentResults, setStudentResults] = useState<StudentOption[]>([]);
   const [selectedStudents, setSelectedStudents] = useState<StudentOption[]>([]);
   const [searchingStudents, setSearchingStudents] = useState(false);
+  const activeSendController = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
 
   const canWrite = context.canWrite;
   const activeSchedules = agendamentos.filter(scheduleActive);
@@ -283,6 +309,17 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
       keepalive: true,
     });
   }, [activeTab]);
+
+  useEffect(() => {
+    mounted.current = true;
+    const abortForNavigation = () => activeSendController.current?.abort("navigation");
+    window.addEventListener("norwyn:navigation", abortForNavigation);
+    return () => {
+      mounted.current = false;
+      window.removeEventListener("norwyn:navigation", abortForNavigation);
+      activeSendController.current?.abort("unmount");
+    };
+  }, []);
 
   useEffect(() => {
     const ids = scheduleForm.filtros.customer_ids ?? [];
@@ -448,22 +485,29 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   }
 
   async function sendDraftNow() {
+    if (sendingId) return;
     for (const step of baseSteps) {
       const error = validateStep(step.key);
       if (error) { setFieldErrors((current) => ({ ...current, [step.key]: error })); setActiveStep(step.key); return; }
     }
     const payload = payloadForSchedule({ frequencia: "sob_demanda", ativo: false });
+    const controller = new AbortController();
+    activeSendController.current = controller;
     setSendingId("draft");
     setMessage("Enviando no Telegram...");
-    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ payload }) });
-    const result = await response.json();
-    setSendingId(null);
-    if (!response.ok) { setMessage(result.error ?? "Nao foi possivel enviar agora."); return; }
-    if (result.data) setEnvios((items) => [result.data, ...items]);
-    trackReportAction("send", "relatorio_envio", result.data?.id);
-    const destination = recipientName(scheduleForm.destinatario_id, destinatarios);
-    const timestamp = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date());
-    setMessage(`Relatorio enviado para ${destination} as ${timestamp}.`);
+    try {
+      const result = await reportRequest("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ payload }) }, controller);
+      if (result.data) setEnvios((items) => [result.data, ...items]);
+      trackReportAction("send", "relatorio_envio", result.data?.id);
+      const destination = recipientName(scheduleForm.destinatario_id, destinatarios);
+      const timestamp = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date());
+      setMessage(`Relatorio enviado para ${destination} as ${timestamp}.`);
+    } catch (error) {
+      if (!controller.signal.aborted || controller.signal.reason === "timeout") setMessage(`⚠️ ${error instanceof Error ? error.message : "Não foi possível enviar o relatório."}`);
+    } finally {
+      if (activeSendController.current === controller) activeSendController.current = null;
+      if (mounted.current) setSendingId(null);
+    }
   }
 
   async function saveRecipient(event: FormEvent<HTMLFormElement>) {
@@ -497,29 +541,40 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
   }
 
   async function sendNow(scheduleId: string) {
+    if (sendingId) return;
+    const controller = new AbortController();
+    activeSendController.current = controller;
     setSendingId(scheduleId);
     setMessage("Enviando no Telegram...");
-    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scheduleId }) });
-    const result = await response.json();
-    setSendingId(null);
-    if (!response.ok) { setMessage(result.error ?? "Nao foi possivel enviar agora."); return; }
-    if (result.data) setEnvios((items) => [result.data, ...items]);
-    trackReportAction("send", "relatorio_envio", result.data?.id);
-    setMessage("Relatorio enviado no Telegram.");
+    try {
+      const result = await reportRequest("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scheduleId }) }, controller);
+      if (result.data) setEnvios((items) => [result.data, ...items]);
+      trackReportAction("send", "relatorio_envio", result.data?.id);
+      setMessage("Relatorio enviado no Telegram.");
+    } catch (error) {
+      if (!controller.signal.aborted || controller.signal.reason === "timeout") setMessage(`⚠️ ${error instanceof Error ? error.message : "Não foi possível enviar o relatório."}`);
+    } finally {
+      if (activeSendController.current === controller) activeSendController.current = null;
+      if (mounted.current) setSendingId(null);
+    }
   }
 
   async function previewSchedule(options: { silent?: boolean } = {}) {
     const payload = payloadForSchedule();
     const selected = Object.entries(payload.filtros?.blocos ?? {}).filter(([, config]) => config?.enabled).map(([key]) => key);
     if (!selected.length || (selected.includes("aluno_360") && !(payload.filtros.customer_ids ?? []).length) || !payload.destinatario_id) return;
+    const controller = new AbortController();
     setPreviewingId("draft");
-    const response = await fetch("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ previewOnly: true, payload }) });
-    const result = await response.json();
-    setPreviewingId(null);
-    if (!response.ok) { if (!options.silent) setMessage(result.error ?? "Nao foi possivel gerar preview real."); return; }
-    setApiPreview(result.preview?.text ?? null);
-    if (!options.silent) trackReportAction("run", "relatorio_preview");
-    if (!options.silent) setMessage(result.preview?.summary ?? "Pre-visualizacao atualizada com dados reais.");
+    try {
+      const result = await reportRequest("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ previewOnly: true, payload }) }, controller, 22_000);
+      setApiPreview(result.preview?.text ?? null);
+      if (!options.silent) trackReportAction("run", "relatorio_preview");
+      if (!options.silent) setMessage(result.preview?.summary ?? "Pre-visualizacao atualizada com dados reais.");
+    } catch (error) {
+      if (!options.silent && (!controller.signal.aborted || controller.signal.reason === "timeout")) setMessage(`⚠️ ${error instanceof Error ? error.message : "Não foi possível gerar o preview real."}`);
+    } finally {
+      if (mounted.current) setPreviewingId(null);
+    }
   }
 
   async function loadHistory(page = historyPage) {
@@ -697,7 +752,7 @@ function SchedulesTab({ agendamentos, destinatarios, sendingId, canWrite, onCrea
       </div>
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         {agendamentos.length ? agendamentos.map((item) => (
-          <ScheduleCard key={item.id} item={item} recipient={recipientName(item.destinatario_id, destinatarios)} sending={sendingId === item.id} canWrite={canWrite} onEdit={() => onEdit(item)} onDuplicate={() => onDuplicate(item)} onToggle={() => onToggle(item)} onSendNow={() => onSendNow(item.id)} onDelete={() => onDelete(item.id)} />
+          <ScheduleCard key={item.id} item={item} recipient={recipientName(item.destinatario_id, destinatarios)} sending={sendingId === item.id} sendDisabled={Boolean(sendingId)} canWrite={canWrite} onEdit={() => onEdit(item)} onDuplicate={() => onDuplicate(item)} onToggle={() => onToggle(item)} onSendNow={() => onSendNow(item.id)} onDelete={() => onDelete(item.id)} />
         )) : <EmptyState text="Ainda nao ha agendamentos configurados." />}
       </div>
     </Card>
@@ -820,7 +875,7 @@ function ComposeTab({ mode, onModeChange, steps, activeStep, onStepChange, onMov
           <div className="flex gap-2"><ActionButton type="button" onClick={onCancel} icon={<X className="h-4 w-4" />} label="Limpar" />{currentIndex > 0 ? <ActionButton type="button" onClick={() => onMoveStep(-1)} icon={<ArrowLeft className="h-4 w-4" />} label="Voltar" /> : null}</div>
           <div className="flex flex-wrap gap-2">
             {!isLastStep ? <ActionButton type="button" onClick={() => onMoveStep(1)} icon={<ArrowRight className="h-4 w-4" />} label="Continuar" primary /> : null}
-            {isLastStep && canWrite && mode === "now" ? <ActionButton type="submit" icon={sendingId === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} label="Enviar agora" primary /> : null}
+            {isLastStep && canWrite && mode === "now" ? <ActionButton type="submit" disabled={Boolean(sendingId)} icon={sendingId === "draft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} label="Enviar agora" primary /> : null}
             {isLastStep && canWrite && mode === "schedule" ? <ActionButton type="submit" icon={<FileText className="h-4 w-4" />} label="Salvar agendamento" primary /> : null}
           </div>
         </div>
@@ -896,7 +951,7 @@ function DestinationsTab({ destinatarios, recipientForm, setRecipientForm, editi
     </div>
   );
 }
-function ScheduleCard({ item, recipient, sending, canWrite, onEdit, onDuplicate, onToggle, onSendNow, onDelete }: { item: RelatorioAgendamento; recipient: string; sending: boolean; canWrite: boolean; onEdit: () => void; onDuplicate: () => void; onToggle: () => void; onSendNow: () => void; onDelete: () => void; }) {
+function ScheduleCard({ item, recipient, sending, sendDisabled, canWrite, onEdit, onDuplicate, onToggle, onSendNow, onDelete }: { item: RelatorioAgendamento; recipient: string; sending: boolean; sendDisabled: boolean; canWrite: boolean; onEdit: () => void; onDuplicate: () => void; onToggle: () => void; onSendNow: () => void; onDelete: () => void; }) {
   const active = scheduleActive(item);
   return (
     <div className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-5 shadow-[var(--ds-shadow-sm)] transition hover:-translate-y-0.5 hover:shadow-soft">
@@ -913,7 +968,7 @@ function ScheduleCard({ item, recipient, sending, canWrite, onEdit, onDuplicate,
         <ActionButton onClick={onEdit} icon={<Pencil className="h-4 w-4" />} label="Editar" />
         <ActionButton onClick={onDuplicate} icon={<Copy className="h-4 w-4" />} label="Duplicar" />
         <ActionButton onClick={onToggle} icon={active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />} label={active ? "Pausar" : "Reativar"} />
-        <ActionButton onClick={onSendNow} icon={sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} label="Enviar agora" primary />
+        <ActionButton onClick={onSendNow} disabled={sendDisabled} icon={sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} label="Enviar agora" primary />
         {canWrite ? <details className="relative ml-auto"><summary className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-[16px] border border-[color:var(--ds-border)] bg-white text-brand-teal"><MoreHorizontal className="h-5 w-5" /></summary><div className="absolute bottom-12 right-0 z-20 min-w-40 rounded-[16px] border border-red-100 bg-white p-2 shadow-soft"><button type="button" onClick={onDelete} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-black text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" />Excluir</button></div></details> : null}
       </div>
     </div>
@@ -962,9 +1017,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="grid gap-2 text-sm font-black text-brand-teal/80"><span>{label}</span>{children}</label>;
 }
 
-function ActionButton({ icon, label, onClick, primary = false, danger = false, type = "button" }: { icon: ReactNode; label: string; onClick?: () => void; primary?: boolean; danger?: boolean; type?: "button" | "submit" }) {
+function ActionButton({ icon, label, onClick, primary = false, danger = false, type = "button", disabled = false }: { icon: ReactNode; label: string; onClick?: () => void; primary?: boolean; danger?: boolean; type?: "button" | "submit"; disabled?: boolean }) {
   const color = primary ? "bg-brand-teal text-white hover:bg-brand-teal/90" : danger ? "border-red-100 bg-red-50 text-red-700 hover:bg-red-100" : "border-brand-sand bg-white text-brand-teal hover:bg-brand-cream";
-  return <button type={type} onClick={onClick} className={`inline-flex min-h-11 items-center gap-2 rounded-[16px] border px-4 py-2.5 text-sm font-black transition ${color}`}>{icon}{label}</button>;
+  return <button type={type} onClick={onClick} disabled={disabled} aria-disabled={disabled} className={`inline-flex min-h-11 items-center gap-2 rounded-[16px] border px-4 py-2.5 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-55 ${color}`}>{icon}{label}</button>;
 }
 
 function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "green" | "blue" | "amber" | "red" | "purple" | "neutral" }) {

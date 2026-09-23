@@ -235,11 +235,16 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
     router.replace("/login");
   }
 
+  function beginInternalNavigation(href: string) {
+    window.dispatchEvent(new Event("norwyn:navigation"));
+    setPendingHref(href);
+  }
+
   return (
     <div className="min-h-screen bg-[color:var(--ds-bg)] lg:grid" style={{ gridTemplateColumns: isCollapsed ? "78px minmax(0,1fr)" : "248px minmax(0,1fr)" }}>
       <aside className="app-sidebar flex border-b border-white/70 bg-brand-teal px-4 py-4 text-white transition-[width] lg:min-h-screen lg:flex-col lg:border-b-0 lg:border-r">
         <div className="flex items-center justify-between gap-3 lg:block">
-          <Link href="/norwyn" className="flex justify-center">
+          <Link href="/norwyn" prefetch onClick={() => beginInternalNavigation("/norwyn")} className="flex justify-center">
             <Image
               src="/brand/logo-horizontal-fundo-escuro.png"
               alt="Juliana Coutinho"
@@ -291,7 +296,7 @@ export function AppShell({ children, activeItem = "agenda", allowedItems, role }
                           event.preventDefault();
                           return;
                         }
-                        setPendingHref(item.href);
+                        beginInternalNavigation(item.href);
                       }}
                       title={isDisabled ? "Módulo em desenvolvimento. Em breve estará disponível." : item.label}
                       data-active={isActive}

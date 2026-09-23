@@ -3,8 +3,7 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { getAdoptionDirectory, getCachedAdoptionAnalytics } from "@/modules/adocao/services/adoption-analytics";
-import type { AdoptionPeriodKey } from "@/modules/adocao/types";
+import { adoptionModuleLabels, getAdoptionDirectory } from "@/modules/adocao/services/adoption-analytics";
 import type { RelatorioAgendamento, RelatorioBlocoKey, RelatorioDestinatario, RelatorioEnvio, RelatorioFiltros, RelatorioPeriodo, RelatoriosContext, RelatorioTipoResumo } from "@/modules/relatorios/types";
 import { escapeTelegramHtml, formatTelegramDateTime, telegramGreetingHeader } from "@/modules/relatorios/utils/telegram-format";
 
@@ -31,7 +30,15 @@ type BlockDiagnostic = {
   reason?: string;
   lines: number;
 };
-type DispatchOptions = { origin?: "manual" | "agendado" | "preview" | "sistema"; createLog?: boolean; requireActive?: boolean };
+type DispatchOptions = { origin?: "manual" | "agendado" | "preview" | "sistema"; createLog?: boolean; requireActive?: boolean; deadlineAt?: number };
+type AdoptionReportPerson = { userId: string; name: string; role: string | null; lastAccess: string | null; activeDays: number; sessions: number; pageViews: number; topModules: Array<{ module: string; views: number }> };
+type AdoptionReportSummary = {
+  people: AdoptionReportPerson[];
+  topModule: { module: string; views: number } | null;
+  experience: { measuredNavigations: number; medianMs: number | null; slowLoads: number; errors: number; successRate: number | null };
+  recentActions: Array<{ userName: string | null; module: string; pagePath: string; eventName: string; createdAt: string }>;
+  recentErrors: Array<{ userName: string | null; module: string; pagePath: string; eventName: string; createdAt: string }>;
+};
 
 const tz = "America/Sao_Paulo";
 const writeRoles = new Set(["ADMIN", "ESPECIALISTA", "SUPORTE", "OPERACIONAL"]);
@@ -324,12 +331,12 @@ async function alunoBlock(client: AnyClient, tenantId: string, filters: Relatori
   if (!result.data.length) return blockEmpty("aluno_360", title, sourceName, "Aluno nao encontrado no recorte.", "alunos selecionados");
   return { key: "aluno_360", title, source: sourceName, period: "alunos selecionados", status: "success", empty: "Aluno nao encontrado no recorte.", lines: result.data.flatMap((student) => ["• " + (student.display_name ?? student.email ?? student.customer_id), "  LTV: " + money(n(student.ltv_brl)) + " · " + n(student.purchase_count) + " compra(s) · " + n(student.product_count) + " produto(s)", "  Ultima compra: " + date(student.last_purchase_at) + " · Ultimo acesso: " + date(student.last_access_at)]) };
 }
-function adoptionPeriod(period: RelatorioPeriodo): AdoptionPeriodKey {
-  if (period === "ultimos_7d") return "7d";
-  if (period === "ultimos_15d") return "15d";
-  if (period === "ultimos_90d") return "90d";
-  if (period === "hoje") return "today";
-  return "30d";
+function adoptionPeriod(period: RelatorioPeriodo) {
+  if (period === "ultimos_7d") return { days: 7, label: "Últimos 7 dias" };
+  if (period === "ultimos_15d") return { days: 15, label: "Últimos 15 dias" };
+  if (period === "ultimos_90d") return { days: 90, label: "Últimos 90 dias" };
+  if (period === "hoje") return { days: 1, label: "Hoje" };
+  return { days: 30, label: "Últimos 30 dias" };
 }
 function lastAccessLabel(value: string | null) {
   if (!value) return "sem atividade registrada";
@@ -340,11 +347,21 @@ function lastAccessLabel(value: string | null) {
 }
 async function adoptionBlock(client: AnyClient, tenantId: string, filters: RelatorioFiltros, compact: boolean): Promise<Block> {
   const sourceName = "adoption_events";
+  const startedAt = performance.now();
+  const period = adoptionPeriod(cfg(filters, "adocao").periodo);
   try {
-    const analytics = await getCachedAdoptionAnalytics(client, tenantId);
-    const snapshot = analytics.snapshots[adoptionPeriod(cfg(filters, "adocao").periodo)];
-    const people = snapshot.people.filter((person) => (!filters.adoption_user_id || person.userId === filters.adoption_user_id) && (!filters.adoption_role || person.role === filters.adoption_role));
-    if (!people.length) return blockEmpty("adocao", `📊 Adoção — ${snapshot.periodLabel.toLowerCase()}`, sourceName, "Sem uso registrado para o filtro selecionado.", snapshot.periodLabel);
+    const fromDay = plusDays(-(period.days - 1));
+    const { data, error } = await client.rpc("get_adoption_report_summary", {
+      p_tenant_id: tenantId,
+      p_from: `${fromDay}T00:00:00-03:00`,
+      p_to: new Date().toISOString(),
+      p_user_id: filters.adoption_user_id || null,
+      p_role: filters.adoption_role || null,
+    });
+    if (error) throw error;
+    const summary = (data ?? { people: [], topModule: null, experience: { measuredNavigations: 0, medianMs: null, slowLoads: 0, errors: 0, successRate: null }, recentActions: [], recentErrors: [] }) as AdoptionReportSummary;
+    const people = Array.isArray(summary.people) ? summary.people : [];
+    if (!people.length) return blockEmpty("adocao", `📊 Adoção — ${period.label.toLowerCase()}`, sourceName, "Sem uso registrado para o filtro selecionado.", period.label);
     const selectedSections = filters.adoption_sections?.length ? new Set(filters.adoption_sections) : null;
     const section = (key: NonNullable<RelatorioFiltros["adoption_sections"]>[number]) => !selectedSections || selectedSections.has(key);
     const lines = people.flatMap((person) => {
@@ -353,27 +370,30 @@ async function adoptionBlock(client: AnyClient, tenantId: string, filters: Relat
       if (section("access")) personLines.push(`Último acesso: ${lastAccessLabel(person.lastAccess)}`);
       const totals = [section("active_days") ? `${person.activeDays} dia(s) ativo(s)` : null, section("sessions") ? `${person.sessions} sessão(ões)` : null, section("pages") ? `${person.pageViews} página(s)` : null].filter(Boolean);
       if (totals.length) personLines.push(totals.join(" · "));
-      if (section("modules") && person.topModules.length) personLines.push("Mais usados:", ...person.topModules.map((module) => `• ${module.label} — ${module.views}`));
+      if (section("modules") && person.topModules.length) personLines.push("Mais usados:", ...person.topModules.map((module) => `• ${adoptionModuleLabels[module.module] ?? module.module} — ${module.views}`));
       personLines.push("");
       return personLines;
     });
-    if (compact && snapshot.modules[0]) lines.push(`Mais usado: ${snapshot.modules[0].label}`);
+    if (compact && summary.topModule) lines.push(`Mais usado: ${adoptionModuleLabels[summary.topModule.module] ?? summary.topModule.module}`);
     if (!compact && section("actions")) {
-      const actionItems = snapshot.recentActivity.filter((item) => item.eventName !== "page_view" && item.eventName !== "error" && (!filters.adoption_user_id || item.userId === filters.adoption_user_id)).slice(0, 5);
-      if (actionItems.length) lines.push("", "Ações recentes:", ...actionItems.map((item) => `• ${item.userName} · ${item.pageLabel}`));
+      if (summary.recentActions.length) lines.push("", "Ações recentes:", ...summary.recentActions.map((item) => `• ${item.userName ?? "Usuário"} · ${adoptionModuleLabels[item.module] ?? item.pagePath}`));
     }
-    if (section("experience") && snapshot.experience.measuredNavigations > 0) {
-      lines.push("", "⚡ Experiência", `${snapshot.experience.successRate == null ? "" : `✅ ${snapshot.experience.successRate.toFixed(1)}% das navegações sem erro`}`.trim(), `Mediana: ${Math.round((snapshot.experience.medianPageLoadMs ?? 0) / 100) / 10}s`, `⚠️ ${snapshot.experience.slowLoads} carregamento(s) lento(s)`, `🔴 ${snapshot.experience.errors} erro(s)`);
+    if (section("experience") && summary.experience.measuredNavigations > 0) {
+      lines.push("", "⚡ Experiência", `${summary.experience.successRate == null ? "" : `✅ ${summary.experience.successRate.toFixed(1)}% das navegações sem erro`}`.trim(), `Mediana: ${Math.round((summary.experience.medianMs ?? 0) / 100) / 10}s`, `⚠️ ${summary.experience.slowLoads} carregamento(s) lento(s)`, `🔴 ${summary.experience.errors} erro(s)`);
     } else if (section("experience")) {
       lines.push("", "⚡ Experiência", "Medição iniciada; ainda não há amostra suficiente.");
     }
-    if (!compact && section("errors") && snapshot.experience.recentErrors.length) lines.push("", "Erros recentes:", ...snapshot.experience.recentErrors.slice(0, 5).map((item) => `• ${item.moduleLabel} · ${item.pageLabel}`));
-    if (!compact && people.length >= 2 && people[0]?.topModule && people[1]?.topModule && people[0].topModule !== people[1].topModule) {
-      lines.push("", "💡 Leitura", `${people[0].name} concentra o uso em ${people[0].topModule}; ${people[1].name}, em ${people[1].topModule}.`);
+    if (!compact && section("errors") && summary.recentErrors.length) lines.push("", "Erros recentes:", ...summary.recentErrors.map((item) => `• ${adoptionModuleLabels[item.module] ?? item.module} · ${item.pagePath}`));
+    const firstTop = people[0]?.topModules[0]?.module;
+    const secondTop = people[1]?.topModules[0]?.module;
+    if (!compact && people.length >= 2 && firstTop && secondTop && firstTop !== secondTop) {
+      lines.push("", "💡 Leitura", `${people[0].name} concentra o uso em ${adoptionModuleLabels[firstTop] ?? firstTop}; ${people[1].name}, em ${adoptionModuleLabels[secondTop] ?? secondTop}.`);
     }
-    return { key: "adocao", title: `📊 Adoção — ${snapshot.periodLabel.toLowerCase()}`, source: sourceName, period: snapshot.periodLabel, status: "success", lines: lines.filter(Boolean) };
+    return { key: "adocao", title: `📊 Adoção — ${period.label.toLowerCase()}`, source: sourceName, period: period.label, status: "success", lines: lines.filter(Boolean) };
   } catch (error) {
     return blockError("adocao", "📊 Adoção", sourceName, errorMessage(error), "período selecionado");
+  } finally {
+    console.info("relatorios.send_now.adoption_ms", Math.round(performance.now() - startedAt));
   }
 }
 function recommendationBlock(blocks: Block[]): Block {
@@ -389,19 +409,26 @@ function shouldRenderBlock(block: Block, filters: RelatorioFiltros) {
   return cfg(filters, block.key).empty_behavior === "show_empty";
 }
 async function buildBlocks(client: AnyClient, tenantId: string, filters: RelatorioFiltros, tipo: RelatorioTipoResumo): Promise<{ requested: Block[]; rendered: Block[]; diagnostics: BlockDiagnostic[] }> {
-  const requested: Block[] = [];
-  if (enabled(filters, "agenda")) requested.push(await agendaBlock(client, tenantId, cfg(filters, "agenda").periodo));
-  if (enabled(filters, "decisoes")) requested.push(await decisionsBlock(client, tenantId));
-  if (enabled(filters, "presence")) requested.push(await presenceBlock(client, tenantId));
-  if (enabled(filters, "marketing_instagram")) requested.push(await instagramBlock(client, tenantId));
-  if (enabled(filters, "marketing_ads")) requested.push(await adsBlock(client, tenantId, cfg(filters, "marketing_ads").periodo));
-  if (enabled(filters, "comercial")) requested.push(await comercialBlock(client, tenantId, cfg(filters, "comercial").periodo));
-  if (enabled(filters, "financeiro")) requested.push(await financeBlock(client, tenantId, cfg(filters, "financeiro").periodo));
-  if (enabled(filters, "interacoes")) requested.push(await interactionsBlock(client, tenantId, cfg(filters, "interacoes").periodo));
-  if (enabled(filters, "atividades")) requested.push(await activitiesBlock(client, tenantId));
-  if (enabled(filters, "aluno_360")) requested.push(await alunoBlock(client, tenantId, filters));
-  if (enabled(filters, "adocao")) requested.push(await adoptionBlock(client, tenantId, filters, tipo === "resumo_executivo"));
+  const timings: Record<string, number> = {};
+  const timed = async (key: string, load: () => Promise<Block>) => {
+    const startedAt = performance.now();
+    try { return await load(); } finally { timings[key] = Math.round(performance.now() - startedAt); }
+  };
+  const tasks: Array<Promise<Block>> = [];
+  if (enabled(filters, "agenda")) tasks.push(timed("agenda", () => agendaBlock(client, tenantId, cfg(filters, "agenda").periodo)));
+  if (enabled(filters, "decisoes")) tasks.push(timed("decisoes", () => decisionsBlock(client, tenantId)));
+  if (enabled(filters, "presence")) tasks.push(timed("presence", () => presenceBlock(client, tenantId)));
+  if (enabled(filters, "marketing_instagram")) tasks.push(timed("instagram", () => instagramBlock(client, tenantId)));
+  if (enabled(filters, "marketing_ads")) tasks.push(timed("ads", () => adsBlock(client, tenantId, cfg(filters, "marketing_ads").periodo)));
+  if (enabled(filters, "comercial")) tasks.push(timed("comercial", () => comercialBlock(client, tenantId, cfg(filters, "comercial").periodo)));
+  if (enabled(filters, "financeiro")) tasks.push(timed("financeiro", () => financeBlock(client, tenantId, cfg(filters, "financeiro").periodo)));
+  if (enabled(filters, "interacoes")) tasks.push(timed("interacoes", () => interactionsBlock(client, tenantId, cfg(filters, "interacoes").periodo)));
+  if (enabled(filters, "atividades")) tasks.push(timed("atividades", () => activitiesBlock(client, tenantId)));
+  if (enabled(filters, "aluno_360")) tasks.push(timed("aluno_360", () => alunoBlock(client, tenantId, filters)));
+  if (enabled(filters, "adocao")) tasks.push(timed("adocao", () => adoptionBlock(client, tenantId, filters, tipo === "resumo_executivo")));
+  const requested: Block[] = await Promise.all(tasks);
   if (enabled(filters, "recomendacoes")) requested.push(recommendationBlock(requested));
+  console.info("relatorios.send_now.blocks_ms", timings);
   const rendered = requested.filter((block) => shouldRenderBlock(block, filters));
   const diagnostics = requested.map((block) => ({ key: block.key, title: block.title, status: block.status, rendered: rendered.includes(block), source: block.source, period: block.period, reason: block.reason ?? (block.status === "empty" ? block.empty : undefined), lines: block.lines.length }));
   return { requested, rendered, diagnostics };
@@ -476,16 +503,26 @@ async function insertEnvioLog(client: AnyClient, payload: Record<string, unknown
     status: payload.status,
     assunto: payload.assunto,
     mensagem: payload.mensagem,
+    erro: payload.erro,
     metadata: { ...(payload.metadata as Record<string, unknown>), origem: payload.origem, resumo: payload.resumo, modulos: payload.modulos, filtros: payload.filtros, generated_at: payload.generated_at },
   };
   const retry = await client.from("relatorio_envios").insert(fallback).select("*").single();
   if (retry.error) throw retry.error;
   return retry.data as RelatorioEnvio;
 }
-async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean, scheduleIdForLog: string | null = schedule.id) {
+async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean, scheduleIdForLog: string | null = schedule.id, deadlineAt?: number) {
+  const totalStartedAt = performance.now();
+  const assertWithinDeadline = () => { if (deadlineAt && Date.now() >= deadlineAt) throw new Error("REPORT_GENERATION_TIMEOUT"); };
+  assertWithinDeadline();
   const filters = filtersFor(schedule.filtros, schedule.tipo_resumo);
+  const blocksStartedAt = performance.now();
   const result = await buildBlocks(client, tenantId, filters, schedule.tipo_resumo);
+  assertWithinDeadline();
+  const blocksMs = Math.round(performance.now() - blocksStartedAt);
+  const renderStartedAt = performance.now();
   const text = message(schedule.tipo_resumo, result.rendered, recipient);
+  assertWithinDeadline();
+  const renderMs = Math.round(performance.now() - renderStartedAt);
   const modules = result.rendered.map((block) => block.key);
   const requestedModules = result.requested.map((block) => block.key);
   const renderedCount = result.diagnostics.filter((block) => block.rendered).length;
@@ -494,36 +531,44 @@ async function prepareDispatch(client: AnyClient, tenantId: string, schedule: Re
   const summary = "Solicitados: " + result.requested.length + " · Renderizados: " + renderedCount + " · Sem dados: " + emptyCount + " · Erro: " + errorCount;
   const metadata = { recipient_name: recipient.nome, schedule_name: schedule.nome, requested_modules: requestedModules, rendered_modules: modules, block_diagnostics: result.diagnostics, block_counts: { requested: result.requested.length, rendered: renderedCount, empty: emptyCount, error: errorCount } };
   let log: RelatorioEnvio | null = null;
+  const historyStartedAt = performance.now();
   if (createLog) {
     log = await insertEnvioLog(client, { tenant_id: tenantId, agendamento_id: scheduleIdForLog, destinatario_id: recipient.id, tipo_resumo: schedule.tipo_resumo, canal: schedule.canal, destino: schedule.canal === "telegram" ? recipient.telegram_chat_id : recipient.email, status: "preparado", origem: origin, assunto: subject(schedule.tipo_resumo), resumo: summary, mensagem: text, modulos: modules, filtros: filters, metadata, generated_at: new Date().toISOString() });
   }
-  return { schedule, recipient, log, subject: subject(schedule.tipo_resumo), text, summary, modules, requestedModules, filters, diagnostics: result.diagnostics, channel: schedule.canal, telegramChatId: recipient.telegram_chat_id };
+  const timings = { blocks_ms: blocksMs, render_ms: renderMs, history_ms: Math.round(performance.now() - historyStartedAt), prepare_total_ms: Math.round(performance.now() - totalStartedAt) };
+  console.info("relatorios.send_now.prepare_ms", timings);
+  return { schedule, recipient, log, subject: subject(schedule.tipo_resumo), text, summary, modules, requestedModules, filters, diagnostics: result.diagnostics, channel: schedule.canal, telegramChatId: recipient.telegram_chat_id, timings };
 }
-export async function getRelatorioPreviewFromDraft(payload: Partial<RelatorioAgendamento>) {
+export async function getRelatorioPreviewFromDraft(payload: Partial<RelatorioAgendamento>, options: DispatchOptions = {}) {
   const auth = await assertRelatoriosWriteAccess();
+  const readStartedAt = performance.now();
   const recipientId = String(payload.destinatario_id ?? "");
   if (!recipientId) throw new Error("Escolha um destino antes de gerar a pre-visualizacao real.");
   const { data: recipient, error: recipientError } = await auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).eq("id", recipientId).maybeSingle();
   if (recipientError) throw recipientError;
   if (!recipient) throw new Error("Destinatario do relatorio nao encontrado.");
   const draft = { ...payload, id: "preview", tenant_id: auth.tenantId, status: payload.status ?? "rascunho", ativo: payload.ativo ?? true, canal: payload.canal ?? "telegram", tipo_resumo: payload.tipo_resumo ?? "personalizado", filtros: payload.filtros ?? {}, incluir_modulos: payload.incluir_modulos ?? [] } as RelatorioAgendamento;
-  return prepareDispatch(auth.dataClient, auth.tenantId, draft, recipient as RelatorioDestinatario, "preview", false);
+  const dispatch = await prepareDispatch(auth.dataClient, auth.tenantId, draft, recipient as RelatorioDestinatario, "preview", false, draft.id, options.deadlineAt);
+  return { ...dispatch, timings: { ...dispatch.timings, report_read_ms: Math.round(performance.now() - readStartedAt - dispatch.timings.prepare_total_ms) } };
 }
-export async function getRelatorioDispatchFromDraft(payload: Partial<RelatorioAgendamento>) {
+export async function getRelatorioDispatchFromDraft(payload: Partial<RelatorioAgendamento>, options: DispatchOptions = {}) {
   const auth = await assertRelatoriosWriteAccess();
+  const readStartedAt = performance.now();
   const recipientId = String(payload.destinatario_id ?? "");
   if (!recipientId) throw new Error("Escolha um destino antes de enviar o relatorio.");
   const { data: recipient, error: recipientError } = await auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).eq("id", recipientId).maybeSingle();
   if (recipientError) throw recipientError;
   if (!recipient) throw new Error("Destinatario do relatorio nao encontrado.");
   const draft = { ...payload, id: "manual", tenant_id: auth.tenantId, status: "rascunho", ativo: false, canal: payload.canal ?? "telegram", tipo_resumo: payload.tipo_resumo ?? "personalizado", filtros: payload.filtros ?? {}, incluir_modulos: payload.incluir_modulos ?? [] } as RelatorioAgendamento;
-  return prepareDispatch(auth.dataClient, auth.tenantId, draft, recipient as RelatorioDestinatario, "manual", true, null);
+  const dispatch = await prepareDispatch(auth.dataClient, auth.tenantId, draft, recipient as RelatorioDestinatario, "manual", true, null, options.deadlineAt);
+  return { ...dispatch, timings: { ...dispatch.timings, report_read_ms: Math.max(0, Math.round(performance.now() - readStartedAt - dispatch.timings.prepare_total_ms)) } };
 }
 export async function getRelatorioDispatchByScheduleId(scheduleId: string, options: DispatchOptions = {}) {
-  const auth = await assertRelatoriosWriteAccess(); const origin = options.origin ?? "manual"; const createLog = options.createLog ?? true;
+  const auth = await assertRelatoriosWriteAccess(); const origin = options.origin ?? "manual"; const createLog = options.createLog ?? true; const readStartedAt = performance.now();
   const { data: schedule, error } = await auth.dataClient.from("relatorio_agendamentos").select("*").eq("tenant_id", auth.tenantId).eq("id", scheduleId).maybeSingle(); if (error) throw error; if (!schedule) throw new Error("Agendamento nao encontrado."); if (options.requireActive && !isActive(schedule as RelatorioAgendamento)) throw new Error("Agendamento nao esta ativo.");
   const { data: recipient, error: recipientError } = await auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).eq("id", schedule.destinatario_id).maybeSingle(); if (recipientError) throw recipientError; if (!recipient) throw new Error("Destinatario do agendamento nao encontrado.");
-  return prepareDispatch(auth.dataClient, auth.tenantId, schedule as RelatorioAgendamento, recipient as RelatorioDestinatario, origin, createLog);
+  const dispatch = await prepareDispatch(auth.dataClient, auth.tenantId, schedule as RelatorioAgendamento, recipient as RelatorioDestinatario, origin, createLog, schedule.id, options.deadlineAt);
+  return { ...dispatch, timings: { ...dispatch.timings, report_read_ms: Math.max(0, Math.round(performance.now() - readStartedAt - dispatch.timings.prepare_total_ms)) } };
 }
 export async function getRelatorioDispatchesDue(now: Date | string = new Date(), windowMinutes = 20) {
   const runAt = typeof now === "string" ? (() => { const [h, m] = now.split(":").map(Number); const d = new Date(); if (Number.isFinite(h)) d.setHours(h, Number.isFinite(m) ? m : 0, 0, 0); return d; })() : now;
@@ -543,9 +588,45 @@ export async function getRelatorioDispatchesDue(now: Date | string = new Date(),
 }
 export async function updateRelatorioEnvioStatus(params: { logId: string; status: "enviado" | "erro" | "ignorado"; error?: string; metadata?: Record<string, unknown> }) {
   const client = createAdminClient() ?? (await createClient()); const payload: Record<string, unknown> = { status: params.status, updated_at: new Date().toISOString() };
-  if (params.status === "enviado") payload.sent_at = new Date().toISOString(); if (params.error) payload.erro = params.error; if (params.metadata) payload.metadata = params.metadata;
+  if (params.status === "enviado") payload.sent_at = new Date().toISOString(); if (params.error) payload.erro = params.error;
+  if (params.metadata) {
+    const current = await client.from("relatorio_envios").select("metadata").eq("id", params.logId).maybeSingle();
+    payload.metadata = { ...(current.data?.metadata ?? {}), ...params.metadata };
+  }
   const { data, error } = await client.from("relatorio_envios").update(payload).eq("id", params.logId).select("*").single(); if (error) throw error;
   const envio = data as RelatorioEnvio;
   if (params.status === "enviado" && envio.destinatario_id) { await client.from("relatorio_destinatarios").update({ last_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", envio.destinatario_id); if (envio.agendamento_id) await client.from("relatorio_agendamentos").update({ last_run_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", envio.agendamento_id); }
   return envio;
+}
+
+export async function recordRelatorioEnvioFailure(params: { scheduleId?: string; payload?: Partial<RelatorioAgendamento>; error: string; stage: string; durationMs: number; timings?: Record<string, number> }) {
+  const auth = await assertRelatoriosWriteAccess();
+  const scheduleResult = params.scheduleId
+    ? await auth.dataClient.from("relatorio_agendamentos").select("*").eq("tenant_id", auth.tenantId).eq("id", params.scheduleId).maybeSingle()
+    : { data: params.payload ?? null, error: null };
+  const schedule = scheduleResult.data as Partial<RelatorioAgendamento> | null;
+  if (!schedule) return null;
+  const recipientId = String(schedule.destinatario_id ?? "");
+  const recipientResult = recipientId
+    ? await auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).eq("id", recipientId).maybeSingle()
+    : { data: null };
+  const recipient = recipientResult.data as RelatorioDestinatario | null;
+  return insertEnvioLog(auth.dataClient, {
+    tenant_id: auth.tenantId,
+    agendamento_id: params.scheduleId || null,
+    destinatario_id: recipient?.id ?? null,
+    tipo_resumo: schedule.tipo_resumo ?? "personalizado",
+    canal: schedule.canal ?? "telegram",
+    destino: recipient?.telegram_chat_id ?? recipient?.email ?? null,
+    status: "erro",
+    origem: "manual",
+    assunto: subject(schedule.tipo_resumo ?? "personalizado"),
+    resumo: "Falha durante o envio manual.",
+    mensagem: null,
+    modulos: schedule.incluir_modulos ?? [],
+    filtros: schedule.filtros ?? {},
+    erro: params.error,
+    metadata: { failure_stage: params.stage, duration_ms: params.durationMs, timings: params.timings ?? {}, attempted_by: auth.userId },
+    generated_at: new Date().toISOString(),
+  });
 }
