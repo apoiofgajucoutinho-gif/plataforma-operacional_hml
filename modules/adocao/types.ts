@@ -112,3 +112,27 @@ export type AdoptionAnalytics = {
   audit: AdoptionAudit;
   updatedAt: string | null;
 };
+
+export type AdoptionActivityKind = "all" | "access" | "action";
+
+export type AdoptionActivitySummary = {
+  userId: string;
+  name: string;
+  email: string | null;
+  role: string | null;
+  firstAccess: string | null;
+  lastAccess: string | null;
+  sessions: number;
+  pageViews: number;
+  modulesVisited: Array<{ key: string; label: string; views: number }>;
+  actions: number;
+  lastAction: AdoptionTimelineItem | null;
+  status: "Navegou e realizou ações" | "Somente navegação registrada" | "Sem atividade registrada";
+};
+
+export type AdoptionActivityResponse = {
+  summary: AdoptionActivitySummary | null;
+  items: AdoptionTimelineItem[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  period: { from: string; to: string; label: string };
+};

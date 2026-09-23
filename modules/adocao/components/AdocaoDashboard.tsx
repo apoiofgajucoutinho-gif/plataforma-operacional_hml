@@ -1,32 +1,50 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, AlertTriangle, BarChart3, CalendarDays, Clock3, Eye, Gauge, LayoutGrid, Users, UsersRound } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Activity, AlertTriangle, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Clock3, Eye, Gauge, LayoutGrid, MousePointerClick, Users, UsersRound, Zap } from "lucide-react";
 import { DataFreshness, EmptyState, IconPill, MetricCard, PageHeader, SectionHeader, StatusBadge, Surface } from "@/components/ui/norwyn-design-system";
-import type { AdoptionAnalytics, AdoptionPeriodKey, AdoptionPerson, AdoptionSnapshot } from "@/modules/adocao/types";
+import type { AdoptionActivityKind, AdoptionActivityResponse, AdoptionAnalytics, AdoptionPeriodKey, AdoptionPerson, AdoptionSnapshot } from "@/modules/adocao/types";
 
-type Tab = "overview" | "people" | "modules" | "experience";
+type Tab = "overview" | "people" | "modules" | "activity" | "experience";
 const periods: Array<{ key: AdoptionPeriodKey; label: string }> = [{ key: "today", label: "Hoje" }, { key: "7d", label: "7 dias" }, { key: "15d", label: "15 dias" }, { key: "30d", label: "30 dias" }, { key: "90d", label: "90 dias" }];
-const tabs: Array<{ key: Tab; label: string }> = [{ key: "overview", label: "Visão Geral" }, { key: "people", label: "Pessoas" }, { key: "modules", label: "Módulos" }, { key: "experience", label: "Experiência" }];
+const tabs: Array<{ key: Tab; label: string }> = [{ key: "overview", label: "Visão Geral" }, { key: "people", label: "Pessoas" }, { key: "modules", label: "Módulos" }, { key: "activity", label: "Atividade" }, { key: "experience", label: "Experiência" }];
 
 export function AdocaoDashboard({ analytics, diagnostic, updatedAt }: { analytics: AdoptionAnalytics | null; diagnostic: string | null; updatedAt: string | null }) {
-  const [period, setPeriod] = useState<AdoptionPeriodKey>("30d");
-  const [tab, setTab] = useState<Tab>("overview");
-  const [selectedUser, setSelectedUser] = useState("all");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const requestedTab = tabs.some((item) => item.key === searchParams.get("tab")) ? searchParams.get("tab") as Tab : "overview";
+  const requestedPeriod = periods.some((item) => item.key === searchParams.get("period")) ? searchParams.get("period") as AdoptionPeriodKey : "30d";
+  const [period, setPeriod] = useState<AdoptionPeriodKey>(requestedPeriod);
+  const [tab, setTab] = useState<Tab>(requestedTab);
+  const [selectedUser, setSelectedUser] = useState(searchParams.get("user") ?? "all");
   const snapshot = analytics?.snapshots[period] ?? null;
   const visibleActivity = useMemo(() => snapshot?.recentActivity.filter((item) => selectedUser === "all" || item.userId === selectedUser) ?? [], [selectedUser, snapshot]);
+  useEffect(() => { setTab(requestedTab); setSelectedUser(searchParams.get("user") ?? "all"); }, [requestedTab, searchParams]);
+  function updateQuery(patch: Record<string, string | null>) {
+    const next = new URLSearchParams(searchParams.toString());
+    Object.entries(patch).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key));
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }
+  function selectTab(nextTab: Tab) {
+    setTab(nextTab);
+    updateQuery({ tab: nextTab === "overview" ? null : nextTab, period: nextTab === "activity" ? "today" : period, user: nextTab === "activity" ? searchParams.get("user") : selectedUser === "all" ? null : selectedUser });
+  }
+  function openActivity(userId: string) { setSelectedUser(userId); setTab("activity"); updateQuery({ tab: "activity", user: userId, period: "today" }); }
   return <div className="norwyn-ds-page space-y-5">
     <PageHeader eyebrow="Norwyn" title="Adoção" description="Uso da plataforma e saúde da experiência, com leitura por pessoa, módulo e página." aside={<DataFreshness label={updatedAt ? `Atualizado em ${dateTime(updatedAt)}` : "Sem eventos registrados"} stale={!updatedAt} />} />
     {diagnostic ? <Surface><p className="font-semibold text-[color:var(--ds-text)]">{diagnostic}</p></Surface> : null}
     {!snapshot ? <Surface><EmptyState title="Adoção ainda sem dados">O tracking começará a aparecer após navegações autenticadas.</EmptyState></Surface> : <>
       <Surface className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap gap-2">{tabs.map((item) => <FilterButton key={item.key} active={tab === item.key} onClick={() => setTab(item.key)}>{item.label}</FilterButton>)}</div>
-        <div className="flex flex-wrap gap-2">{periods.map((item) => <FilterButton key={item.key} active={period === item.key} onClick={() => setPeriod(item.key)}>{item.label}</FilterButton>)}</div>
+        <div className="flex flex-wrap gap-2">{tabs.map((item) => <FilterButton key={item.key} active={tab === item.key} onClick={() => selectTab(item.key)}>{item.label}</FilterButton>)}</div>
+        {tab !== "activity" ? <div className="flex flex-wrap gap-2">{periods.map((item) => <FilterButton key={item.key} active={period === item.key} onClick={() => { setPeriod(item.key); updateQuery({ period: item.key === "30d" ? null : item.key }); }}>{item.label}</FilterButton>)}</div> : null}
       </Surface>
       {tab === "overview" ? <Overview snapshot={snapshot} onSelectUser={(id) => { setSelectedUser(id); setTab("people"); }} /> : null}
-      {tab === "people" ? <People snapshot={snapshot} selectedUser={selectedUser} setSelectedUser={setSelectedUser} activity={visibleActivity} /> : null}
+      {tab === "people" ? <People snapshot={snapshot} selectedUser={selectedUser} setSelectedUser={setSelectedUser} activity={visibleActivity} onOpenActivity={openActivity} /> : null}
       {tab === "modules" ? <Modules snapshot={snapshot} /> : null}
+      {tab === "activity" ? <ActivityView people={analytics?.snapshots["30d"].people ?? []} initialUser={searchParams.get("user")} query={searchParams} updateQuery={updateQuery} /> : null}
       {tab === "experience" ? <Experience snapshot={snapshot} /> : null}
     </>}
   </div>;
@@ -50,13 +68,89 @@ function Overview({ snapshot, onSelectUser }: { snapshot: AdoptionSnapshot; onSe
   </>;
 }
 
-function People({ snapshot, selectedUser, setSelectedUser, activity }: { snapshot: AdoptionSnapshot; selectedUser: string; setSelectedUser: (id: string) => void; activity: AdoptionSnapshot["recentActivity"] }) {
+function People({ snapshot, selectedUser, setSelectedUser, activity, onOpenActivity }: { snapshot: AdoptionSnapshot; selectedUser: string; setSelectedUser: (id: string) => void; activity: AdoptionSnapshot["recentActivity"]; onOpenActivity: (id: string) => void }) {
   const selected = snapshot.people.find((person) => person.userId === selectedUser) ?? null;
   return <div className="space-y-4">
-    <Surface><SectionHeader title="Pessoas" description="Distribuição de uso por usuário autenticado." action={<select className="h-10 rounded-full border border-[color:var(--ds-border)] bg-white px-4 text-sm font-semibold text-[color:var(--ds-text)]" value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}><option value="all">Todos os usuários</option>{snapshot.people.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}</select>} /><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{snapshot.people.map((person) => <PersonCard key={person.userId} person={person} onClick={() => setSelectedUser(person.userId)} selected={selectedUser === person.userId} />)}</div></Surface>
+    <Surface><SectionHeader title="Pessoas" description="Distribuição de uso por usuário autenticado." action={<select className="h-10 rounded-full border border-[color:var(--ds-border)] bg-white px-4 text-sm font-semibold text-[color:var(--ds-text)]" value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}><option value="all">Todos os usuários</option>{snapshot.people.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}</select>} /><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{snapshot.people.map((person) => <PersonCard key={person.userId} person={person} onClick={() => onOpenActivity(person.userId)} selected={selectedUser === person.userId} />)}</div></Surface>
     {selected ? <><Surface><p className="font-semibold text-[color:var(--ds-text)]">{selected.name}</p><p className="mt-1 text-sm text-[color:var(--ds-text-secondary)]">{selected.email ?? "E-mail não disponível"} · {roleLabel(selected.role)}</p></Surface><section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><MetricCard label="Último acesso" value={relativeDate(selected.lastAccess)} icon={Activity} tone={statusTone(selected.status)} /><MetricCard label="Dias ativos" value={String(selected.activeDays)} period={snapshot.periodLabel} icon={CalendarDays} /><MetricCard label="Sessões" value={String(selected.sessions)} icon={Clock3} /><MetricCard label="Page views" value={String(selected.pageViews)} icon={Eye} /><MetricCard label="Módulos usados" value={String(selected.modulesUsed)} icon={LayoutGrid} /><MetricCard label="Mais usado" value={selected.topModule ?? "Sem uso"} icon={BarChart3} /></section><section className="grid gap-4 xl:grid-cols-2"><CompactRanking title="Módulos mais usados" rows={selected.topModules} /><CompactRanking title="Páginas mais acessadas" rows={selected.topPages} /></section></> : null}
     <Surface><SectionHeader title={selected ? `Atividade recente — ${selected.name}` : "Atividade recente"} description="Navegação e ações operacionais relevantes; eventos técnicos repetitivos são omitidos." /><Timeline items={activity} /></Surface>
   </div>;
+}
+
+const activityPeriods = [{ key: "today", label: "Hoje" }, { key: "7d", label: "7 dias" }, { key: "15d", label: "15 dias" }, { key: "30d", label: "30 dias" }, { key: "custom", label: "Personalizado" }] as const;
+
+function ActivityView({ people, initialUser, query, updateQuery }: { people: AdoptionPerson[]; initialUser: string | null; query: URLSearchParams; updateQuery: (patch: Record<string, string | null>) => void }) {
+  const initialPerson = initialUser && people.some((person) => person.userId === initialUser) ? initialUser : people[0]?.userId ?? "all";
+  const initialPeriod = activityPeriods.some((item) => item.key === query.get("period")) ? query.get("period")! : "today";
+  const [userId, setUserId] = useState(initialPerson);
+  const [period, setActivityPeriod] = useState(initialPeriod);
+  const [module, setModule] = useState(query.get("module") ?? "all");
+  const [kind, setKind] = useState<AdoptionActivityKind>(["all", "access", "action"].includes(query.get("type") ?? "") ? query.get("type") as AdoptionActivityKind : "all");
+  const [page, setPage] = useState(Math.max(1, Number(query.get("page")) || 1));
+  const [fromDate, setFromDate] = useState(query.get("from") ?? localDay(new Date()));
+  const [toDate, setToDate] = useState(query.get("to") ?? localDay(new Date()));
+  const [data, setData] = useState<AdoptionActivityResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ period, user: userId, type: kind, page: String(page), pageSize: "20" });
+    if (module !== "all") params.set("module", module);
+    if (period === "custom") { params.set("from", fromDate); params.set("to", toDate); }
+    setLoading(true); setError(null);
+    fetch(`/api/adoption/activity?${params.toString()}`, { signal: controller.signal })
+      .then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error ?? "Não foi possível carregar a atividade."); return payload; })
+      .then((payload: AdoptionActivityResponse) => setData(payload))
+      .catch((reason) => { if (reason instanceof DOMException && reason.name === "AbortError") return; setError(reason instanceof Error ? reason.message : "Não foi possível carregar a atividade."); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [fromDate, kind, module, page, period, toDate, userId]);
+
+  function changeUser(value: string) { setUserId(value); setPage(1); updateQuery({ user: value === "all" ? null : value, page: null }); }
+  function changePeriod(value: string) { setActivityPeriod(value); setPage(1); updateQuery({ period: value, from: value === "custom" ? fromDate : null, to: value === "custom" ? toDate : null, page: null }); }
+  function changeModule(value: string) { setModule(value); setPage(1); updateQuery({ module: value === "all" ? null : value, page: null }); }
+  function changeKind(value: AdoptionActivityKind) { setKind(value); setPage(1); updateQuery({ type: value === "all" ? null : value, page: null }); }
+  const summary = data?.summary;
+  const modules = summary?.modulesVisited ?? [];
+
+  return <div className="space-y-4">
+    <Surface>
+      <SectionHeader title="Atividade" description="Diferencia navegação de ações humanas registradas, sem inferir trabalho não instrumentado." />
+      <div className="mt-4 flex flex-wrap gap-2">{activityPeriods.map((item) => <FilterButton key={item.key} active={period === item.key} onClick={() => changePeriod(item.key)}>{item.label}</FilterButton>)}</div>
+      {period === "custom" ? <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:max-w-xl"><label className="text-sm font-semibold text-[color:var(--ds-text)]">De<input type="date" value={fromDate} onChange={(event) => { setFromDate(event.target.value); updateQuery({ from: event.target.value, page: null }); }} className="mt-2 h-11 w-full rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-white px-3" /></label><label className="text-sm font-semibold text-[color:var(--ds-text)]">Até<input type="date" value={toDate} onChange={(event) => { setToDate(event.target.value); updateQuery({ to: event.target.value, page: null }); }} className="mt-2 h-11 w-full rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-white px-3" /></label></div> : null}
+      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,1fr)_minmax(200px,0.8fr)_auto]">
+        <label className="text-sm font-semibold text-[color:var(--ds-text)]">Usuário<select value={userId} onChange={(event) => changeUser(event.target.value)} className="mt-2 h-11 w-full rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-white px-3"><option value="all">Todos os usuários</option>{people.map((person) => <option key={person.userId} value={person.userId}>{person.name}{person.email ? ` · ${person.email}` : ""}</option>)}</select></label>
+        <label className="text-sm font-semibold text-[color:var(--ds-text)]">Módulo<select value={module} onChange={(event) => changeModule(event.target.value)} className="mt-2 h-11 w-full rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-white px-3"><option value="all">Todos os módulos</option>{modules.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+        <div><p className="text-sm font-semibold text-[color:var(--ds-text)]">Tipo</p><div className="mt-2 flex gap-2">{([{ key: "all", label: "Todos" }, { key: "access", label: "Acessos" }, { key: "action", label: "Ações" }] as Array<{ key: AdoptionActivityKind; label: string }>).map((item) => <FilterButton key={item.key} active={kind === item.key} onClick={() => changeKind(item.key)}>{item.label}</FilterButton>)}</div></div>
+      </div>
+    </Surface>
+
+    {error ? <Surface><p className="font-semibold text-rose-700">{error}</p></Surface> : null}
+    {loading && !data ? <Surface><p className="text-sm font-semibold text-[color:var(--ds-text-secondary)]">Carregando atividade...</p></Surface> : null}
+    {summary ? <>
+      <Surface><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-lg font-semibold text-[color:var(--ds-text)]">{summary.name}</p><p className="mt-1 text-sm text-[color:var(--ds-text-secondary)]">{summary.email ?? "E-mail não disponível"} · {roleLabel(summary.role)}</p></div><StatusBadge tone={summary.actions > 0 ? "success" : summary.pageViews > 0 ? "info" : "neutral"}>{summary.status}</StatusBadge></div>{summary.modulesVisited.length ? <div className="mt-4 flex flex-wrap gap-2">{summary.modulesVisited.map((item) => <StatusBadge key={item.key}>{item.label} · {plural(item.views, "acesso", "acessos")}</StatusBadge>)}</div> : null}</Surface>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <MetricCard label="Primeiro acesso" value={activityDate(summary.firstAccess)} icon={Clock3} tone="info" />
+        <MetricCard label="Último acesso" value={activityDate(summary.lastAccess)} icon={Activity} tone="primary" />
+        <MetricCard label="Sessões" value={formatNumber(summary.sessions)} period="janela de 30 min" icon={Users} />
+        <MetricCard label="Page views" value={formatNumber(summary.pageViews)} icon={Eye} />
+        <MetricCard label="Módulos visitados" value={formatNumber(summary.modulesVisited.length)} icon={LayoutGrid} />
+        <MetricCard label="Ações registradas" value={formatNumber(summary.actions)} icon={Zap} tone={summary.actions ? "success" : "neutral"} />
+      </section>
+      <Surface><SectionHeader title="Última ação" description={summary.actions ? "Última ação humana coberta pela instrumentação atual." : "Nenhuma ação registrada no período."} />{summary.lastAction ? <div className="mt-4 rounded-[var(--ds-radius-md)] bg-[color:var(--ds-bg-soft)] p-4"><p className="font-semibold text-[color:var(--ds-text)]">{activityTitle(summary.lastAction)}</p><p className="mt-1 text-sm text-[color:var(--ds-text-secondary)]">{summary.lastAction.moduleLabel} · {dateTime(summary.lastAction.createdAt)}</p></div> : null}</Surface>
+    </> : userId === "all" && data ? <Surface><EmptyState title="Selecione um usuário para ver o resumo individual">A timeline abaixo continua mostrando os eventos de todos os usuários no período.</EmptyState></Surface> : null}
+
+    <Surface>
+      <SectionHeader title="Timeline" description={`${data?.pagination.total ?? 0} eventos no filtro atual · página ${data?.pagination.page ?? 1} de ${data?.pagination.totalPages ?? 1}`} />
+      <ActivityTimeline items={data?.items ?? []} />
+      {(data?.pagination.totalPages ?? 1) > 1 ? <div className="mt-4 flex items-center justify-between border-t border-[color:var(--ds-border)] pt-4"><button type="button" disabled={page <= 1 || loading} onClick={() => { const next = Math.max(1, page - 1); setPage(next); updateQuery({ page: next === 1 ? null : String(next) }); }} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[color:var(--ds-border)] px-4 text-sm font-semibold disabled:opacity-40"><ChevronLeft className="h-4 w-4" />Anterior</button><button type="button" disabled={page >= (data?.pagination.totalPages ?? 1) || loading} onClick={() => { const next = page + 1; setPage(next); updateQuery({ page: String(next) }); }} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[color:var(--ds-border)] px-4 text-sm font-semibold disabled:opacity-40">Próxima<ChevronRight className="h-4 w-4" /></button></div> : null}
+    </Surface>
+  </div>;
+}
+
+function ActivityTimeline({ items }: { items: AdoptionActivityResponse["items"] }) {
+  return <div className="mt-4 space-y-3">{items.map((item) => { const kind = activityEventKind(item.eventName); return <div key={item.id} className="grid grid-cols-[42px_minmax(0,1fr)] gap-3 rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]"><IconPill icon={kind === "Acesso" ? MousePointerClick : kind === "Ação" ? Zap : AlertTriangle} tone={kind === "Acesso" ? "info" : kind === "Ação" ? "success" : "danger"} /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><StatusBadge tone={kind === "Acesso" ? "info" : kind === "Ação" ? "success" : "danger"}>{kind}</StatusBadge><span className="text-sm font-semibold text-[color:var(--ds-text-muted)]">{activityDateTime(item.createdAt)}</span>{item.userName ? <span className="text-sm text-[color:var(--ds-text-secondary)]">· {item.userName}</span> : null}</div><p className="mt-2 font-semibold text-[color:var(--ds-text)]">{activityTitle(item)}</p><p className="mt-1 text-sm text-[color:var(--ds-text-secondary)]">{item.moduleLabel}</p>{kind === "Erro" && item.message ? <p className="mt-2 text-sm text-rose-700">{item.message}</p> : null}</div></div>; })}{!items.length ? <EmptyState title="Sem atividade registrada no filtro atual" /> : null}</div>;
 }
 
 function Modules({ snapshot }: { snapshot: AdoptionSnapshot }) {
@@ -124,3 +218,7 @@ function statusTone(status: AdoptionPerson["status"]): "success" | "warning" | "
 function statusLabel(status: AdoptionPerson["status"]) { return status === "recent" ? "Ativo recentemente" : status === "low" ? "Pouco ativo" : "Sem atividade recente"; }
 function roleLabel(role: string | null) { const labels: Record<string, string> = { ADMIN: "Admin", ESPECIALISTA: "Especialista", OPERACIONAL: "Operacional", SUPORTE: "Suporte" }; return role ? labels[role] ?? role : "Perfil não identificado"; }
 function eventLabel(event: string) { const labels: Record<string, string> = { page_view: "abriu", create: "criou", update: "atualizou", approve: "aprovou", delete: "excluiu", send: "enviou", run: "executou", search: "pesquisou", export: "exportou", error: "erro" }; return labels[event] ?? event; }
+function activityEventKind(event: string) { return event === "page_view" ? "Acesso" : event === "error" ? "Erro" : "Ação"; }
+function activityTitle(item: AdoptionActivityResponse["items"][number]) { const verb = eventLabel(item.eventName); const label = item.pageLabel.startsWith("/") ? item.moduleLabel : item.pageLabel; return item.eventName === "page_view" ? `Abriu ${label}` : `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${label}`; }
+function activityDate(value: string | null) { return value ? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(value)) : "Sem registro"; }
+function activityDateTime(value: string) { const date = new Date(value); return localDay(date) === localDay(new Date()) ? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(date) : new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(date); }
