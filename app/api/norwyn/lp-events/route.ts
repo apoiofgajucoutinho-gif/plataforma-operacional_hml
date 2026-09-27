@@ -12,6 +12,7 @@ const allowedEvents = new Set([
 const allowedEnvironments = new Set(["hml", "dev", "qa"]);
 const corsOrigins = new Set([
   "https://v0-zumbidoju.vercel.app",
+  "https://lp-ju.vercel.app",
   "https://plataf-op-hml.vercel.app",
 ]);
 
