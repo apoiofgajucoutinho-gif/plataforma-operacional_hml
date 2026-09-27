@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getValidationAuth } from "@/modules/validacao/services/validation-server";
+import { assertExpectedSupabaseWriteTarget } from "@/lib/supabase/environment-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -307,6 +308,9 @@ export async function POST(request: Request) {
     if (!auth.canWrite) return NextResponse.json({ error: "Seu perfil não pode classificar conteúdos." }, { status: 403 });
     const body = await request.json().catch(() => ({}));
     const action = text(body.action);
+    if (action !== "suggest" && action !== "similar") {
+      assertExpectedSupabaseWriteTarget(`content_library.${action || "classify"}`);
+    }
     const ids = [...new Set(list(body.ids))].slice(0, MAX_BULK);
     if (!ids.length) return NextResponse.json({ error: "Selecione ao menos um conteúdo." }, { status: 400 });
 

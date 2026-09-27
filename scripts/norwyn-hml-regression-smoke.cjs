@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 
 const tests = [
+  "scripts/norwyn-environment-guard-test.cjs",
   "scripts/norwyn-app-shell-navigation-test.cjs",
   "scripts/norwyn-hotmart-golden-30d-test.cjs",
   "scripts/norwyn-hotmart-data-trust-tests.mjs",
