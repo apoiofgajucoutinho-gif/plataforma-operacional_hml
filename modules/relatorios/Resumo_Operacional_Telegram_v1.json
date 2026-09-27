@@ -133,7 +133,7 @@
             },
             {
               "name": "parse_mode",
-              "value": "HTML"
+              "value": "={{ $json.parseMode || $json.parse_mode || 'HTML' }}"
             },
             {
               "name": "disable_web_page_preview",
@@ -326,5 +326,5 @@
   "tags": [],
   "triggerCount": 0,
   "updatedAt": "2026-06-13T00:00:00.000Z",
-  "versionId": "relatorios-telegram-v1"
+  "versionId": "relatorios-telegram-v3"
 }

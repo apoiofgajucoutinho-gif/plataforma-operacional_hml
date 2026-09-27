@@ -101,6 +101,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, preview: { subject: dispatch.subject, text: dispatch.text, summary: dispatch.summary, modules: dispatch.modules, requestedModules: dispatch.requestedModules, filters: dispatch.filters, diagnostics: dispatch.diagnostics } });
     }
     if (!dispatch.log) return NextResponse.json({ error: "Falha ao criar historico do envio." }, { status: 400 });
+    if (!dispatch.hasContent) {
+      timings.total_ms = Math.round(performance.now() - totalStartedAt);
+      console.info("relatorios.send_now.no_content", { logId: dispatch.log.id, ...timings });
+      return NextResponse.json({ ok: true, skipped: true, reason: "sem_conteudo", data: dispatch.log, timings });
+    }
 
     if (dispatch.channel !== "telegram") {
       await updateRelatorioEnvioStatus({ logId: dispatch.log.id, status: "erro", error: "Envio imediato implementado apenas para Telegram neste momento." });
@@ -118,7 +123,7 @@ export async function POST(request: Request) {
     stage = "history";
     const historyStartedAt = performance.now();
     const envio = await withTimeout(
-      updateRelatorioEnvioStatus({ logId: dispatch.log.id, status: "enviado", metadata: { telegram_message_id: telegram?.result?.message_id ?? null, immediate: true, duration_ms: Math.round(performance.now() - totalStartedAt), timings } }),
+      updateRelatorioEnvioStatus({ logId: dispatch.log.id, status: "enviado", metadata: { telegram_message_id: telegram?.result?.message_id ?? null, immediate: true, renderer: "telegram_v3", parse_mode: "HTML", duration_ms: Math.round(performance.now() - totalStartedAt), timings } }),
       historyTimeoutMs,
       new SendNowError("history", "History update timeout", "HISTORY_TIMEOUT"),
     );

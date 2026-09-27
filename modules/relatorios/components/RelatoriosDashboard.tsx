@@ -31,7 +31,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { formatTelegramDateTime, telegramGreetingHeader } from "@/modules/relatorios/utils/telegram-format";
+import { renderTelegramReport } from "@/modules/relatorios/utils/telegram-format";
 import type {
   RelatorioAgendamento,
   RelatorioCanal,
@@ -504,10 +504,10 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     try {
       const result = await reportRequest("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ payload }) }, controller);
       if (result.data) setEnvios((items) => [result.data, ...items]);
-      trackReportAction("send", "relatorio_envio", result.data?.id);
+      if (!result.skipped) trackReportAction("send", "relatorio_envio", result.data?.id);
       const destination = recipientName(scheduleForm.destinatario_id, destinatarios);
       const timestamp = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date());
-      setMessage(`Relatorio enviado para ${destination} as ${timestamp}.`);
+      setMessage(result.skipped ? "Relatório sem conteúdo relevante; nenhum envio foi feito." : `Relatório enviado para ${destination} às ${timestamp}.`);
     } catch (error) {
       if (!controller.signal.aborted || controller.signal.reason === "timeout") setMessage(`⚠️ ${error instanceof Error ? error.message : "Não foi possível enviar o relatório."}`);
     } finally {
@@ -555,8 +555,8 @@ export function RelatoriosDashboard({ context }: { context: RelatoriosContext })
     try {
       const result = await reportRequest("/api/relatorios/send-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scheduleId }) }, controller);
       if (result.data) setEnvios((items) => [result.data, ...items]);
-      trackReportAction("send", "relatorio_envio", result.data?.id);
-      setMessage("Relatorio enviado no Telegram.");
+      if (!result.skipped) trackReportAction("send", "relatorio_envio", result.data?.id);
+      setMessage(result.skipped ? "Relatório sem conteúdo relevante; nenhum envio foi feito." : "Relatório enviado no Telegram.");
     } catch (error) {
       if (!controller.signal.aborted || controller.signal.reason === "timeout") setMessage(`⚠️ ${error instanceof Error ? error.message : "Não foi possível enviar o relatório."}`);
     } finally {
@@ -901,7 +901,7 @@ function HistoryTab({ envios, total, page, filters, setFilters, loading, destina
         <SectionTitle icon={<History className="h-4 w-4" />} title="Historico de envios" subtitle="Completo, paginado e sem limite artificial de 1000 registros." />
         <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           <Field label="Busca"><input value={filters.q ?? ""} onChange={(e) => setFilters((c) => ({ ...c, q: e.target.value }))} className="input-like min-h-12 text-[15px]" placeholder="Assunto, destino..." /></Field>
-          <Field label="Status"><select value={filters.status ?? ""} onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Todos</option><option value="enviado">Enviado</option><option value="preparado">Preparado</option><option value="erro">Erro</option><option value="ignorado">Ignorado</option></select></Field>
+          <Field label="Status"><select value={filters.status ?? ""} onChange={(e) => setFilters((c) => ({ ...c, status: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Todos</option><option value="enviado">Enviado</option><option value="preparado">Preparado</option><option value="sem_conteudo">Sem conteúdo</option><option value="erro">Erro</option><option value="ignorado">Ignorado</option></select></Field>
           <Field label="Origem"><select value={filters.origin ?? ""} onChange={(e) => setFilters((c) => ({ ...c, origin: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Todas</option><option value="manual">Manual</option><option value="agendado">Agendado</option><option value="preview">Preview</option></select></Field>
           <Field label="Canal"><select value={filters.channel ?? ""} onChange={(e) => setFilters((c) => ({ ...c, channel: e.target.value }))} className="input-like min-h-12 text-[15px]"><option value="">Todos</option><option value="telegram">Telegram</option></select></Field>
           <Field label="De"><input type="date" value={filters.from ?? ""} onChange={(e) => setFilters((c) => ({ ...c, from: e.target.value }))} className="input-like min-h-12 text-[15px]" /></Field>
@@ -1079,34 +1079,29 @@ function InlineError({ children }: { children: ReactNode }) {
 function buildPreview(form: DraftSchedule, destinatarios: RelatorioDestinatario[]) {
   const filters = { ...defaultFilters, ...(form.filtros ?? {}), blocos: { ...defaultFilters.blocos, ...(form.filtros?.blocos ?? {}) } };
   const selected = Object.entries(filters.blocos ?? {}).filter(([, config]) => config?.enabled).map(([key]) => key);
-  const recipient = recipientName(form.destinatario_id, destinatarios);
   const destination = destinatarios.find((item) => item.id === form.destinatario_id);
-  const lines: string[] = [];
-  const now = new Date();
-  if (form.tipo_resumo === "aluno_360") lines.push("👤 <b>Aluno 360 — Norwyn</b>");
-  else lines.push(telegramGreetingHeader(now, destination?.tipo_destino === "individual" ? destination.nome : null));
-  lines.push(`📅 ${formatTelegramDateTime(now)}`);
-  if (recipient !== "Destino nao definido") lines.push(`Para: ${recipient}`);
-  lines.push("");
+  const blocks: Array<{ title: string; lines: string[] }> = [];
   for (const key of selected) {
-    if (key === "agenda") lines.push("📅 Agenda", "• Hoje: compromissos do periodo selecionado", "");
-    if (key === "decisoes") lines.push("🎯 Precisa de voce", "• Decisoes e pendencias abertas entram aqui", "");
-    if (key === "presence") lines.push("🛡️ Saude digital", "✅ Ativos e links monitorados entram aqui", "");
-    if (key === "marketing_instagram") lines.push("📈 Marketing · Instagram", "Seguidores, variacao e destaque entram aqui", "");
-    if (key === "marketing_ads") lines.push("📣 Marketing · Ads", "Investimento, alcance e campanhas entram aqui", "");
-    if (key === "comercial") lines.push("💰 Comercial", "Vendas confirmadas e receita validada entram aqui", "");
-    if (key === "financeiro") lines.push("💳 Financeiro", "Entradas, saidas e previsoes conhecidas entram aqui", "");
-    if (key === "interacoes") lines.push("💬 Interacoes", "Comentarios, directs e suporte entram aqui", "");
+    if (key === "agenda") blocks.push({ title: "📅 Agenda", lines: ["• Compromissos do período selecionado"] });
+    if (key === "decisoes") blocks.push({ title: "🎯 Precisa de você", lines: ["• Decisões e pendências abertas entram aqui"] });
+    if (key === "presence") blocks.push({ title: "🛡️ Saúde digital", lines: ["✅ Ativos e links monitorados entram aqui"] });
+    if (key === "marketing_instagram") blocks.push({ title: "📈 Marketing · Instagram", lines: ["Seguidores, variação e destaque entram aqui"] });
+    if (key === "marketing_ads") blocks.push({ title: "📣 Marketing · Ads", lines: ["Investimento, alcance e campanhas entram aqui"] });
+    if (key === "comercial") blocks.push({ title: "💰 Comercial", lines: ["Vendas confirmadas e receita validada entram aqui"] });
+    if (key === "financeiro") blocks.push({ title: "💳 Financeiro", lines: ["Entradas, saídas e previsões conhecidas entram aqui"] });
+    if (key === "interacoes") blocks.push({ title: "💬 Interações", lines: ["Comentários, directs e suporte entram aqui"] });
     if (key === "aluno_360") {
       const count = filters.customer_ids?.length ?? 0;
-      lines.push("👤 Aluno 360", count ? `• ${count} aluno(s) selecionado(s)` : "• Selecione um ou mais alunos para gerar o bloco", "");
+      blocks.push({ title: "👤 Aluno 360", lines: [count ? `• ${count} aluno(s) selecionado(s)` : "• Selecione um ou mais alunos para gerar o bloco"] });
     }
-    if (key === "adocao") lines.push("📊 <b>Adoção</b>", "Últimos acessos, dias ativos, sessões e experiência entram aqui", "");
-    if (key === "recomendacoes") lines.push("💡 Norwyn recomenda", "Recomendacao executiva curta com base nos blocos selecionados", "");
+    if (key === "adocao") blocks.push({ title: "📊 Adoção", lines: ["Últimos acessos, dias ativos, sessões e experiência entram aqui"] });
+    if (key === "recomendacoes") blocks.push({ title: "💡 Norwyn recomenda", lines: ["Recomendação executiva curta com base nos blocos selecionados"] });
   }
-  if (!selected.length) lines.push("Escolha ao menos um bloco para montar o relatorio.", "");
-  lines.push("Norwyn · Relatorio gerado automaticamente");
-  return lines.join("\n").trim();
+  return renderTelegramReport({
+    title: form.tipo_resumo === "aluno_360" ? "👤 Aluno 360 — Norwyn" : null,
+    personalName: destination?.tipo_destino === "individual" ? destination.nome : null,
+    blocks,
+  });
 }
 
 function dateTime(value?: string | null) {

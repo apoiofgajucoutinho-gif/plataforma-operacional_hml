@@ -32,6 +32,7 @@ export async function GET(request: Request) {
       subject: dispatch.subject,
       text: dispatch.text,
       parseMode: "HTML",
+      parse_mode: "HTML",
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao preparar report." }, { status: 400 });

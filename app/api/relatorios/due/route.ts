@@ -35,6 +35,8 @@ export async function GET(request: Request) {
         whatsapp: dispatch.recipient.whatsapp,
         subject: dispatch.subject,
         text: dispatch.text,
+        parseMode: "HTML",
+        parse_mode: "HTML",
       })),
     });
   } catch (error) {

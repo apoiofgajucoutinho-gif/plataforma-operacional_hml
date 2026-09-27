@@ -16,7 +16,7 @@ export type RelatorioTipoResumo =
 export type RelatorioFrequencia = "sob_demanda" | "unico" | "diario" | "dias_uteis" | "semanal" | "quinzenal" | "mensal" | "fechamento_mes" | "imediato";
 export type RelatorioScheduleStatus = "ativo" | "pausado" | "rascunho";
 export type RelatorioModoEnvio = "recorrente" | "unico";
-export type RelatorioStatusEnvio = "preparado" | "enviado" | "erro" | "ignorado";
+export type RelatorioStatusEnvio = "preparado" | "enviado" | "erro" | "ignorado" | "sem_conteudo";
 export type RelatorioOrigemEnvio = "manual" | "agendado" | "preview" | "sistema";
 export type RelatorioPeriodo =
   | "hoje"
@@ -150,6 +150,7 @@ export type RelatorioEnvio = {
   modulos: string[];
   filtros: Record<string, unknown>;
   metadata: Record<string, unknown>;
+  idempotency_key?: string | null;
   generated_at: string;
   sent_at: string | null;
   created_at: string;

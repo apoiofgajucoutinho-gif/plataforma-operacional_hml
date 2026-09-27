@@ -4,8 +4,8 @@ import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-b
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { adoptionModuleLabels, getAdoptionDirectory } from "@/modules/adocao/services/adoption-analytics";
-import type { RelatorioAgendamento, RelatorioBlocoKey, RelatorioDestinatario, RelatorioEnvio, RelatorioFiltros, RelatorioPeriodo, RelatoriosContext, RelatorioTipoResumo } from "@/modules/relatorios/types";
-import { escapeTelegramHtml, formatTelegramDateTime, telegramGreetingHeader } from "@/modules/relatorios/utils/telegram-format";
+import type { RelatorioAgendamento, RelatorioBlocoConfig, RelatorioBlocoKey, RelatorioDestinatario, RelatorioEnvio, RelatorioFiltros, RelatorioPeriodo, RelatoriosContext, RelatorioTipoResumo } from "@/modules/relatorios/types";
+import { renderTelegramReport } from "@/modules/relatorios/utils/telegram-format";
 
 type AnyClient = any;
 type SourceStatus = "success" | "empty" | "error";
@@ -100,16 +100,16 @@ function today() { return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).for
 function plusDays(days: number) { const d = new Date(); d.setDate(d.getDate() + days); return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(d); }
 function range(period?: RelatorioPeriodo) {
   const t = today();
-  if (period === "amanha") return { from: plusDays(1), to: plusDays(1), label: "Amanha" };
-  if (period === "proximos_2d") return { from: t, to: plusDays(2), label: "Proximos 2 dias" };
-  if (period === "proximos_7d") return { from: t, to: plusDays(7), label: "Proximos 7 dias" };
-  if (period === "proximos_15d") return { from: t, to: plusDays(15), label: "Proximos 15 dias" };
-  if (period === "ultimos_7d") return { from: plusDays(-7), to: t, label: "Ultimos 7 dias" };
-  if (period === "ultimos_15d") return { from: plusDays(-15), to: t, label: "Ultimos 15 dias" };
-  if (period === "ultimos_90d") return { from: plusDays(-90), to: t, label: "Ultimos 90 dias" };
-  if (period === "mes_atual") return { from: t.slice(0, 8) + "01", to: t, label: "Mes atual" };
+  if (period === "amanha") return { from: plusDays(1), to: plusDays(1), label: "Amanhã" };
+  if (period === "proximos_2d") return { from: t, to: plusDays(2), label: "Próximos 2 dias" };
+  if (period === "proximos_7d") return { from: t, to: plusDays(7), label: "Próximos 7 dias" };
+  if (period === "proximos_15d") return { from: t, to: plusDays(15), label: "Próximos 15 dias" };
+  if (period === "ultimos_7d") return { from: plusDays(-7), to: t, label: "Últimos 7 dias" };
+  if (period === "ultimos_15d") return { from: plusDays(-15), to: t, label: "Últimos 15 dias" };
+  if (period === "ultimos_90d") return { from: plusDays(-90), to: t, label: "Últimos 90 dias" };
+  if (period === "mes_atual") return { from: t.slice(0, 8) + "01", to: t, label: "Mês atual" };
   if (period === "ano_atual") return { from: t.slice(0, 4) + "-01-01", to: t, label: "Ano atual" };
-  if (period === "ultimos_30d") return { from: plusDays(-30), to: t, label: "Ultimos 30 dias" };
+  if (period === "ultimos_30d") return { from: plusDays(-30), to: t, label: "Últimos 30 dias" };
   return { from: t, to: t, label: "Hoje" };
 }
 function errorMessage(error: unknown) {
@@ -139,16 +139,22 @@ async function sourceCount(query: PromiseLike<{ count: number | null; error: unk
   }
 }
 function blockError(key: RelatorioBlocoKey, title: string, sourceName: string, error?: string, period?: string): Block {
-  return { key, title, source: sourceName, period, status: "error", reason: error ?? "Consulta indisponivel.", lines: [`Dados temporariamente indisponiveis. Fonte: ${sourceName}.`] };
+  return { key, title, source: sourceName, period, status: "error", reason: error ?? "Consulta indisponível.", empty: "Não foi possível atualizar este bloco neste envio.", lines: [] };
 }
 function blockEmpty(key: RelatorioBlocoKey, title: string, sourceName: string, empty: string, period?: string): Block {
   return { key, title, source: sourceName, period, status: "empty", empty, lines: [] };
 }
 function filtersFor(input: RelatorioFiltros | null | undefined, tipo: RelatorioTipoResumo): RelatorioFiltros {
   const sourceFilters = input ?? {};
-  const hasExplicitBlocks = Boolean(sourceFilters.blocos && Object.keys(sourceFilters.blocos).length);
-  const blocks = hasExplicitBlocks ? Object.fromEntries(Object.keys(defaults).map((key) => { const blockKey = key as RelatorioBlocoKey; return [blockKey, { ...defaults[blockKey], enabled: false, ...(sourceFilters.blocos?.[blockKey] ?? {}) }]; })) as typeof defaults : { ...defaults, ...(sourceFilters.blocos ?? {}) };
-  if (!hasExplicitBlocks) {
+  const legacyMap: Record<string, RelatorioBlocoKey> = { instagram: "marketing_instagram", ads: "marketing_ads", ocorrencias: "interacoes" };
+  const normalizedSourceBlocks = { ...(sourceFilters.blocos ?? {}) } as Record<string, RelatorioBlocoConfig>;
+  for (const [legacyKey, canonicalKey] of Object.entries(legacyMap)) {
+    if (normalizedSourceBlocks[legacyKey] && !normalizedSourceBlocks[canonicalKey]) normalizedSourceBlocks[canonicalKey] = normalizedSourceBlocks[legacyKey];
+  }
+  const hasExplicitBlocks = Boolean(Object.keys(normalizedSourceBlocks).length);
+  const blocks = hasExplicitBlocks ? Object.fromEntries(Object.keys(defaults).map((key) => { const blockKey = key as RelatorioBlocoKey; const configured = normalizedSourceBlocks[blockKey]; return [blockKey, { ...defaults[blockKey], ...(configured ?? {}), enabled: configured?.enabled ?? false }]; })) as typeof defaults : { ...defaults };
+  const hasEnabledCanonicalBlock = Object.values(blocks).some((block) => block?.enabled);
+  if (!hasExplicitBlocks || !hasEnabledCanonicalBlock) {
     const keys = typeBlocks[tipo] ?? typeBlocks.personalizado;
     Object.keys(blocks).forEach((key) => {
       const blockKey = key as RelatorioBlocoKey;
@@ -163,24 +169,24 @@ function cfg(filters: RelatorioFiltros, key: RelatorioBlocoKey) { return filters
 async function agendaBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
   const title = "📅 Agenda";
   const sourceName = "agenda_eventos";
-  const r = { from: today(), to: plusDays(2), label: "Hoje, amanha e proximos 2 dias" };
+  const r = { from: today(), to: plusDays(2), label: "Hoje, amanhã e próximos 2 dias" };
   const result = await source<any[]>(client.from(sourceName).select("titulo, inicio, descricao, local").eq("tenant_id", tenantId).gte("inicio", r.from + "T00:00:00").lte("inicio", r.to + "T23:59:59").order("inicio", { ascending: true }).limit(30), []);
   if (result.status === "error") return blockError("agenda", title, sourceName, result.error, r.label);
   const rows = result.data;
-  if (!rows.length) return blockEmpty("agenda", title, sourceName, "Sem compromissos nos proximos 2 dias.", r.label);
+  if (!rows.length) return blockEmpty("agenda", title, sourceName, "Sem compromissos nos próximos 2 dias.", r.label);
   const windows = [
     { label: "Hoje", from: today(), to: today() },
-    { label: "Amanha", from: plusDays(1), to: plusDays(1) },
-    { label: "Proximos 2 dias", from: plusDays(2), to: plusDays(2) },
+    { label: "Amanhã", from: plusDays(1), to: plusDays(1) },
+    { label: "Próximos 2 dias", from: plusDays(2), to: plusDays(2) },
   ];
   const lines = windows.flatMap((window) => {
     const items = rows.filter((e) => String(e.inicio ?? "").slice(0, 10) >= window.from && String(e.inicio ?? "").slice(0, 10) <= window.to);
-    return [window.label, ...(items.length ? items.map((e) => "• " + datetime(e.inicio) + " - " + e.titulo + (e.descricao ? " (" + e.descricao + ")" : "")) : ["• Sem compromissos"]), ""];
+    return items.length ? [window.label, ...items.map((e) => "• " + datetime(e.inicio) + " - " + e.titulo + (e.descricao ? " (" + e.descricao + ")" : "")), ""] : [];
   }).filter((line, index, array) => line !== "" || array[index + 1]);
-  return { key: "agenda", title, source: sourceName, period: r.label, status: "success", empty: "Sem compromissos nos proximos 2 dias.", lines };
+  return { key: "agenda", title, source: sourceName, period: r.label, status: "success", empty: "Sem compromissos nos próximos 2 dias.", lines };
 }
 async function decisionsBlock(client: AnyClient, tenantId: string): Promise<Block> {
-  const title = "🎯 Precisa de voce";
+  const title = "🎯 Precisa de você";
   const sourceName = "atividades_tarefas";
   const result = await source<any[]>(client.from(sourceName).select("titulo, prioridade, status, prazo").eq("tenant_id", tenantId).in("status", ["pendente", "em_andamento", "bloqueada"]).order("prazo", { ascending: true, nullsFirst: false }).limit(8), []);
   if (result.status === "error") return blockError("decisoes", title, sourceName, result.error, "pendentes");
@@ -189,7 +195,7 @@ async function decisionsBlock(client: AnyClient, tenantId: string): Promise<Bloc
   return { key: "decisoes", title, source: sourceName, period: "pendentes", status: "success", empty: "Sem decisoes pendentes no momento.", lines: rows.map((i) => "• " + i.titulo + (i.prazo ? " - prazo " + date(i.prazo) : "")) };
 }
 async function presenceBlock(client: AnyClient, tenantId: string): Promise<Block> {
-  const title = "🛡️ Saude digital";
+  const title = "🛡️ Saúde digital";
   const sourceName = "digital_assets + catalog_sales_links.presence_asset_id";
   const [assetsResult, linksResult] = await Promise.all([
     source<any[]>(client.from("digital_assets").select("id, name, asset_type, environment, monitoring_enabled, last_status, last_checked_at").eq("tenant_id", tenantId).eq("monitoring_enabled", true).limit(500), []),
@@ -208,10 +214,10 @@ async function presenceBlock(client: AnyClient, tenantId: string): Promise<Block
   const last = [...assets, ...links].map((x) => x.last_checked_at).filter(Boolean).sort().pop();
   if (!assets.length && !links.length) return blockEmpty("presence", title, sourceName, "Sem ativos monitorados no Presence.", "estado atual");
   const lines = ["✅ " + healthyAssets + "/" + assets.length + " ativos funcionando", "✅ " + healthyLinks + "/" + links.length + " links de venda funcionando"];
-  if (problemAssets) lines.push("⚠️ " + problemAssets + " ativo(s) precisam de atencao");
-  if (problemLinks) lines.push("⚠️ " + problemLinks + " link(s) de venda precisam de atencao");
-  if (last) lines.push("Ultima verificacao: " + datetime(last));
-  return { key: "presence", title, source: sourceName, period: "estado atual", status: "success", empty: "Sem dados de saude digital disponiveis.", lines };
+  if (problemAssets) lines.push("⚠️ " + problemAssets + (problemAssets === 1 ? " ativo precisa" : " ativos precisam") + " de atenção");
+  if (problemLinks) lines.push("⚠️ " + problemLinks + (problemLinks === 1 ? " link de venda precisa" : " links de venda precisam") + " de atenção");
+  if (last) lines.push("Última verificação: " + datetime(last));
+  return { key: "presence", title, source: sourceName, period: "estado atual", status: "success", empty: "Sem dados de saúde digital disponíveis.", lines };
 }
 async function instagramBlock(client: AnyClient, tenantId: string): Promise<Block> {
   const title = "📈 Marketing · Instagram";
@@ -232,9 +238,9 @@ async function instagramBlock(client: AnyClient, tenantId: string): Promise<Bloc
   const pending = interactions.data.filter((i) => ["pendente", "open", "novo"].includes(String(i.status).toLowerCase())).length;
   const lines: string[] = [];
   if (followers) lines.push("Seguidores: " + followers.toLocaleString("pt-BR") + (delta ? " (" + (delta >= 0 ? "+" : "") + delta + " em 30 dias)" : ""));
-  if (reach || saved || comments) lines.push("Alcance: " + reach.toLocaleString("pt-BR") + " · Interacoes: " + comments.toLocaleString("pt-BR") + " · Salvos: " + saved.toLocaleString("pt-BR"));
+  if (reach || saved || comments) lines.push("Alcance: " + reach.toLocaleString("pt-BR") + " · Interações: " + comments.toLocaleString("pt-BR") + " · Salvos: " + saved.toLocaleString("pt-BR"));
   if (best) lines.push("Destaque: " + (best.legenda ?? best.raw_payload?.legenda ?? "post sem legenda").slice(0, 80) + "... · " + n(best.raw_payload?.reach).toLocaleString("pt-BR") + " de alcance");
-  if (pending) lines.push("Interacoes pendentes: " + pending);
+  if (pending) lines.push("Interações pendentes: " + pending);
   if (!lines.length) return blockEmpty("marketing_instagram", title, sourceName, "Sem dados de Instagram no recorte.", "ultimos 30 dias");
   return { key: "marketing_instagram", title, source: sourceName, period: "ultimos 30 dias", status: "success", empty: "Sem dados de Instagram no recorte.", lines };
 }
@@ -250,7 +256,7 @@ async function adsBlock(client: AnyClient, tenantId: string, period: RelatorioPe
   const reach = rows.reduce((sum, row) => sum + n(row.reach), 0);
   const clicks = rows.reduce((sum, row) => sum + n(row.clicks), 0);
   const campaigns = new Set(rows.map((row) => row.campaign_name).filter(Boolean)).size;
-  return { key: "marketing_ads", title, source: sourceName, period: r.label, status: "success", empty: "Sem dados de Ads em " + r.label.toLowerCase() + ".", lines: ["Periodo: " + r.label, "Investimento: " + money(spend), "Alcance: " + reach.toLocaleString("pt-BR") + " · Cliques: " + clicks.toLocaleString("pt-BR"), "Campanhas: " + campaigns] };
+  return { key: "marketing_ads", title, source: sourceName, period: r.label, status: "success", empty: "Sem dados de Ads em " + r.label.toLowerCase() + ".", lines: ["Período: " + r.label, "Investimento: " + money(spend), "Alcance: " + reach.toLocaleString("pt-BR") + " · Cliques: " + clicks.toLocaleString("pt-BR"), "Campanhas: " + campaigns] };
 }
 async function comercialBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
   const r = range(period);
@@ -264,7 +270,7 @@ async function comercialBlock(client: AnyClient, tenantId: string, period: Relat
   const revenue = confirmed.filter((row) => row.revenue_eligible === true && String(row.moeda ?? "BRL").toUpperCase() === "BRL");
   const gross = revenue.reduce((sum, row) => sum + n(row.valor_bruto), 0);
   const refunded = rows.filter((row) => ["REFUNDED", "CHARGEBACK"].includes(String(row.status_normalizado).toUpperCase())).length;
-  return { key: "comercial", title, source: sourceName, period: r.label, status: "success", empty: "Sem vendas comerciais em " + r.label.toLowerCase() + ".", lines: ["Periodo: " + r.label, confirmed.length + " vendas confirmadas", "Receita confirmada BRL: " + money(gross), "Ticket medio: " + money(confirmed.length ? gross / confirmed.length : 0), "Reembolsos/chargebacks: " + refunded] };
+  return { key: "comercial", title, source: sourceName, period: r.label, status: "success", empty: "Sem vendas comerciais em " + r.label.toLowerCase() + ".", lines: ["Período: " + r.label, confirmed.length + " vendas confirmadas", "Receita confirmada: " + money(gross), "Ticket médio: " + money(confirmed.length ? gross / confirmed.length : 0), "Reembolsos/chargebacks: " + refunded] };
 }
 async function financeBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
   const r = range(period);
@@ -273,16 +279,16 @@ async function financeBlock(client: AnyClient, tenantId: string, period: Relator
   const result = await source<any[]>(client.from(sourceName).select("tipo, status, valor, data, descricao").eq("tenant_id", tenantId).gte("data", r.from).lte("data", r.to).limit(2000), []);
   if (result.status === "error") return blockError("financeiro", title, sourceName, result.error, r.label);
   const rows = result.data;
-  if (!rows.length) return blockEmpty("financeiro", title, sourceName, "Sem lancamentos em " + r.label.toLowerCase() + ".", r.label);
+  if (!rows.length) return blockEmpty("financeiro", title, sourceName, "Sem lançamentos em " + r.label.toLowerCase() + ".", r.label);
   const entradas = rows.filter((row) => String(row.tipo).toLowerCase() === "entrada" && ["recebido", "pago"].includes(String(row.status).toLowerCase())).reduce((sum, row) => sum + n(row.valor), 0);
   const saidas = rows.filter((row) => String(row.tipo).toLowerCase() === "saida" && ["pago", "recebido"].includes(String(row.status).toLowerCase())).reduce((sum, row) => sum + n(row.valor), 0);
   const aReceber = rows.filter((row) => String(row.tipo).toLowerCase() === "entrada" && String(row.status).toLowerCase() === "previsto").reduce((sum, row) => sum + n(row.valor), 0);
   const aPagar = rows.filter((row) => String(row.tipo).toLowerCase() === "saida" && String(row.status).toLowerCase() === "previsto").reduce((sum, row) => sum + n(row.valor), 0);
-  return { key: "financeiro", title, source: sourceName, period: r.label, status: "success", empty: "Sem lancamentos em " + r.label.toLowerCase() + ".", lines: ["Periodo: " + r.label, "Entrou na conta: " + money(entradas), "Saiu da conta: " + money(saidas), "A receber: " + money(aReceber) + " · A pagar: " + money(aPagar)] };
+  return { key: "financeiro", title, source: sourceName, period: r.label, status: "success", empty: "Sem lançamentos em " + r.label.toLowerCase() + ".", lines: ["Período: " + r.label, "Entradas: " + money(entradas), "Saídas: " + money(saidas), "Saldo: " + money(entradas - saidas), "Pendências: " + money(aReceber + aPagar)] };
 }
 async function interactionsBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
   const r = range(period);
-  const title = "💬 Interacoes - " + r.label;
+  const title = "💬 Interações — " + r.label.toLowerCase();
   const sourceName = "instagram_interactions + ocorrencias_chamados + norwyn_support_tickets";
   const fromTs = r.from + "T00:00:00";
   const toTs = r.to + "T23:59:59";
@@ -304,15 +310,14 @@ async function interactionsBlock(client: AnyClient, tenantId: string, period: Re
   const errors = results.filter((item) => item.status === "error");
   if (errors.length === results.length) return blockError("interacoes", title, sourceName, errors.map((item) => item.error).join(" | "), r.label);
   const supportOpen = openOccurrences.data + openTickets.data;
-  const lines = [commentsTotal.data + " comentarios", commentsPending.data + " pendentes de resposta"];
+  const lines = [commentsTotal.data + (commentsTotal.data === 1 ? " comentário" : " comentários"), commentsPending.data + " pendentes de resposta"];
   if (directEver.data > 0) {
-    lines.push(directTotal.data + " Directs", directPending.data + " Direct pendente(s)");
+    lines.push(directTotal.data + " Directs", directPending.data + (directPending.data === 1 ? " Direct pendente" : " Directs pendentes"));
   } else {
-    lines.push("Directs: nao disponivel nesta fonte");
+    lines.push("Directs: não disponíveis nesta fonte");
   }
-  lines.push(supportOpen + " ocorrencia(s) de suporte abertas");
-  if (errors.length) lines.push("Fonte parcial indisponivel: " + errors.map((item) => item.error ?? "erro desconhecido").join(" | "));
-  return { key: "interacoes", title, source: sourceName, period: r.label, status: errors.length ? "error" : "success", reason: errors.map((item) => item.error).filter(Boolean).join(" | ") || undefined, empty: "Sem interacoes pendentes no recorte.", lines };
+  lines.push(supportOpen + (supportOpen === 1 ? " ocorrência de suporte aberta" : " ocorrências de suporte abertas"));
+  return { key: "interacoes", title, source: sourceName, period: r.label, status: "success", reason: errors.map((item) => item.error).filter(Boolean).join(" | ") || undefined, empty: "Sem interações no recorte.", lines };
 }
 async function activitiesBlock(client: AnyClient, tenantId: string): Promise<Block> {
   const title = "✅ Atividades";
@@ -329,8 +334,8 @@ async function alunoBlock(client: AnyClient, tenantId: string, filters: Relatori
   const sourceName = "norwyn_customer_student_360";
   const result = await source<any[]>(client.from(sourceName).select("customer_id, display_name, email, ltv_brl, purchase_count, product_count, last_purchase_at, last_access_at").eq("tenant_id", tenantId).in("customer_id", ids).limit(5), []);
   if (result.status === "error") return blockError("aluno_360", title, sourceName, result.error, "alunos selecionados");
-  if (!result.data.length) return blockEmpty("aluno_360", title, sourceName, "Aluno nao encontrado no recorte.", "alunos selecionados");
-  return { key: "aluno_360", title, source: sourceName, period: "alunos selecionados", status: "success", empty: "Aluno nao encontrado no recorte.", lines: result.data.flatMap((student) => ["• " + (student.display_name ?? student.email ?? student.customer_id), "  LTV: " + money(n(student.ltv_brl)) + " · " + n(student.purchase_count) + " compra(s) · " + n(student.product_count) + " produto(s)", "  Ultima compra: " + date(student.last_purchase_at) + " · Ultimo acesso: " + date(student.last_access_at)]) };
+  if (!result.data.length) return blockEmpty("aluno_360", title, sourceName, "Aluno não encontrado no recorte.", "alunos selecionados");
+  return { key: "aluno_360", title, source: sourceName, period: "alunos selecionados", status: "success", empty: "Aluno não encontrado no recorte.", lines: result.data.flatMap((student) => ["• " + (student.display_name ?? student.email ?? student.customer_id), "  LTV: " + money(n(student.ltv_brl)) + " · " + n(student.purchase_count) + " compra(s) · " + n(student.product_count) + " produto(s)", "  Última compra: " + date(student.last_purchase_at) + " · Último acesso: " + date(student.last_access_at)]) };
 }
 function adoptionPeriod(period: RelatorioPeriodo) {
   if (period === "ultimos_7d") return { days: 7, label: "Últimos 7 dias" };
@@ -425,13 +430,13 @@ async function adoptionBlock(client: AnyClient, tenantId: string, filters: Relat
 }
 function recommendationBlock(blocks: Block[]): Block {
   const presenceIssue = blocks.find((block) => block.key === "presence" && block.lines.some((line) => line.includes("⚠️")));
-  const interactionIssue = blocks.find((block) => block.key === "interacoes" && block.lines.some((line) => !line.startsWith("0 ") && !line.startsWith("Fonte parcial")));
+  const interactionIssue = blocks.find((block) => block.key === "interacoes" && block.lines.some((line) => /^[1-9][0-9.]* pendentes de resposta$/.test(line)));
   const agendaWithItems = blocks.find((block) => block.key === "agenda" && block.lines.some((line) => line.startsWith("• ") && !line.includes("Sem compromissos")));
-  const line = presenceIssue ? "Priorizar ativos digitais com problema antes de novas campanhas." : interactionIssue ? "Responder interacoes pendentes para evitar perda de oportunidade." : agendaWithItems ? "Conferir agenda e preparar materiais dos compromissos principais." : null;
-  return { key: "recomendacoes", title: "💡 Norwyn recomenda", source: "blocos renderizados", period: "estado atual", status: line ? "success" : "empty", empty: "Sem recomendacao automatica relevante.", lines: line ? [line] : [] };
+  const line = presenceIssue ? "Priorizar ativos digitais com problema antes de novas campanhas." : interactionIssue ? "Responder interações pendentes para evitar perda de oportunidade." : agendaWithItems ? "Conferir a agenda e preparar os materiais dos compromissos principais." : null;
+  return { key: "recomendacoes", title: "💡 Norwyn recomenda", source: "blocos renderizados", period: "estado atual", status: line ? "success" : "empty", empty: "Sem recomendação automática relevante.", lines: line ? [line] : [] };
 }
 function shouldRenderBlock(block: Block, filters: RelatorioFiltros) {
-  if (block.status === "error") return true;
+  if (block.status === "error") return cfg(filters, block.key).empty_behavior === "show_empty";
   if (block.lines.length) return true;
   return cfg(filters, block.key).empty_behavior === "show_empty";
 }
@@ -460,16 +465,15 @@ async function buildBlocks(client: AnyClient, tenantId: string, filters: Relator
   const diagnostics = requested.map((block) => ({ key: block.key, title: block.title, status: block.status, rendered: rendered.includes(block), source: block.source, period: block.period, reason: block.reason ?? (block.status === "empty" ? block.empty : undefined), lines: block.lines.length }));
   return { requested, rendered, diagnostics };
 }
-function subject(tipo: RelatorioTipoResumo) { if (tipo === "aluno_360") return "Aluno 360"; if (tipo === "marketing") return "Relatorio de Marketing"; if (tipo === "comercial") return "Relatorio Comercial"; if (tipo === "presence") return "Saude digital"; if (tipo === "agenda" || tipo === "lembrete_agendamento") return "Agenda Norwyn"; return "Daily da Norwyn"; }
+function subject(tipo: RelatorioTipoResumo) { if (tipo === "aluno_360") return "Aluno 360"; if (tipo === "marketing") return "Relatório de Marketing"; if (tipo === "comercial") return "Relatório Comercial"; if (tipo === "presence") return "Saúde digital"; if (tipo === "agenda" || tipo === "lembrete_agendamento") return "Agenda Norwyn"; return "Daily da Norwyn"; }
 function message(tipo: RelatorioTipoResumo, blocks: Block[], recipient: RelatorioDestinatario) {
-  const now = new Date();
-  const personalName = recipient.tipo_destino === "individual" ? recipient.nome.trim() : "";
-  const header = tipo === "aluno_360" ? `👤 <b>${escapeTelegramHtml(subject(tipo))}</b>` : telegramGreetingHeader(now, personalName);
-  const lines = [header, `📅 ${formatTelegramDateTime(now)}`, ""];
-  for (const b of blocks) { lines.push(`<b>${escapeTelegramHtml(b.title)}</b>`); lines.push(...(b.lines.length ? b.lines.map(escapeTelegramHtml) : b.empty ? [escapeTelegramHtml(b.empty)] : [])); lines.push(""); }
-  lines.push("Norwyn · Relatorio gerado automaticamente"); return lines.join("\n").trim();
+  return renderTelegramReport({
+    title: tipo === "aluno_360" ? `👤 ${subject(tipo)}` : null,
+    personalName: recipient.tipo_destino === "individual" ? recipient.nome.trim() : null,
+    blocks: blocks.map((block) => ({ title: block.title, lines: block.lines, empty: block.empty })),
+  });
 }
-function isActive(schedule: RelatorioAgendamento) { return schedule.ativo !== false && schedule.status === "ativo"; }
+function isActive(schedule: RelatorioAgendamento) { return schedule.ativo !== false && (!schedule.status || schedule.status === "ativo"); }
 function dueToday(schedule: RelatorioAgendamento, now: Date) {
   const day = now.getDay(); const dayOfMonth = Number(new Intl.DateTimeFormat("pt-BR", { day: "2-digit", timeZone: schedule.timezone ?? tz }).format(now));
   if (["sob_demanda", "imediato"].includes(schedule.frequencia)) return false;
@@ -482,14 +486,35 @@ function dueToday(schedule: RelatorioAgendamento, now: Date) {
   if (schedule.frequencia === "fechamento_mes") return dayOfMonth >= 28;
   return false;
 }
-function inWindow(schedule: RelatorioAgendamento, now: Date, minutes: number) {
+function inWindow(schedule: RelatorioAgendamento, now: Date, minutes: number, suppliedTime?: string | null) {
   if (!schedule.horario) return true; const [h, m] = schedule.horario.split(":").map(Number); if (!Number.isFinite(h) || !Number.isFinite(m)) return true;
-  const local = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: schedule.timezone ?? tz }).format(now); const [ch, cm] = local.split(":").map(Number);
+  const local = suppliedTime ?? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: schedule.timezone ?? tz }).format(now); const [ch, cm] = local.split(":").map(Number);
   return Math.abs((ch * 60 + cm) - (h * 60 + m)) <= minutes;
 }
-async function alreadyToday(client: AnyClient, tenantId: string, scheduleId: string) {
-  const { data } = await client.from("relatorio_envios").select("id").eq("tenant_id", tenantId).eq("agendamento_id", scheduleId).gte("created_at", `${today()}T00:00:00`).limit(1).maybeSingle();
-  return Boolean(data);
+function scheduledCycleKey(schedule: RelatorioAgendamento, now = new Date()) {
+  const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: schedule.timezone ?? tz }).format(now);
+  const slot = String(schedule.horario ?? "sem-horario").slice(0, 5);
+  return `schedule:${schedule.id}:${localDate}:${slot}`;
+}
+
+async function reserveScheduledDispatch(client: AnyClient, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, now = new Date()) {
+  const idempotencyKey = scheduledCycleKey(schedule, now);
+  const { data, error } = await client.from("relatorio_envios").insert({
+    tenant_id: schedule.tenant_id,
+    agendamento_id: schedule.id,
+    destinatario_id: recipient.id,
+    tipo_resumo: schedule.tipo_resumo,
+    canal: schedule.canal,
+    destino: schedule.canal === "telegram" ? recipient.telegram_chat_id : recipient.email,
+    status: "preparado",
+    assunto: subject(schedule.tipo_resumo),
+    mensagem: null,
+    metadata: { origem: "agendado", idempotency_key: idempotencyKey, renderer: "telegram_v3" },
+    idempotency_key: idempotencyKey,
+  }).select("*").single();
+  if (!error) return data as RelatorioEnvio;
+  if (error.code === "23505") return null;
+  throw error;
 }
 
 export async function getRelatoriosContext(): Promise<RelatoriosContext> {
@@ -537,7 +562,7 @@ async function insertEnvioLog(client: AnyClient, payload: Record<string, unknown
   if (retry.error) throw retry.error;
   return retry.data as RelatorioEnvio;
 }
-async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean, scheduleIdForLog: string | null = schedule.id, deadlineAt?: number) {
+async function prepareDispatch(client: AnyClient, tenantId: string, schedule: RelatorioAgendamento, recipient: RelatorioDestinatario, origin: "manual" | "agendado" | "preview" | "sistema", createLog: boolean, scheduleIdForLog: string | null = schedule.id, deadlineAt?: number, reservedLog: RelatorioEnvio | null = null) {
   const totalStartedAt = performance.now();
   const assertWithinDeadline = () => { if (deadlineAt && Date.now() >= deadlineAt) throw new Error("REPORT_GENERATION_TIMEOUT"); };
   assertWithinDeadline();
@@ -556,15 +581,20 @@ async function prepareDispatch(client: AnyClient, tenantId: string, schedule: Re
   const emptyCount = result.diagnostics.filter((block) => block.status === "empty").length;
   const errorCount = result.diagnostics.filter((block) => block.status === "error").length;
   const summary = "Solicitados: " + result.requested.length + " · Renderizados: " + renderedCount + " · Sem dados: " + emptyCount + " · Erro: " + errorCount;
-  const metadata = { recipient_name: recipient.nome, schedule_name: schedule.nome, requested_modules: requestedModules, rendered_modules: modules, block_diagnostics: result.diagnostics, block_counts: { requested: result.requested.length, rendered: renderedCount, empty: emptyCount, error: errorCount } };
+  const hasContent = renderedCount > 0;
+  const metadata = { ...(reservedLog?.metadata ?? {}), renderer: "telegram_v3", parse_mode: "HTML", recipient_name: recipient.nome, schedule_name: schedule.nome, requested_modules: requestedModules, rendered_modules: modules, block_diagnostics: result.diagnostics, block_counts: { requested: result.requested.length, rendered: renderedCount, empty: emptyCount, error: errorCount } };
   let log: RelatorioEnvio | null = null;
   const historyStartedAt = performance.now();
-  if (createLog) {
-    log = await insertEnvioLog(client, { tenant_id: tenantId, agendamento_id: scheduleIdForLog, destinatario_id: recipient.id, tipo_resumo: schedule.tipo_resumo, canal: schedule.canal, destino: schedule.canal === "telegram" ? recipient.telegram_chat_id : recipient.email, status: "preparado", origem: origin, assunto: subject(schedule.tipo_resumo), resumo: summary, mensagem: text, modulos: modules, filtros: filters, metadata, generated_at: new Date().toISOString() });
+  if (reservedLog) {
+    const { data: updated, error } = await client.from("relatorio_envios").update({ status: hasContent ? "preparado" : "sem_conteudo", assunto: subject(schedule.tipo_resumo), mensagem: text, metadata }).eq("id", reservedLog.id).select("*").single();
+    if (error) throw error;
+    log = updated as RelatorioEnvio;
+  } else if (createLog) {
+    log = await insertEnvioLog(client, { tenant_id: tenantId, agendamento_id: scheduleIdForLog, destinatario_id: recipient.id, tipo_resumo: schedule.tipo_resumo, canal: schedule.canal, destino: schedule.canal === "telegram" ? recipient.telegram_chat_id : recipient.email, status: hasContent ? "preparado" : "sem_conteudo", origem: origin, assunto: subject(schedule.tipo_resumo), resumo: summary, mensagem: text, modulos: modules, filtros: filters, metadata, generated_at: new Date().toISOString() });
   }
   const timings = { blocks_ms: blocksMs, render_ms: renderMs, history_ms: Math.round(performance.now() - historyStartedAt), prepare_total_ms: Math.round(performance.now() - totalStartedAt) };
   console.info("relatorios.send_now.prepare_ms", timings);
-  return { schedule, recipient, log, subject: subject(schedule.tipo_resumo), text, summary, modules, requestedModules, filters, diagnostics: result.diagnostics, channel: schedule.canal, telegramChatId: recipient.telegram_chat_id, timings };
+  return { schedule, recipient, log, subject: subject(schedule.tipo_resumo), text, summary, modules, requestedModules, filters, diagnostics: result.diagnostics, channel: schedule.canal, telegramChatId: recipient.telegram_chat_id, timings, hasContent };
 }
 export async function getRelatorioPreviewFromDraft(payload: Partial<RelatorioAgendamento>, options: DispatchOptions = {}) {
   const auth = await assertRelatoriosWriteAccess();
@@ -594,11 +624,19 @@ export async function getRelatorioDispatchByScheduleId(scheduleId: string, optio
   const auth = await assertRelatoriosWriteAccess(); const origin = options.origin ?? "manual"; const createLog = options.createLog ?? true; const readStartedAt = performance.now();
   const { data: schedule, error } = await auth.dataClient.from("relatorio_agendamentos").select("*").eq("tenant_id", auth.tenantId).eq("id", scheduleId).maybeSingle(); if (error) throw error; if (!schedule) throw new Error("Agendamento nao encontrado."); if (options.requireActive && !isActive(schedule as RelatorioAgendamento)) throw new Error("Agendamento nao esta ativo.");
   const { data: recipient, error: recipientError } = await auth.dataClient.from("relatorio_destinatarios").select("*").eq("tenant_id", auth.tenantId).eq("id", schedule.destinatario_id).maybeSingle(); if (recipientError) throw recipientError; if (!recipient) throw new Error("Destinatario do agendamento nao encontrado.");
-  const dispatch = await prepareDispatch(auth.dataClient, auth.tenantId, schedule as RelatorioAgendamento, recipient as RelatorioDestinatario, origin, createLog, schedule.id, options.deadlineAt);
-  return { ...dispatch, timings: { ...dispatch.timings, report_read_ms: Math.max(0, Math.round(performance.now() - readStartedAt - dispatch.timings.prepare_total_ms)) } };
+  const reservation = origin === "agendado" && createLog ? await reserveScheduledDispatch(auth.dataClient, schedule as RelatorioAgendamento, recipient as RelatorioDestinatario) : null;
+  if (origin === "agendado" && createLog && !reservation) throw new Error("Este ciclo do agendamento já foi preparado.");
+  try {
+    const dispatch = await prepareDispatch(auth.dataClient, auth.tenantId, schedule as RelatorioAgendamento, recipient as RelatorioDestinatario, origin, createLog, schedule.id, options.deadlineAt, reservation);
+    return { ...dispatch, timings: { ...dispatch.timings, report_read_ms: Math.max(0, Math.round(performance.now() - readStartedAt - dispatch.timings.prepare_total_ms)) } };
+  } catch (dispatchError) {
+    if (reservation) await updateRelatorioEnvioStatus({ logId: reservation.id, status: "erro", error: errorMessage(dispatchError), metadata: { failure_stage: "render" } });
+    throw dispatchError;
+  }
 }
 export async function getRelatorioDispatchesDue(now: Date | string = new Date(), windowMinutes = 20) {
-  const runAt = typeof now === "string" ? (() => { const [h, m] = now.split(":").map(Number); const d = new Date(); if (Number.isFinite(h)) d.setHours(h, Number.isFinite(m) ? m : 0, 0, 0); return d; })() : now;
+  const suppliedTime = typeof now === "string" ? now : null;
+  const runAt = typeof now === "string" ? new Date() : now;
   const admin = createAdminClient(); if (!admin) throw new Error("Cliente administrativo indisponivel para despachar relatorios.");
   let schedulesResult = await admin.from("relatorio_agendamentos").select("*").eq("ativo", true).eq("status", "ativo").order("created_at", { ascending: true }).limit(200);
   if (schedulesResult.error && String(schedulesResult.error.message ?? "").toLowerCase().includes("status")) {
@@ -607,13 +645,21 @@ export async function getRelatorioDispatchesDue(now: Date | string = new Date(),
   const { data, error } = schedulesResult; if (error) throw error;
   const dispatches = [];
   for (const schedule of (data ?? []) as RelatorioAgendamento[]) {
-    if (!dueToday(schedule, runAt) || !inWindow(schedule, runAt, windowMinutes) || await alreadyToday(admin, schedule.tenant_id, schedule.id)) continue;
+    if (!dueToday(schedule, runAt) || !inWindow(schedule, runAt, windowMinutes, suppliedTime)) continue;
     const { data: recipient } = await admin.from("relatorio_destinatarios").select("*").eq("tenant_id", schedule.tenant_id).eq("id", schedule.destinatario_id).maybeSingle(); if (!recipient) continue;
-    dispatches.push(await prepareDispatch(admin, schedule.tenant_id, schedule, recipient as RelatorioDestinatario, "agendado", true));
+    const reservation = await reserveScheduledDispatch(admin, schedule, recipient as RelatorioDestinatario, runAt);
+    if (!reservation) continue;
+    try {
+      const dispatch = await prepareDispatch(admin, schedule.tenant_id, schedule, recipient as RelatorioDestinatario, "agendado", true, schedule.id, undefined, reservation);
+      if (dispatch.hasContent) dispatches.push(dispatch);
+    } catch (error) {
+      await updateRelatorioEnvioStatus({ logId: reservation.id, status: "erro", error: errorMessage(error), metadata: { failure_stage: "render" } });
+      console.error("relatorios.due.prepare_failure", { scheduleId: schedule.id, error: errorMessage(error) });
+    }
   }
   return dispatches;
 }
-export async function updateRelatorioEnvioStatus(params: { logId: string; status: "enviado" | "erro" | "ignorado"; error?: string; metadata?: Record<string, unknown> }) {
+export async function updateRelatorioEnvioStatus(params: { logId: string; status: "enviado" | "erro" | "ignorado" | "sem_conteudo"; error?: string; metadata?: Record<string, unknown> }) {
   const client = createAdminClient() ?? (await createClient()); const payload: Record<string, unknown> = { status: params.status, updated_at: new Date().toISOString() };
   if (params.status === "enviado") payload.sent_at = new Date().toISOString(); if (params.error) payload.erro = params.error;
   if (params.metadata) {

@@ -23,14 +23,14 @@ export async function POST(request: Request) {
   const status = String(body.status ?? "");
 
   if (!logId) return NextResponse.json({ error: "logId obrigatorio." }, { status: 400 });
-  if (!["enviado", "erro", "ignorado"].includes(status)) {
+  if (!["enviado", "erro", "ignorado", "sem_conteudo"].includes(status)) {
     return NextResponse.json({ error: "status invalido." }, { status: 400 });
   }
 
   try {
     const data = await updateRelatorioEnvioStatus({
       logId,
-      status: status as "enviado" | "erro" | "ignorado",
+      status: status as "enviado" | "erro" | "ignorado" | "sem_conteudo",
       error: body.error ? String(body.error) : undefined,
       metadata: typeof body.metadata === "object" && body.metadata ? body.metadata : {},
     });
