@@ -24,6 +24,12 @@ assert.match(library, /window\.confirm\(/, "similar content expansion must requi
 assert.match(library, /Nada foi salvo/, "AI suggestions must be visibly non-persistent before confirmation");
 assert.match(library, /15 por página/, "the UI must disclose the page size");
 assert.match(api, /Ordenado por salvamentos/, "reuse ranking criteria must be transparent");
+assert.match(api, /campaignSummary/, "campaign filters must return an operational summary");
+assert.match(api, /rows\.length >= 5/, "format insights must require a minimum sample");
+assert.match(api, /rows\.length >= 7/, "timing insights must require a minimum sample");
+assert.match(library, /Amostra insuficiente para concluir padrão de formato/, "the UI must state when format evidence is insufficient");
+assert.match(library, /Amostra insuficiente para concluir padrão de horário/, "the UI must state when timing evidence is insufficient");
+assert.match(library, /Não disponível/, "missing metrics must use a neutral state instead of a false zero");
 assert.doesNotMatch(validation, /\.limit\(3000\)/, "validation RSC must not serialize the content corpus");
 assert.ok(seed.includes("imersao"), "the current import corpus must contain the imersao search case");
 assert.ok(seed.includes("zumbido"), "the current import corpus must contain the zumbido search case");

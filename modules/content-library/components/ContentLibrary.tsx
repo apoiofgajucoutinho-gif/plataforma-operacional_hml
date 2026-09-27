@@ -20,11 +20,21 @@ type ContentItem = {
   cta: string | null;
   permalink: string | null;
   thumbnail: string | null;
-  metrics: { reach: number; interactions: number; likes: number; saves: number; shares: number; comments: number; engagement: number };
+  metrics: { reach: number | null; interactions: number | null; likes: number | null; saves: number | null; shares: number | null; comments: number | null; engagement: number | null };
   classification: { tags: string[]; reuseStatus: string; reuseAction: string };
 };
 type Facets = { products: string[]; themes: string[]; campaigns: Array<{ value: string; label: string }>; objectives: string[]; formats: string[]; funnels: string[] };
-type Payload = { items: ContentItem[]; highlights: ContentItem[]; highlightRule: string; page: number; pages: number; total: number; facets: Facets; canWrite: boolean; error?: string };
+type CampaignSummary = {
+  total: number;
+  bestReach: { id: string; title: string; value: number } | null;
+  mostSaved: { id: string; title: string; value: number } | null;
+  mostShared: { id: string; title: string; value: number } | null;
+  bestEngagement: { id: string; title: string; value: number } | null;
+  bestFormat: { label: string; averageEngagement: number; sample: number } | null;
+  bestTiming: { label: string; averageEngagement: number; sample: number } | null;
+  sampleSufficient: boolean;
+};
+type Payload = { items: ContentItem[]; highlights: ContentItem[]; highlightRule: string; campaignSummary: CampaignSummary | null; page: number; pages: number; total: number; facets: Facets; canWrite: boolean; error?: string };
 type Classification = { product: string; theme: string; campaign: string; objective: string; funnel: string; format: string; reuse_status: string; tags: string[] };
 
 const emptyFacets: Facets = { products: [], themes: [], campaigns: [], objectives: [], formats: [], funnels: [] };
@@ -33,8 +43,8 @@ const reuseOptions = [
   ["reel", "Reel"], ["carrossel", "Carrossel"], ["stories", "Stories"], ["atualizar_hook", "Atualizar hook"], ["atualizar_legenda", "Atualizar legenda"], ["campanha_atual", "Usar na campanha atual"],
 ];
 
-function number(value: number) { return new Intl.NumberFormat("pt-BR").format(value || 0); }
-function percent(value: number) { return new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 1 }).format(value || 0); }
+function number(value: number | null) { return value == null ? "Não disponível" : new Intl.NumberFormat("pt-BR").format(value); }
+function percent(value: number | null) { return value == null ? "Não disponível" : new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 1 }).format(value); }
 function date(value: string) { return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value)); }
 function time(value: string) { return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
 function titleFor(item: ContentItem) { return item.title?.trim() || item.caption?.trim() || "Conteúdo sem título"; }
@@ -53,7 +63,7 @@ function SelectFilter({ label, value, options, onChange }: { label: string; valu
 }
 
 export function ContentLibrary({ mode }: { mode: Mode }) {
-  const [data, setData] = useState<Payload>({ items: [], highlights: [], highlightRule: "", page: 1, pages: 1, total: 0, facets: emptyFacets, canWrite: false });
+  const [data, setData] = useState<Payload>({ items: [], highlights: [], highlightRule: "", campaignSummary: null, page: 1, pages: 1, total: 0, facets: emptyFacets, canWrite: false });
   const [filters, setFilters] = useState({ q: "", product: "", theme: "", campaign: "", objective: "", format: "", funnel: "", from: "", to: "", sort: "recent" });
   const [applied, setApplied] = useState(filters);
   const [page, setPage] = useState(1);
@@ -191,6 +201,8 @@ export function ContentLibrary({ mode }: { mode: Mode }) {
         </Surface>
       ) : null}
 
+      {mode === "marketing" && data.campaignSummary ? <CampaignOverview summary={data.campaignSummary} campaign={data.facets.campaigns.find((item) => item.value === applied.campaign)?.label ?? "Campanha selecionada"} /> : null}
+
       <Surface>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><p className="text-base font-bold text-[color:var(--ds-text)]">{number(data.total)} conteúdo(s)</p><p className="text-sm text-[color:var(--ds-text-secondary)]">Página {data.page} de {data.pages} · 15 por página</p></div>
@@ -261,6 +273,25 @@ function ContentRow({ item, mode, selected, onToggle, onTeach, onReuse, disabled
 
 function CompactHighlight({ item, onReuse, disabled }: { item: ContentItem; onReuse: (item: ContentItem, action: string) => void; disabled: boolean }) {
   return <div className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4"><p className="text-sm font-bold text-[color:var(--ds-text)]">{compact(titleFor(item), 78)}</p><p className="mt-2 text-sm text-[color:var(--ds-text-secondary)]">{number(item.metrics.saves)} salvos · {number(item.metrics.shares)} compartilhamentos · {number(item.metrics.reach)} de alcance</p><div className="mt-3"><ReuseMenu item={item} onReuse={onReuse} disabled={disabled} /></div></div>;
+}
+
+function CampaignOverview({ summary, campaign }: { summary: CampaignSummary; campaign: string }) {
+  const metric = (label: string, item: CampaignSummary["bestReach"], engagement = false) => <Mini label={label} value={item ? `${engagement ? percent(item.value) : number(item.value)} · ${compact(item.title, 42)}` : "Não disponível"} />;
+  return (
+    <Surface>
+      <SectionHeader eyebrow="Campanha" title={campaign} description={`${number(summary.total)} conteúdos encontrados no filtro atual.`} />
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {metric("Melhor alcance", summary.bestReach)}
+        {metric("Mais salvo", summary.mostSaved)}
+        {metric("Mais compartilhado", summary.mostShared)}
+        {metric("Melhor engajamento", summary.bestEngagement, true)}
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <InsightCard title="Melhor formato" tone="info">{summary.bestFormat ? `${summary.bestFormat.label} · média de ${percent(summary.bestFormat.averageEngagement)} em ${summary.bestFormat.sample} conteúdos` : "Amostra insuficiente para concluir padrão de formato."}</InsightCard>
+        <InsightCard title="Melhor dia e horário" tone="info">{summary.bestTiming ? `${summary.bestTiming.label} · média de ${percent(summary.bestTiming.averageEngagement)} em ${summary.bestTiming.sample} conteúdos` : "Amostra insuficiente para concluir padrão de horário."}</InsightCard>
+      </div>
+    </Surface>
+  );
 }
 
 function ReuseMenu({ item, onReuse, disabled }: { item: ContentItem; onReuse: (item: ContentItem, action: string) => void; disabled: boolean }) {

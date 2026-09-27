@@ -8,6 +8,7 @@ const tests = [
   "scripts/norwyn-student360-pagination-test.cjs",
   "scripts/norwyn-student360-filters-sort-profile-test.cjs",
   "scripts/norwyn-content-library-regression-test.cjs",
+  "scripts/norwyn-reports-v3-regression-test.cjs",
   "scripts/norwyn-student360-searchparams-test.cjs",
   "scripts/norwyn-student-enrollment-backfill-tests.cjs",
   "scripts/norwyn-presence-regression-test.cjs",

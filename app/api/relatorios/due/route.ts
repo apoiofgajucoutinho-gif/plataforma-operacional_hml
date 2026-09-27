@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { getRelatorioDispatchesDue } from "@/modules/relatorios/services/relatorios-server";
+import { telegramHtmlToPlainText } from "@/modules/relatorios/utils/telegram-format";
 
 function hasValidToken(request: Request) {
   const expected = env.n8nIngestToken;
@@ -34,7 +35,8 @@ export async function GET(request: Request) {
         email: dispatch.recipient.email,
         whatsapp: dispatch.recipient.whatsapp,
         subject: dispatch.subject,
-        text: dispatch.text,
+        text: telegramHtmlToPlainText(dispatch.text),
+        html: dispatch.text,
         parseMode: "HTML",
         parse_mode: "HTML",
       })),

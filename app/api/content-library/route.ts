@@ -25,6 +25,14 @@ function metric(snapshot: unknown, key: string) {
   return Number.isFinite(value) ? value : 0;
 }
 
+function optionalMetric(snapshot: unknown, key: string) {
+  if (!snapshot || typeof snapshot !== "object" || !(key in snapshot)) return null;
+  const raw = (snapshot as Record<string, unknown>)[key];
+  if (raw == null || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
 function classificationFromDecision(decision: any) {
   const value = decision?.new_value && typeof decision.new_value === "object" ? decision.new_value : {};
   return {
@@ -96,6 +104,67 @@ function applyFilters(query: any, params: URLSearchParams) {
   return query;
 }
 
+function filterRows(rows: any[], params: URLSearchParams, search: string) {
+  const product = text(params.get("product"));
+  const theme = text(params.get("theme"));
+  const campaign = text(params.get("campaign"));
+  const objective = text(params.get("objective"));
+  const format = text(params.get("format"));
+  const funnel = text(params.get("funnel"));
+  const period = text(params.get("period"));
+  const [from, to] = /^\d{4}-\d{2}-\d{2}:\d{4}-\d{2}-\d{2}$/.test(period) ? period.split(":") : ["", ""];
+  return rows.filter((row) => {
+    const published = text(row.published_at).slice(0, 10);
+    return (!search || searchable(row).includes(search))
+      && (!product || list(row.product_tags).includes(product))
+      && (!theme || list(row.theme_tags).includes(theme))
+      && (!campaign || text(row.campaign_id) === campaign)
+      && (!objective || text(row.objective) === objective)
+      && (!format || text(row.subtype) === format)
+      && (!funnel || text(row.funnel_stage) === funnel)
+      && (!from || published >= from)
+      && (!to || published <= to);
+  });
+}
+
+function campaignSummary(rows: any[]) {
+  if (!rows.length) return { total: 0, bestReach: null, mostSaved: null, mostShared: null, bestEngagement: null, bestFormat: null, bestTiming: null, sampleSufficient: false };
+  const best = (key: string) => rows
+    .filter((row) => optionalMetric(row.performance_snapshot, key) != null)
+    .toSorted((a, b) => (optionalMetric(b.performance_snapshot, key) ?? 0) - (optionalMetric(a.performance_snapshot, key) ?? 0))[0] ?? null;
+  const formatGroups = new Map<string, number[]>();
+  const timingGroups = new Map<string, number[]>();
+  for (const row of rows) {
+    const engagement = optionalMetric(row.performance_snapshot, "engajamento_score");
+    if (engagement == null) continue;
+    const format = text(row.subtype);
+    if (format) formatGroups.set(format, [...(formatGroups.get(format) ?? []), engagement]);
+    if (row.published_at) {
+      const instant = new Date(row.published_at);
+      const day = new Intl.DateTimeFormat("pt-BR", { weekday: "long", timeZone: "America/Sao_Paulo" }).format(instant);
+      const hour = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", hour12: false, timeZone: "America/Sao_Paulo" }).format(instant);
+      const timing = `${day}, ${hour}h`;
+      timingGroups.set(timing, [...(timingGroups.get(timing) ?? []), engagement]);
+    }
+  }
+  const bestGroup = (groups: Map<string, number[]>, minimum: number) => [...groups]
+    .filter(([, values]) => values.length >= minimum)
+    .map(([label, values]) => ({ label, averageEngagement: values.reduce((sum, value) => sum + value, 0) / values.length, sample: values.length }))
+    .toSorted((a, b) => b.averageEngagement - a.averageEngagement)[0] ?? null;
+  const summarize = (row: any, key: string) => row ? { id: row.id, title: row.title || row.caption || "Conteúdo sem título", value: optionalMetric(row.performance_snapshot, key) } : null;
+  const sampleSufficient = rows.length >= 5;
+  return {
+    total: rows.length,
+    bestReach: summarize(best("alcance"), "alcance"),
+    mostSaved: summarize(best("salvos"), "salvos"),
+    mostShared: summarize(best("compartilhamentos"), "compartilhamentos"),
+    bestEngagement: summarize(best("engajamento_score"), "engajamento_score"),
+    bestFormat: sampleSufficient ? bestGroup(formatGroups, 2) : null,
+    bestTiming: rows.length >= 7 ? bestGroup(timingGroups, 2) : null,
+    sampleSufficient,
+  };
+}
+
 function mergeRow(row: any, campaigns: Map<string, string>, decision: any) {
   const snapshot = row.performance_snapshot ?? {};
   const likes = metric(snapshot, "likes");
@@ -106,13 +175,13 @@ function mergeRow(row: any, campaigns: Map<string, string>, decision: any) {
     ...row,
     campaign_name: campaigns.get(String(row.campaign_id ?? "")) ?? row.campaign_id ?? null,
     metrics: {
-      reach: metric(snapshot, "alcance"),
-      interactions: likes + comments + saves + shares,
-      likes,
-      saves,
-      shares,
-      comments,
-      engagement: metric(snapshot, "engajamento_score"),
+      reach: optionalMetric(snapshot, "alcance"),
+      interactions: ["likes", "comentarios", "salvos", "compartilhamentos"].some((key) => optionalMetric(snapshot, key) != null) ? likes + comments + saves + shares : null,
+      likes: optionalMetric(snapshot, "likes"),
+      saves: optionalMetric(snapshot, "salvos"),
+      shares: optionalMetric(snapshot, "compartilhamentos"),
+      comments: optionalMetric(snapshot, "comentarios"),
+      engagement: optionalMetric(snapshot, "engajamento_score"),
     },
     permalink: text(snapshot.permalink) || text(row.metadata?.permalink),
     thumbnail: text(row.metadata?.thumbnail_url) || text(row.metadata?.media_url) || null,
@@ -138,6 +207,7 @@ export async function GET(request: Request) {
     const campaignNames = new Map<string, string>((campaignResult.data ?? []).map((item: any) => [String(item.id), String(item.name)]));
     const contentDecisions = decisionsByContent(classificationResult.data ?? []);
     const facetRows = (facetResult.data ?? []).map((row: any) => ({ ...row, campaign_name: campaignNames.get(String(row.campaign_id ?? "")), decision_tags: classificationFromDecision(contentDecisions.get(row.id)).tags }));
+    const filteredFacetRows = filterRows(facetRows, params, search);
     const matchingIds = search ? facetRows.filter((row: any) => searchable(row).includes(search)).map((row: any) => row.id) : null;
 
     let rows: any[] = [];
@@ -161,7 +231,7 @@ export async function GET(request: Request) {
       count = result.count ?? 0;
     }
 
-    const topRows = [...facetRows]
+    const topRows = [...filteredFacetRows]
       .map((row: any) => ({ ...row, performance_snapshot: row.performance_snapshot ?? {} }))
       .filter((row: any) => metric(row.performance_snapshot, "salvos") || metric(row.performance_snapshot, "compartilhamentos"))
       .sort((a: any, b: any) => metric(b.performance_snapshot, "salvos") - metric(a.performance_snapshot, "salvos") || metric(b.performance_snapshot, "compartilhamentos") - metric(a.performance_snapshot, "compartilhamentos"))
@@ -175,6 +245,7 @@ export async function GET(request: Request) {
       pages: Math.max(1, Math.ceil(count / PAGE_SIZE)),
       highlights: topRows.map((row) => mergeRow(row, campaignNames, contentDecisions.get(row.id))),
       highlightRule: "Ordenado por salvamentos; desempate por compartilhamentos. Não usa score oculto.",
+      campaignSummary: text(params.get("campaign")) ? campaignSummary(filteredFacetRows) : null,
       facets: {
         products: unique(facetRows.map((row: any) => row.product_tags)),
         themes: unique(facetRows.map((row: any) => row.theme_tags)),

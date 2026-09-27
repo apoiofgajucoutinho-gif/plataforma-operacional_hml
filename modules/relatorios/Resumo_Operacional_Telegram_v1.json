@@ -129,7 +129,7 @@
             },
             {
               "name": "text",
-              "value": "={{ $json.text }}"
+              "value": "={{ $json.html || $json.text }}"
             },
             {
               "name": "parse_mode",
