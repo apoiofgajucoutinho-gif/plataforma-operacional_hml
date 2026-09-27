@@ -33,6 +33,8 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { clsx } from "clsx";
 import { TrackPageView } from "@/components/adoption/TrackPageView";
+import { navigationDefinitionsForRole } from "@/components/layout/app-navigation";
+import type { NavigationIconKey } from "@/components/layout/app-navigation";
 import { readyModules } from "@/lib/auth/modules";
 import { functionalRoleFor } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/client";
@@ -47,67 +49,29 @@ type NavigationItem = {
   adminOnly?: boolean;
 };
 
-const defaultNavigation: NavigationItem[] = [
-  { label: "Início", href: "/norwyn", icon: Compass, key: "norwyn", module: "norwyn", group: "Principal" },
-  { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda", module: "agenda", group: "Principal" },
-  { label: "Atividades", href: "/atividades", icon: Activity, key: "atividades", module: "atividades", group: "Principal" },
-  { label: "Comercial", href: "/comercial", icon: BriefcaseBusiness, key: "comercial", module: "comercial", group: "Negócio" },
-  { label: "Marketing", href: "/marketing", icon: Sparkles, key: "marketing", module: "norwyn", group: "Negócio" },
-  { label: "Resultados", href: "/resultados", icon: BarChart3, key: "resultados", module: "norwyn", group: "Negócio" },
-  { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Negócio" },
-  { label: "Produtos & Alunos", href: "/produtos-alunos", icon: UsersRound, key: "produtos-alunos", module: "norwyn", group: "Negócio" },
-  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Negócio" },
-  { label: "Missões", href: "/missoes", icon: Target, key: "missoes", module: "norwyn", group: "Negócio" },
-  { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Negócio" },
-  { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Negócio" },
-  { label: "Presença", href: "/presence", icon: MonitorSmartphone, key: "presence", module: "norwyn", group: "Avançado" },
-  { label: "Landing Pages", href: "/landing-pages", icon: LayoutDashboard, key: "landing-pages", module: "landing-pages", group: "Administração" },
-  { label: "Suporte", href: "/ocorrencias", icon: AlertTriangle, key: "suporte", module: "ocorrencias", group: "Operação" },
-  { label: "Alunos", href: "/produtos-alunos?view=students", icon: UsersRound, key: "alunos", module: "norwyn", group: "Operação" },
-  { label: "Usuários", href: "/admin", icon: Settings, key: "admin", module: "admin", group: "Administração" },
-  { label: "Relatórios", href: "/relatorios", icon: FileText, key: "relatorios", module: "relatorios", group: "Administração" },
-  { label: "Adoção", href: "/adocao", icon: Activity, key: "adocao", module: "adocao", group: "Administração", adminOnly: true },
-  { label: "Configurações", href: "/admin?tab=settings", icon: Settings, key: "configuracoes", module: "admin", group: "Administração" },
-  { label: "Lifecycle", href: "/norwyn?tab=guide", icon: LineChart, key: "lifecycle", module: "norwyn", group: "Avançado" },
-  { label: "Product Identity", href: "/norwyn?tab=business", icon: BriefcaseBusiness, key: "product-identity", module: "norwyn", group: "Avançado" },
-  { label: "QA", href: "/norwyn?tab=evidence", icon: BarChart3, key: "qa", module: "norwyn", group: "Avançado" },
-  { label: "Lab", href: "/norwyn-lab/funnel-test", icon: LineChart, key: "advanced", module: "norwyn", group: "Avançado" },
-];
+const navigationIcons: Record<NavigationIconKey, LucideIcon> = {
+  activity: Activity,
+  alert: AlertTriangle,
+  "bar-chart": BarChart3,
+  bot: Bot,
+  briefcase: BriefcaseBusiness,
+  calendar: CalendarDays,
+  clipboard: ClipboardCheck,
+  compass: Compass,
+  dollar: CircleDollarSign,
+  "file-text": FileText,
+  layout: LayoutDashboard,
+  "line-chart": LineChart,
+  monitor: MonitorSmartphone,
+  settings: Settings,
+  sparkles: Sparkles,
+  tags: Tags,
+  target: Target,
+  users: UsersRound,
+};
 
-const specialistNavigation: NavigationItem[] = [
-  { label: "Início", href: "/norwyn", icon: Compass, key: "norwyn", module: "norwyn", group: "Principal" },
-  { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda", module: "agenda", group: "Principal" },
-  { label: "Missões", href: "/missoes", icon: Target, key: "missoes", module: "norwyn", group: "Principal" },
-  { label: "Marketing", href: "/marketing", icon: Sparkles, key: "marketing", module: "norwyn", group: "Trabalho" },
-  { label: "Comercial", href: "/comercial", icon: BriefcaseBusiness, key: "comercial", module: "comercial", group: "Trabalho" },
-  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Trabalho" },
-  { label: "Produtos & Alunos", href: "/produtos-alunos", icon: UsersRound, key: "produtos-alunos", module: "norwyn", group: "Trabalho" },
-  { label: "Resultados", href: "/resultados", icon: BarChart3, key: "resultados", module: "norwyn", group: "Trabalho" },
-  { label: "Relatórios", href: "/relatorios", icon: FileText, key: "relatorios", module: "relatorios", group: "Trabalho" },
-  { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Trabalho" },
-  { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Trabalho" },
-  { label: "Presença", href: "/presence", icon: MonitorSmartphone, key: "presence", module: "norwyn", group: "Trabalho" },
-  { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Trabalho" },
-];
-
-const operationalNavigation: NavigationItem[] = [
-  { label: "Início", href: "/norwyn", icon: Compass, key: "norwyn", module: "norwyn", group: "Principal" },
-  { label: "Agenda", href: "/agenda", icon: CalendarDays, key: "agenda", module: "agenda", group: "Principal" },
-  { label: "Atividades", href: "/atividades", icon: Activity, key: "atividades", module: "atividades", group: "Principal" },
-  { label: "Suporte", href: "/ocorrencias", icon: AlertTriangle, key: "suporte", module: "ocorrencias", group: "Operação" },
-  { label: "Alunos", href: "/produtos-alunos?view=students", icon: UsersRound, key: "alunos", module: "norwyn", group: "Operação" },
-  { label: "Financeiro", href: "/financeiro", icon: CircleDollarSign, key: "financeiro", module: "financeiro", group: "Operação" },
-  { label: "Produtos", href: "/produtos-alunos?view=products", icon: BriefcaseBusiness, key: "produtos", module: "norwyn", group: "Operação" },
-  { label: "Catálogo", href: "/catalogo", icon: Tags, key: "catalogo", module: "catalogo", group: "Operação" },
-  { label: "Relatórios", href: "/relatorios", icon: FileText, key: "relatorios", module: "relatorios", group: "Operação" },
-  { label: "Automações", href: "/automacoes", icon: Bot, key: "automacoes", module: "norwyn", group: "Operação" },
-  { label: "Validação", href: "/validacao", icon: ClipboardCheck, key: "validacao", module: "validacao", group: "Operação" },
-];
-function navigationForRole(role: unknown) {
-  const functionalRole = functionalRoleFor(role);
-  if (functionalRole === "ESPECIALISTA") return specialistNavigation;
-  if (functionalRole === "OPERACIONAL") return operationalNavigation;
-  return defaultNavigation;
+function navigationForRole(role: unknown): NavigationItem[] {
+  return navigationDefinitionsForRole(role).map((item) => ({ ...item, icon: navigationIcons[item.icon] }));
 }
 
 function groupedNavigation(items: NavigationItem[]) {
