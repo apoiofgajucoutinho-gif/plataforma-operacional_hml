@@ -67,6 +67,7 @@ const specialistNavigation: NavigationDefinition[] = [
   { label: "Relatórios", href: "/relatorios", icon: "file-text", key: "relatorios", module: "relatorios", group: "Trabalho" },
   { label: "Financeiro", href: "/financeiro", icon: "dollar", key: "financeiro", module: "financeiro", group: "Trabalho" },
   { label: "Automações", href: "/automacoes", icon: "bot", key: "automacoes", module: "norwyn", group: "Trabalho" },
+  { label: "Landing Pages", href: "/landing-pages", icon: "layout", key: "landing-pages", module: "landing-pages", group: "Trabalho" },
   { label: "Presença", href: "/presence", icon: "monitor", key: "presence", module: "norwyn", group: "Trabalho" },
   { label: "Validação", href: "/validacao", icon: "clipboard", key: "validacao", module: "validacao", group: "Trabalho" },
 ];

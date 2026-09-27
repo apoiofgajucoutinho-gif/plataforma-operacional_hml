@@ -93,3 +93,87 @@ export type LandingAdminContext = {
   diagnostic: string | null;
   landings: LandingApprovalSummary[];
 };
+
+export type LandingDashboardTab =
+  | "overview"
+  | "performance"
+  | "behavior"
+  | "attribution"
+  | "content"
+  | "health"
+  | "events"
+  | "versions"
+  | "qa";
+
+export type LandingMetric = {
+  value: number | null;
+  previous: number | null;
+};
+
+export type LandingDashboardItem = {
+  landingKey: string;
+  name: string;
+  productId: string | null;
+  productName: string;
+  campaign: string;
+  environment: string;
+  status: string;
+  url: string | null;
+  domain: string;
+  version: string | null;
+  source: "definition" | "registry" | "tracking";
+};
+
+export type LandingDashboardContext = {
+  role: string | null;
+  roleMode: "ADMIN" | "ESPECIALISTA";
+  allowedModules: string[];
+  diagnostic: string | null;
+  period: { key: string; label: string; start: string; end: string; comparisonAvailable: boolean };
+  filters: { products: string[]; campaigns: string[]; environments: string[]; statuses: string[]; domains: string[] };
+  landings: LandingDashboardItem[];
+  selected: LandingDashboardItem | null;
+  metrics: {
+    visitors: LandingMetric;
+    sessions: LandingMetric;
+    pageViews: LandingMetric;
+    offerViews: LandingMetric;
+    checkoutClicks: LandingMetric;
+    conversionRate: LandingMetric;
+  };
+  daily: Array<{ date: string; pageViews: number; sessions: number; checkoutClicks: number }>;
+  funnel: Array<{ label: string; value: number; rate: number | null }>;
+  topEvents: Array<{ name: string; total: number; sessions: number }>;
+  sections: Array<{ id: string; label: string; views: number; share: number | null }>;
+  attribution: Array<{ source: string; campaign: string; sessions: number; checkoutClicks: number }>;
+  recentEvents: Array<{ id: string; name: string; label: string; occurredAt: string; section: string | null; source: string }>;
+  content: {
+    title: string;
+    summary: string;
+    checkoutUrl: string | null;
+    hotmartProductId: string | null;
+    hotmartOfferId: string | null;
+    previewUrl: string | null;
+  };
+  health: {
+    availability: string;
+    httpStatus: number | null;
+    lastCheckedAt: string | null;
+    domain: string;
+    checkout: string;
+    checkoutCheckedAt: string | null;
+    links: string;
+    images: string;
+    tracking: string;
+    recentEventAt: string | null;
+    errors: number | null;
+    seo: string;
+    technicalPerformance: string;
+    publishedIntegrity: string;
+    divergences: string[];
+    alerts: string[];
+  };
+  versions: Array<{ id: string; version: string; status: string; summary: string; createdAt: string }>;
+  qa: Array<{ id: string; status: string; passed: number; warnings: number; blockers: number; completedAt: string | null }>;
+  approvals: Array<{ id: string; type: string; decision: string; requestedAt: string; decidedAt: string | null }>;
+};

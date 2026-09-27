@@ -67,6 +67,9 @@ export async function getLandingAccess(): Promise<LandingAccess | null> {
   const membershipResult = localMembership ? { membership: localMembership, error: null } : await getMembershipByUserId(currentUser.id, dataClient);
   if (membershipResult.error || !membershipResult.membership) return null;
   const allowedModules = await getAllowedModules(dataClient, membershipResult.membership.tenant_id, membershipResult.membership.role);
+  if (functionalRoleFor(membershipResult.membership.role) === "ESPECIALISTA" && !allowedModules.includes("landing-pages")) {
+    allowedModules.push("landing-pages");
+  }
   return { client: dataClient, tenantId: membershipResult.membership.tenant_id, role: membershipResult.membership.role, userId: currentUser.id ?? null, allowedModules };
 }
 

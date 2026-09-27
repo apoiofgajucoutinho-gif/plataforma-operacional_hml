@@ -1,111 +1,110 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import Link from "next/link";
-import { CheckCircle2, ExternalLink, FlaskConical, Send, ShieldAlert } from "lucide-react";
-import type { LandingAdminContext, LandingApprovalSummary } from "@/modules/landing-pages/types";
+import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Activity, AlertTriangle, BarChart3, CheckCircle2, ChevronRight, CircleGauge, Clock3,
+  ExternalLink, Eye, FileCheck2, FileText, Filter, Globe2, ImageIcon, LayoutDashboard,
+  Link2, MousePointerClick, Search, Tags, UsersRound,
+} from "lucide-react";
+import { EmptyState, IconPill, MetricCard, PageHeader, SectionHeader, StatusBadge, Surface } from "@/components/ui/norwyn-design-system";
+import type { LandingDashboardContext, LandingDashboardTab, LandingMetric } from "@/modules/landing-pages/types";
 
-function statusLabel(status: string) {
-  const labels: Record<string, string> = { DRAFT: "Em construção", DEV: "DEV", QA: "Em testes", HML: "Homologação", AWAITING_APPROVAL: "Aguardando aprovação", REJECTED: "Reprovado para ajustes", READY_FOR_PROD: "Ready for PROD" };
-  return labels[status] ?? status;
+const tabs: Array<{ key: LandingDashboardTab; label: string; adminOnly?: boolean }> = [
+  { key: "overview", label: "Visão Geral" }, { key: "performance", label: "Desempenho" },
+  { key: "behavior", label: "Comportamento", adminOnly: true }, { key: "attribution", label: "Atribuição", adminOnly: true },
+  { key: "content", label: "Conteúdo" }, { key: "health", label: "Saúde" },
+  { key: "events", label: "Eventos", adminOnly: true }, { key: "versions", label: "Versões", adminOnly: true },
+  { key: "qa", label: "QA e Integridade", adminOnly: true },
+];
+const statusLabels: Record<string, string> = { active: "Ativa", tracking: "Rastreada", DRAFT: "Rascunho", DEV: "DEV", QA: "Em QA", HML: "HML", AWAITING_APPROVAL: "Aguardando aprovação", APPROVED: "Aprovada", REJECTED: "Reprovada", READY_FOR_PROD: "Pronta para PROD", PROD: "Produção" };
+
+function valueOf(metric: LandingMetric, percent = false) {
+  if (metric.value === null) return "Não disponível";
+  return percent ? `${metric.value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%` : metric.value.toLocaleString("pt-BR");
+}
+function comparisonOf(metric: LandingMetric, percent = false) {
+  if (metric.previous === null || metric.value === null) return undefined;
+  if (percent) return `${(metric.value - metric.previous).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} p.p. vs. período anterior`;
+  if (metric.previous === 0) return metric.value === 0 ? "Estável" : "Sem base anterior";
+  const delta = ((metric.value - metric.previous) / metric.previous) * 100;
+  return `${delta >= 0 ? "+" : ""}${delta.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% vs. período anterior`;
+}
+function formatDate(value: string | null, withTime = true) {
+  if (!value) return "Não disponível";
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}) }).format(new Date(value));
+}
+function tabFrom(value: string | null, isAdmin: boolean): LandingDashboardTab {
+  const allowed = tabs.filter((tab) => isAdmin || !tab.adminOnly).map((tab) => tab.key);
+  return allowed.includes(value as LandingDashboardTab) ? value as LandingDashboardTab : "overview";
 }
 
-export function LandingPagesAdminPage({ context }: { context: LandingAdminContext }) {
-  const [items, setItems] = useState(context.landings);
-  const [pending, startTransition] = useTransition();
-  const [message, setMessage] = useState<string | null>(context.diagnostic);
-  const item = items[0];
-  const [headline, setHeadline] = useState("Domine a adaptação de AASI com método, segurança clínica e condução prática.");
-  const [imageSrc, setImageSrc] = useState("/brand/logo-horizontal-fundo-escuro.png");
-  const [themeKey, setThemeKey] = useState("juliana-default");
+export function LandingPagesAdminPage({ context }: { context: LandingDashboardContext }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const isAdmin = context.roleMode === "ADMIN";
+  const activeTab = tabFrom(searchParams.get("tab"), isAdmin);
+  const [query, setQuery] = useState(searchParams.get("q") ?? "");
+  const [product, setProduct] = useState(searchParams.get("product") ?? "all");
+  const [campaign, setCampaign] = useState(searchParams.get("campaign") ?? "all");
+  const [environment, setEnvironment] = useState(searchParams.get("environment") ?? "all");
+  const [status, setStatus] = useState(searchParams.get("status") ?? "all");
+  const [domain, setDomain] = useState(searchParams.get("domain") ?? "all");
+  const [customStart, setCustomStart] = useState(searchParams.get("start") ?? "");
+  const [customEnd, setCustomEnd] = useState(searchParams.get("end") ?? "");
+  const visibleLandings = useMemo(() => context.landings.filter((item) => {
+    const text = `${item.name} ${item.productName} ${item.campaign} ${item.domain}`.toLocaleLowerCase("pt-BR");
+    return (!query.trim() || text.includes(query.trim().toLocaleLowerCase("pt-BR"))) && (product === "all" || item.productName === product) && (campaign === "all" || item.campaign === campaign) && (environment === "all" || item.environment === environment) && (status === "all" || item.status === status) && (domain === "all" || item.domain === domain);
+  }), [campaign, context.landings, domain, environment, product, query, status]);
 
-  async function run(action: string, payload: Record<string, unknown> = {}) {
-    setMessage(null);
-    startTransition(async () => {
-      const response = await fetch("/api/landing-pages/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, landingKey: item?.landingKey ?? "aasi-premium-v2", ...payload }) });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) { setMessage(json.error ?? "Ação não concluída."); return; }
-      setItems(Array.isArray(json.landings) ? json.landings : items);
-      setMessage(json.message ?? "Atualizado.");
-    });
+  function navigate(updates: Record<string, string | null>) {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(updates)) value ? params.set(key, value) : params.delete(key);
+    router.replace(`/landing-pages?${params.toString()}`, { scroll: false });
   }
-
-  if (context.diagnostic && !item) {
-    return <main className="min-h-screen bg-[color:var(--ds-bg)] p-6"><div className="rounded-lg border border-amber-200 bg-white p-5 text-sm text-brand-teal">{context.diagnostic}</div></main>;
+  function applyFilters() {
+    navigate({ q: query || null, product: product === "all" ? null : product, campaign: campaign === "all" ? null : campaign, environment: environment === "all" ? null : environment, status: status === "all" ? null : status, domain: domain === "all" ? null : domain });
   }
+  if (context.diagnostic || !context.selected) return <main className="min-h-screen bg-[color:var(--ds-bg)] p-4 sm:p-6"><EmptyState title="Landing Pages indisponível">{context.diagnostic ?? "Aguardando dados."}</EmptyState></main>;
 
-  return (
-    <main className="min-h-screen bg-[color:var(--ds-bg)] p-4 sm:p-6 lg:p-8">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-clay">Landing System</p>
-            <h1 className="mt-2 text-3xl font-semibold text-brand-teal">Landing Pages</h1>
-            <p className="mt-2 max-w-2xl text-sm text-brand-teal/70">Builder administrativo, versionamento, QA, aprovação e preparação de publicação. Produção real permanece bloqueada.</p>
-          </div>
-          <span className="rounded-full bg-brand-teal px-4 py-2 text-xs font-black text-white">ADMIN</span>
-        </header>
-
-        {message ? <div className="rounded-lg border border-brand-sand bg-white p-3 text-sm text-brand-teal">{message}</div> : null}
-        {item ? <LandingAdminCard item={item} /> : null}
-
-        <section className="grid gap-4 rounded-2xl border border-brand-sand bg-white p-5 shadow-sm lg:grid-cols-[1fr_0.8fr]">
-          <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-brand-teal">Configuração AASI V2</h2>
-            <label className="grid gap-1 text-sm font-bold text-brand-teal">Headline
-              <textarea value={headline} onChange={(event) => setHeadline(event.target.value)} className="min-h-24 rounded-lg border border-brand-sand p-3 text-sm font-medium" />
-            </label>
-            <label className="grid gap-1 text-sm font-bold text-brand-teal">Imagem principal por URL/caminho
-              <input value={imageSrc} onChange={(event) => setImageSrc(event.target.value)} className="h-11 rounded-lg border border-brand-sand px-3 text-sm" />
-            </label>
-            <label className="grid gap-1 text-sm font-bold text-brand-teal">Tema
-              <select value={themeKey} onChange={(event) => setThemeKey(event.target.value)} className="h-11 rounded-lg border border-brand-sand px-3 text-sm">
-                <option value="juliana-default">Juliana Default</option>
-                <option value="black-friday-demo">Black Friday Demo</option>
-              </select>
-            </label>
-            <button type="button" disabled={pending} onClick={() => run("create_version", { headline, imageSrc, themeKey })} className="rounded-lg bg-brand-teal px-4 py-2 text-sm font-black text-white disabled:opacity-50">Criar nova versão</button>
-          </div>
-          <div className="space-y-3 rounded-xl bg-brand-cream/60 p-4">
-            <h3 className="text-sm font-black uppercase tracking-[0.12em] text-brand-clay">Pipeline</h3>
-            <button type="button" disabled={pending} onClick={() => run("send_dev")} className="flex w-full items-center justify-between rounded-lg bg-white px-4 py-3 text-sm font-bold text-brand-teal"><Send className="h-4 w-4" /> Enviar para DEV</button>
-            <button type="button" disabled={pending} onClick={() => run("run_qa")} className="flex w-full items-center justify-between rounded-lg bg-white px-4 py-3 text-sm font-bold text-brand-teal"><FlaskConical className="h-4 w-4" /> Executar QA</button>
-            <button type="button" disabled={pending} onClick={() => run("promote_hml")} className="flex w-full items-center justify-between rounded-lg bg-white px-4 py-3 text-sm font-bold text-brand-teal"><ExternalLink className="h-4 w-4" /> Promover para HML</button>
-            <button type="button" disabled={pending} onClick={() => run("request_approval")} className="flex w-full items-center justify-between rounded-lg bg-white px-4 py-3 text-sm font-bold text-brand-teal"><CheckCircle2 className="h-4 w-4" /> Solicitar aprovação</button>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-900"><ShieldAlert className="mr-2 inline h-4 w-4" /> PROD real bloqueado nesta fase.</div>
-          </div>
-        </section>
-      </div>
-    </main>
-  );
+  const selected = context.selected;
+  return <main className="min-h-screen bg-[color:var(--ds-bg)] p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1500px] space-y-5">
+    <PageHeader eyebrow="Marketing" title="Landing Pages" description="Acompanhe desempenho, conteúdo, atribuição e saúde das páginas em um único lugar." aside={<div className="flex flex-wrap gap-2"><StatusBadge tone={isAdmin ? "primary" : "info"}>{isAdmin ? "ADMIN" : "ESPECIALISTA"}</StatusBadge><StatusBadge tone="success">{context.landings.length} LP{context.landings.length === 1 ? "" : "s"}</StatusBadge></div>} />
+    <Surface className="space-y-4"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.5fr_repeat(5,minmax(0,1fr))_auto]">
+      <label className="relative block"><Search className="absolute left-3 top-3.5 h-4 w-4 text-[color:var(--ds-text-muted)]" /><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && applyFilters()} placeholder="Buscar LP por nome..." className="h-11 w-full rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] pl-10 pr-3 text-sm text-[color:var(--ds-text)] outline-none focus:border-[color:var(--ds-primary)]" /></label>
+      <FilterSelect label="Produto" value={product} values={context.filters.products} onChange={setProduct} /><FilterSelect label="Campanha" value={campaign} values={context.filters.campaigns} onChange={setCampaign} /><FilterSelect label="Ambiente" value={environment} values={context.filters.environments} onChange={setEnvironment} /><FilterSelect label="Status" value={status} values={context.filters.statuses} onChange={setStatus} /><FilterSelect label="Domínio" value={domain} values={context.filters.domains} onChange={setDomain} />
+      <button type="button" onClick={applyFilters} className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--ds-radius-md)] bg-[color:var(--ds-primary)] px-4 text-sm font-semibold text-white"><Filter className="h-4 w-4" />Filtrar</button>
+    </div><div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--ds-border)] pt-4">{(["today", "7d", "30d"] as const).map((key) => <button key={key} type="button" onClick={() => navigate({ period: key, start: null, end: null })} className={`rounded-full border px-4 py-2 text-sm font-semibold ${context.period.key === key ? "border-[color:var(--ds-primary)] bg-[color:var(--ds-primary)] text-white" : "border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] text-[color:var(--ds-text-secondary)]"}`}>{key === "today" ? "Hoje" : key === "7d" ? "7 dias" : "30 dias"}</button>)}<input aria-label="Início do período personalizado" type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} className="h-10 rounded-full border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] px-3 text-sm text-[color:var(--ds-text-secondary)]" /><input aria-label="Fim do período personalizado" type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} className="h-10 rounded-full border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] px-3 text-sm text-[color:var(--ds-text-secondary)]" /><button type="button" disabled={!customStart || !customEnd} onClick={() => navigate({ period: "custom", start: customStart, end: customEnd })} className="h-10 rounded-full border border-[color:var(--ds-border-strong)] px-4 text-sm font-semibold text-[color:var(--ds-text)] disabled:opacity-40">Aplicar período</button><span className="ml-auto inline-flex items-center gap-2 text-sm text-[color:var(--ds-text-muted)]"><Clock3 className="h-4 w-4" />{context.period.label}</span></div></Surface>
+    <div className="grid gap-5 xl:grid-cols-[290px_minmax(0,1fr)]"><Surface className="h-fit p-3 sm:p-3"><div className="mb-3 flex items-center justify-between px-2"><p className="text-sm font-semibold text-[color:var(--ds-text)]">Páginas</p><span className="text-xs text-[color:var(--ds-text-muted)]">{visibleLandings.length}</span></div><div className="grid max-h-[580px] gap-2 overflow-y-auto">{visibleLandings.map((item) => <button type="button" key={item.landingKey} onClick={() => navigate({ lp: item.landingKey, tab: "overview" })} className={`w-full rounded-[var(--ds-radius-md)] border p-3 text-left transition ${selected.landingKey === item.landingKey ? "border-[color:var(--ds-primary)] bg-[color:var(--ds-primary-soft)]" : "border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] hover:border-[color:var(--ds-border-strong)]"}`}><div className="flex items-start justify-between gap-2"><p className="font-semibold leading-5 text-[color:var(--ds-text)]">{item.name}</p><ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--ds-text-muted)]" /></div><p className="mt-1 text-xs text-[color:var(--ds-text-secondary)]">{item.productName}</p><div className="mt-3 flex flex-wrap gap-1.5"><StatusBadge tone={item.status === "active" ? "success" : "neutral"}>{statusLabels[item.status] ?? item.status}</StatusBadge><StatusBadge tone="info">{item.environment}</StatusBadge></div></button>)}{!visibleLandings.length ? <EmptyState title="Nenhuma LP encontrada">Ajuste os filtros para ampliar a busca.</EmptyState> : null}</div></Surface>
+      <div className="min-w-0 space-y-5"><Surface><div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div className="flex min-w-0 gap-3"><IconPill icon={LayoutDashboard} tone="primary" /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2 className="text-2xl font-semibold text-[color:var(--ds-text)]">{selected.name}</h2><StatusBadge tone="success">{statusLabels[selected.status] ?? selected.status}</StatusBadge></div><p className="mt-1 text-sm text-[color:var(--ds-text-secondary)]">{selected.productName} · {selected.campaign}</p><p className="mt-2 break-all text-sm text-[color:var(--ds-text-muted)]">{selected.domain} · {selected.version ?? "Versão não disponível"}</p></div></div>{context.content.previewUrl ? <a href={context.content.previewUrl} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center gap-2 rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border-strong)] bg-[color:var(--ds-surface-solid)] px-4 text-sm font-semibold text-[color:var(--ds-text)]"><Eye className="h-4 w-4" />Abrir preview<ExternalLink className="h-3.5 w-3.5" /></a> : null}</div></Surface>
+        <nav className="flex gap-2 overflow-x-auto rounded-[var(--ds-radius-lg)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface)] p-2 shadow-[var(--ds-shadow-sm)]" aria-label="Visões da landing page">{tabs.filter((tab) => isAdmin || !tab.adminOnly).map((tab) => <button key={tab.key} type="button" onClick={() => navigate({ tab: tab.key })} className={`shrink-0 rounded-full px-4 py-2.5 text-sm font-semibold ${activeTab === tab.key ? "bg-[color:var(--ds-primary)] text-white" : "text-[color:var(--ds-text-secondary)] hover:bg-[color:var(--ds-bg-soft)]"}`}>{tab.label}</button>)}</nav>
+        {activeTab === "overview" ? <Overview context={context} /> : null}{activeTab === "performance" ? <Performance context={context} /> : null}{activeTab === "behavior" ? <Behavior context={context} /> : null}{activeTab === "attribution" ? <Attribution context={context} /> : null}{activeTab === "content" ? <Content context={context} /> : null}{activeTab === "health" ? <Health context={context} simplified={!isAdmin} /> : null}{activeTab === "events" ? <Events context={context} /> : null}{activeTab === "versions" ? <Versions context={context} /> : null}{activeTab === "qa" ? <QaIntegrity context={context} /> : null}
+      </div></div>
+  </div></main>;
 }
 
-function LandingAdminCard({ item }: { item: LandingApprovalSummary }) {
-  return (
-    <section className="rounded-2xl border border-brand-sand bg-white p-5 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold text-brand-teal">{item.name}</h2>
-          <p className="mt-1 text-sm text-brand-teal/70">{item.version} - {statusLabel(item.status)} - {item.environment}</p>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-brand-teal/75">{item.changeSummary}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <a href={item.previewPath} target="_blank" rel="noreferrer" className="rounded-lg border border-brand-sand px-3 py-2 text-sm font-bold text-brand-teal">Abrir preview</a>
-          <Link href={`/landing-pages/approvals/${item.landingKey}`} className="rounded-lg bg-brand-clay px-3 py-2 text-sm font-bold text-white">Aprovação</Link>
-        </div>
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-6">
-        <Metric label="Testes" value={item.qa.total} />
-        <Metric label="Aprovados" value={item.qa.passed} />
-        <Metric label="Atenções" value={item.qa.warnings} />
-        <Metric label="Bloqueios" value={item.qa.blockers} />
-        <Metric label="Tracking" value={item.trackingEvents ?? 0} />
-        <Metric label="Histórico" value={item.historyEvents ?? 0} />
-      </div>
-    </section>
-  );
-}
+function FilterSelect({ label, value, values, onChange }: { label: string; value: string; values: string[]; onChange: (value: string) => void }) { return <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="h-11 min-w-0 rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] px-3 text-sm text-[color:var(--ds-text)]"><option value="all">{label}: todos</option>{values.map((item) => <option key={item} value={item}>{item}</option>)}</select>; }
+function Metrics({ context }: { context: LandingDashboardContext }) { const period = context.period.label; return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"><MetricCard label="Visitantes únicos" value={valueOf(context.metrics.visitors)} period={period} comparison={comparisonOf(context.metrics.visitors)} tone="primary" icon={UsersRound} /><MetricCard label="Sessões" value={valueOf(context.metrics.sessions)} period={period} comparison={comparisonOf(context.metrics.sessions)} tone="info" icon={Activity} /><MetricCard label="Page views" value={valueOf(context.metrics.pageViews)} period={period} comparison={comparisonOf(context.metrics.pageViews)} icon={Eye} /><MetricCard label="Oferta visualizada" value={valueOf(context.metrics.offerViews)} period={period} comparison={comparisonOf(context.metrics.offerViews)} tone="warning" icon={Tags} /><MetricCard label="Cliques no checkout" value={valueOf(context.metrics.checkoutClicks)} period={period} comparison={comparisonOf(context.metrics.checkoutClicks)} tone="success" icon={MousePointerClick} /><MetricCard label="LP → checkout" value={valueOf(context.metrics.conversionRate, true)} period="Sessões únicas" comparison={comparisonOf(context.metrics.conversionRate, true)} tone="success" icon={BarChart3} /></div>; }
+function Overview({ context }: { context: LandingDashboardContext }) { return <div className="space-y-5"><Metrics context={context} /><div className="grid gap-5 lg:grid-cols-[1.25fr_0.75fr]"><Trend context={context} /><Funnel context={context} /></div><div className="grid gap-5 lg:grid-cols-2"><Sections context={context} /><TopEvents context={context} /></div><Attribution context={context} compact /></div>; }
+function Performance({ context }: { context: LandingDashboardContext }) { return <div className="space-y-5"><Metrics context={context} /><div className="grid gap-5 lg:grid-cols-[1.25fr_0.75fr]"><Trend context={context} /><Funnel context={context} /></div><Sections context={context} /></div>; }
+function Trend({ context }: { context: LandingDashboardContext }) { const max = Math.max(1, ...context.daily.map((item) => item.pageViews)); return <Surface><SectionHeader eyebrow="Evolução" title="Movimento no período" description="Page views diários da LP selecionada." />{context.daily.length ? <div className="mt-6 flex h-52 items-end gap-2 border-b border-[color:var(--ds-border)] px-1">{context.daily.map((item) => <div key={item.date} className="group flex min-w-0 flex-1 flex-col items-center justify-end gap-2"><div title={`${item.date}: ${item.pageViews} page views`} className="w-full max-w-10 rounded-t bg-[color:var(--ds-primary)] transition group-hover:bg-[color:var(--ds-accent)]" style={{ height: `${Math.max(8, (item.pageViews / max) * 160)}px` }} /><span className="hidden text-[10px] text-[color:var(--ds-text-muted)] sm:block">{item.date.slice(5)}</span></div>)}</div> : <EmptyState title="Aguardando dados">A evolução aparece quando houver eventos no período.</EmptyState>}</Surface>; }
+function Funnel({ context }: { context: LandingDashboardContext }) { const max = Math.max(1, context.funnel[0]?.value ?? 1); return <Surface><SectionHeader eyebrow="Funil" title="LP até checkout" description="Conversão calculada por sessões únicas." /><div className="mt-5 space-y-4">{context.funnel.map((item) => <div key={item.label}><div className="mb-2 flex items-center justify-between gap-3 text-sm"><span className="font-semibold text-[color:var(--ds-text)]">{item.label}</span><span className="text-[color:var(--ds-text-secondary)]">{item.value.toLocaleString("pt-BR")} {item.rate === null ? "" : `· ${item.rate.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}</span></div><div className="h-3 overflow-hidden rounded-full bg-[color:var(--ds-bg-soft)]"><div className="h-full rounded-full bg-[color:var(--ds-accent)]" style={{ width: `${Math.max(item.value ? 8 : 0, (item.value / max) * 100)}%` }} /></div></div>)}</div></Surface>; }
+function Sections({ context }: { context: LandingDashboardContext }) { return <Surface><SectionHeader eyebrow="Conteúdo" title="Performance por seção" description="Sessões que visualizaram cada parte rastreada." /><div className="mt-5 divide-y divide-[color:var(--ds-border)]">{context.sections.map((item) => <div key={item.id} className="flex items-center justify-between gap-4 py-3"><div><p className="font-semibold text-[color:var(--ds-text)]">{item.label}</p><p className="text-xs text-[color:var(--ds-text-muted)]">{item.id}</p></div><div className="text-right"><p className="text-lg font-semibold text-[color:var(--ds-text)]">{item.views}</p><p className="text-xs text-[color:var(--ds-text-muted)]">{item.share === null ? "Não disponível" : `${item.share.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}% das sessões`}</p></div></div>)}{!context.sections.length ? <EmptyState title="Aguardando dados">Esta LP ainda não envia eventos de seção.</EmptyState> : null}</div></Surface>; }
+function TopEvents({ context }: { context: LandingDashboardContext }) { return <Surface><SectionHeader eyebrow="Eventos" title="Principais eventos" description="Eventos reais recebidos no período." /><div className="mt-5 grid gap-2">{context.topEvents.map((item, index) => <div key={item.name} className="flex items-center gap-3 rounded-[var(--ds-radius-md)] bg-[color:var(--ds-bg-soft)] p-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[color:var(--ds-primary-soft)] text-sm font-semibold text-[color:var(--ds-primary)]">{index + 1}</span><div className="min-w-0 flex-1"><p className="truncate font-semibold text-[color:var(--ds-text)]">{eventLabel(item.name)}</p><p className="text-xs text-[color:var(--ds-text-muted)]">{item.sessions} sessões</p></div><span className="text-lg font-semibold text-[color:var(--ds-text)]">{item.total}</span></div>)}{!context.topEvents.length ? <EmptyState title="Aguardando dados" /> : null}</div></Surface>; }
+function Behavior({ context }: { context: LandingDashboardContext }) { return <div className="grid gap-5 lg:grid-cols-2"><Sections context={context} /><TopEvents context={context} /></div>; }
+function Attribution({ context, compact = false }: { context: LandingDashboardContext; compact?: boolean }) { return <Surface><SectionHeader eyebrow="Aquisição" title="Origem e campanha" description="Atribuição disponível nos eventos reais da LP." /><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm"><thead className="text-[color:var(--ds-text-muted)]"><tr><th className="pb-3 font-medium">Origem</th><th className="pb-3 font-medium">Campanha</th><th className="pb-3 text-right font-medium">Sessões</th><th className="pb-3 text-right font-medium">Checkout</th></tr></thead><tbody className="divide-y divide-[color:var(--ds-border)]">{context.attribution.slice(0, compact ? 5 : 20).map((item) => <tr key={`${item.source}-${item.campaign}`}><td className="py-3 font-semibold text-[color:var(--ds-text)]">{item.source}</td><td className="py-3 text-[color:var(--ds-text-secondary)]">{item.campaign}</td><td className="py-3 text-right text-[color:var(--ds-text)]">{item.sessions}</td><td className="py-3 text-right text-[color:var(--ds-text)]">{item.checkoutClicks}</td></tr>)}</tbody></table>{!context.attribution.length ? <EmptyState title="Aguardando dados">Nenhuma atribuição foi recebida no período.</EmptyState> : null}</div></Surface>; }
+function Content({ context }: { context: LandingDashboardContext }) { return <div className="grid gap-5 lg:grid-cols-[1fr_0.8fr]"><Surface><SectionHeader eyebrow="Página" title={context.content.title} description={context.content.summary} /><div className="mt-6 grid gap-3 sm:grid-cols-2"><Info label="Produto" value={context.selected?.productName ?? "Não disponível"} /><Info label="Campanha" value={context.selected?.campaign ?? "Não disponível"} /><Info label="Versão" value={context.selected?.version ?? "Não disponível"} /><Info label="Ambiente" value={context.selected?.environment ?? "Não disponível"} /></div></Surface><Surface><SectionHeader eyebrow="Oferta" title="Checkout vinculado" description="Identidade comercial encontrada no Catálogo." /><div className="mt-5 space-y-3"><Info label="Hotmart Product ID" value={context.content.hotmartProductId ?? "Não disponível"} /><Info label="Offer ID" value={context.content.hotmartOfferId ?? "Não disponível"} /><Info label="URL" value={context.content.checkoutUrl ?? "Não disponível"} />{context.content.checkoutUrl ? <a href={context.content.checkoutUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--ds-primary)]">Abrir checkout <ExternalLink className="h-4 w-4" /></a> : null}</div></Surface></div>; }
 
-function Metric({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-xl bg-brand-cream/60 p-4"><p className="text-xs font-bold text-brand-teal/60">{label}</p><p className="mt-1 text-2xl font-semibold text-brand-teal">{value}</p></div>;
+function Health({ context, simplified }: { context: LandingDashboardContext; simplified: boolean }) {
+  const health = context.health;
+  const core = [["Disponibilidade", health.availability, Globe2], ["Checkout", health.checkout, Link2], ["Tracking", health.tracking, Activity], ["Último evento", formatDate(health.recentEventAt), Clock3]] as const;
+  const technical = [["HTTP", health.httpStatus === null ? "Não disponível" : String(health.httpStatus), CircleGauge], ["Links", health.links, Link2], ["Imagens", health.images, ImageIcon], ["SEO básico", health.seo, FileText], ["Performance técnica", health.technicalPerformance, BarChart3], ["Integridade publicada", health.publishedIntegrity, FileCheck2], ["Erros recentes", health.errors === null ? "Não disponível" : String(health.errors), AlertTriangle]] as const;
+  return <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{core.map(([label, value, Icon]) => <HealthCard key={label} label={label} value={value} icon={Icon} />)}</div>{!simplified ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{technical.map(([label, value, Icon]) => <HealthCard key={label} label={label} value={value} icon={Icon} />)}</div> : null}<div className="grid gap-5 lg:grid-cols-2"><Surface><SectionHeader eyebrow="Integridade" title="Divergências detectadas" description="Diferenças registradas sem correção automática." /><div className="mt-5 space-y-2">{health.divergences.map((item, index) => <Notice key={index} text={item} tone="warning" />)}{!health.divergences.length ? <Notice text="Nenhuma divergência registrada para esta LP." tone="success" /> : null}</div></Surface><Surface><SectionHeader eyebrow="Atenção" title={simplified ? "Pendências de validação" : "Alertas e QA"} description={simplified ? "Itens que podem precisar de revisão." : "Ocorrências abertas nas fontes de monitoramento."} /><div className="mt-5 space-y-2">{health.alerts.map((item, index) => <Notice key={index} text={item} tone="warning" />)}{!health.alerts.length ? <Notice text="Nenhum alerta aberto nas fontes disponíveis." tone="success" /> : null}</div></Surface></div><Surface><SectionHeader eyebrow="Monitoramento" title="Cobertura atual" description={`Domínio: ${health.domain}`} /><p className="mt-4 text-sm leading-6 text-[color:var(--ds-text-secondary)]">Última checagem: {formatDate(health.lastCheckedAt)} · Checkout verificado: {formatDate(health.checkoutCheckedAt)}</p></Surface></div>;
 }
+function Events({ context }: { context: LandingDashboardContext }) { return <Surface><SectionHeader eyebrow="Tracking" title="Eventos recentes" description="Últimos eventos reais no período selecionado." /><div className="mt-5 divide-y divide-[color:var(--ds-border)]">{context.recentEvents.map((item) => <div key={item.id} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-[color:var(--ds-text)]">{item.label}</p><p className="text-xs text-[color:var(--ds-text-muted)]">{item.section ?? item.source}</p></div><time className="text-sm text-[color:var(--ds-text-secondary)]">{formatDate(item.occurredAt)}</time></div>)}{!context.recentEvents.length ? <EmptyState title="Aguardando dados" /> : null}</div></Surface>; }
+function Versions({ context }: { context: LandingDashboardContext }) { return <Surface><SectionHeader eyebrow="Publicação" title="Versões" description="Histórico da estrutura de versionamento existente." /><div className="mt-5 grid gap-3 md:grid-cols-2">{context.versions.map((item) => <div key={item.id} className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4"><div className="flex items-center justify-between gap-3"><p className="font-semibold text-[color:var(--ds-text)]">{item.version}</p><StatusBadge tone="info">{statusLabels[item.status] ?? item.status}</StatusBadge></div><p className="mt-3 text-sm leading-6 text-[color:var(--ds-text-secondary)]">{item.summary}</p><p className="mt-3 text-xs text-[color:var(--ds-text-muted)]">{formatDate(item.createdAt)}</p></div>)}{!context.versions.length ? <EmptyState title="Aguardando dados">A LP rastreada ainda não possui versão no Landing System.</EmptyState> : null}</div></Surface>; }
+function QaIntegrity({ context }: { context: LandingDashboardContext }) { return <div className="grid gap-5 lg:grid-cols-2"><Surface><SectionHeader eyebrow="Qualidade" title="Execuções de QA" /><div className="mt-5 space-y-3">{context.qa.map((item) => <div key={item.id} className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] p-4"><div className="flex justify-between gap-3"><p className="font-semibold text-[color:var(--ds-text)]">{item.status}</p><span className="text-xs text-[color:var(--ds-text-muted)]">{formatDate(item.completedAt)}</span></div><p className="mt-2 text-sm text-[color:var(--ds-text-secondary)]">{item.passed} aprovados · {item.warnings} atenções · {item.blockers} bloqueios</p></div>)}{!context.qa.length ? <EmptyState title="Aguardando QA" /> : null}</div></Surface><Surface><SectionHeader eyebrow="Governança" title="Aprovações" /><div className="mt-5 space-y-3">{context.approvals.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] p-4"><div><p className="font-semibold text-[color:var(--ds-text)]">{item.type}</p><p className="text-xs text-[color:var(--ds-text-muted)]">Solicitada em {formatDate(item.requestedAt)}</p></div><StatusBadge tone={item.decision === "APPROVED" ? "success" : item.decision === "REJECTED" ? "danger" : "warning"}>{item.decision}</StatusBadge></div>)}{!context.approvals.length ? <EmptyState title="Aguardando aprovação" /> : null}</div></Surface></div>; }
+function HealthCard({ label, value, icon }: { label: string; value: string; icon: typeof Globe2 }) { const waiting = /não disponível|aguardando/i.test(value); return <div className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]"><div className="flex items-center gap-3"><IconPill icon={icon} tone={waiting ? "neutral" : "success"} /><div className="min-w-0"><p className="text-sm text-[color:var(--ds-text-secondary)]">{label}</p><p className="mt-1 break-words font-semibold text-[color:var(--ds-text)]">{value}</p></div></div></div>; }
+function Info({ label, value }: { label: string; value: string }) { return <div className="rounded-[var(--ds-radius-md)] bg-[color:var(--ds-bg-soft)] p-4"><p className="text-xs font-medium text-[color:var(--ds-text-muted)]">{label}</p><p className="mt-1 break-words text-sm font-semibold text-[color:var(--ds-text)]">{value}</p></div>; }
+function Notice({ text, tone }: { text: string; tone: "warning" | "success" }) { const Icon = tone === "success" ? CheckCircle2 : AlertTriangle; return <div className={`flex gap-3 rounded-[var(--ds-radius-md)] border p-3 ${tone === "success" ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone === "success" ? "text-emerald-700" : "text-amber-700"}`} /><p className="text-sm leading-5 text-[color:var(--ds-text)]">{text}</p></div>; }
+function eventLabel(value: string) { return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
