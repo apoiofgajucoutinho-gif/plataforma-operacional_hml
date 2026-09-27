@@ -185,7 +185,7 @@ function mergeRow(row: any, campaigns: Map<string, string>, decision: any) {
       engagement: optionalMetric(snapshot, "engajamento_score"),
     },
     permalink: text(snapshot.permalink) || text(row.metadata?.permalink),
-    thumbnail: text(row.metadata?.thumbnail_url) || text(row.metadata?.media_url) || null,
+    thumbnail: text(row.metadata?.thumbnail_url) || text(snapshot.thumbnail_url) || text(row.metadata?.media_url) || text(snapshot.media_url) || null,
     classification: classificationFromDecision(decision),
   };
 }
@@ -217,15 +217,30 @@ export async function GET(request: Request) {
       let query = auth.dataClient.from("norwyn_content_events").select(select, { count: "exact" }).eq("tenant_id", auth.tenantId);
       query = applyFilters(query, params);
       if (matchingIds) query = query.in("id", matchingIds);
-      const sortMap: Record<string, string> = {
-        reach: "performance_snapshot->alcance",
-        engagement: "performance_snapshot->engajamento_score",
-        saves: "performance_snapshot->salvos",
-        shares: "performance_snapshot->compartilhamentos",
-        comments: "performance_snapshot->comentarios",
-        recent: "published_at",
+      const sortMap: Record<string, { column: string; ascending: boolean }> = {
+        recent: { column: "published_at", ascending: false },
+        oldest: { column: "published_at", ascending: true },
+        reach: { column: "performance_snapshot->alcance", ascending: false },
+        reach_desc: { column: "performance_snapshot->alcance", ascending: false },
+        reach_asc: { column: "performance_snapshot->alcance", ascending: true },
+        engagement: { column: "performance_snapshot->engajamento_score", ascending: false },
+        engagement_desc: { column: "performance_snapshot->engajamento_score", ascending: false },
+        engagement_asc: { column: "performance_snapshot->engajamento_score", ascending: true },
+        saves: { column: "performance_snapshot->salvos", ascending: false },
+        shares: { column: "performance_snapshot->compartilhamentos", ascending: false },
+        comments: { column: "performance_snapshot->comentarios", ascending: false },
+        title_asc: { column: "title", ascending: true },
+        title_desc: { column: "title", ascending: false },
       };
-      query = query.order(sortMap[sort] ?? "published_at", { ascending: false, nullsFirst: false }).range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+      if (sort === "reuse") {
+        query = query
+          .order("performance_snapshot->salvos", { ascending: false, nullsFirst: false })
+          .order("performance_snapshot->compartilhamentos", { ascending: false, nullsFirst: false });
+      } else {
+        const selectedSort = sortMap[sort] ?? sortMap.recent;
+        query = query.order(selectedSort.column, { ascending: selectedSort.ascending, nullsFirst: false });
+      }
+      query = query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
       const result = await query;
       if (result.error) throw new Error(result.error.message);
       rows = result.data ?? [];
@@ -258,7 +273,8 @@ export async function GET(request: Request) {
       canWrite: auth.canWrite,
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível carregar o acervo." }, { status: 500 });
+    console.error("content_library.load_failed", { error: error instanceof Error ? error.message : String(error) });
+    return NextResponse.json({ error: "A biblioteca de conteúdos está temporariamente indisponível. Tente novamente em instantes." }, { status: 500 });
   }
 }
 
@@ -273,6 +289,7 @@ function safeClassification(value: unknown) {
     format: text(input.format),
     reuse_status: text(input.reuse_status),
     tags: list(input.tags).slice(0, 20),
+    observation: text(input.observation).slice(0, 1000),
   };
 }
 
@@ -352,12 +369,13 @@ export async function POST(request: Request) {
       if (result.error) throw new Error(result.error.message);
     }
     const previousById = new Map((current.data ?? []).map((row: any) => [row.id, row]));
-    const decisions = ids.map((id) => ({ tenant_id: auth.tenantId, validation_type: "CONTENT", entity_type: "content", entity_id: id, decision_type: "CONTENT_CLASSIFIED", previous_value: previousById.get(id) ?? null, new_value: classification, learn_scope: "single_case", decided_by: auth.userId, decided_role: auth.role, source: "content_library", metadata: { bulk: ids.length > 1, ai_suggestion_confirmed: Boolean(body.ai_suggestion_confirmed), similar_confirmed: Boolean(body.similar_confirmed) } }));
+    const decisions = ids.map((id) => ({ tenant_id: auth.tenantId, validation_type: "CONTENT", entity_type: "content", entity_id: id, decision_type: "CONTENT_CLASSIFIED", previous_value: previousById.get(id) ?? null, new_value: classification, comment: classification.observation || null, learn_scope: "single_case", decided_by: auth.userId, decided_role: auth.role, source: "content_library", metadata: { bulk: ids.length > 1, ai_suggestion_confirmed: Boolean(body.ai_suggestion_confirmed), similar_confirmed: Boolean(body.similar_confirmed) } }));
     const inserted = await auth.dataClient.from("norwyn_validation_decisions").insert(decisions);
     if (inserted.error) throw new Error(inserted.error.message);
     return NextResponse.json({ ok: true, updated: ids.length });
   } catch (error) {
-    const message = error instanceof Error && error.name === "AbortError" ? "A sugestão por IA excedeu o tempo de resposta." : error instanceof Error ? error.message : "Não foi possível atualizar os conteúdos.";
+    console.error("content_library.update_failed", { error: error instanceof Error ? error.message : String(error) });
+    const message = error instanceof Error && error.name === "AbortError" ? "A sugestão por IA excedeu o tempo de resposta." : "Não foi possível atualizar os conteúdos agora. Tente novamente em instantes.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

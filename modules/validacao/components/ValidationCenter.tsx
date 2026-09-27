@@ -76,15 +76,20 @@ export function ValidationCenter({ context }: { context: ValidationContext }) {
       />
 
       {!context.schemaReady ? (
-        <InsightCard title="Migration pendente no HML" tone="warning">A Central já está no código. As tabelas novas precisam existir no banco para uploads, decisões e aprendizados persistirem. Erros: {context.schemaErrors.join(" | ") || "schema ainda não confirmado"}.</InsightCard>
+        <InsightCard title="Central parcialmente disponível" tone="warning">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>A Central de Validação está passando por uma atualização interna. Algumas funções podem ficar indisponíveis temporariamente.</span>
+            <StatusBadge tone="warning">Em atualização</StatusBadge>
+          </div>
+        </InsightCard>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {active.key !== "conteudos" ? <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard icon={AlertTriangle} tone="warning" label="Precisam de revisão" value={number(context.bigNumbers.pending)} period="Dinheiro, produto e conteúdo" />
         <MetricCard icon={CheckCircle2} tone="success" label="Validados" value={number(context.bigNumbers.validated)} period="Decisões registradas" />
         <MetricCard icon={RefreshCw} tone="danger" label="Divergências" value={number(context.bigNumbers.divergences)} period="Comparações e moedas" />
         <MetricCard icon={Lightbulb} tone="info" label="Aprendizados" value={number(context.bigNumbers.learnings)} period="Knowledge layer" />
-      </section>
+      </section> : null}
 
       <Surface className="p-2 sm:p-2">
         <div className="grid gap-2 sm:grid-cols-3" role="tablist" aria-label="Central de Validação">

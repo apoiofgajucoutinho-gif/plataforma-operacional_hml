@@ -27,9 +27,15 @@ assert.match(api, /Ordenado por salvamentos/, "reuse ranking criteria must be tr
 assert.match(api, /campaignSummary/, "campaign filters must return an operational summary");
 assert.match(api, /rows\.length >= 5/, "format insights must require a minimum sample");
 assert.match(api, /rows\.length >= 7/, "timing insights must require a minimum sample");
-assert.match(library, /Amostra insuficiente para concluir padrão de formato/, "the UI must state when format evidence is insufficient");
-assert.match(library, /Amostra insuficiente para concluir padrão de horário/, "the UI must state when timing evidence is insufficient");
+assert.match(library, /Amostra insuficiente para recomendação confiável/, "the UI must state when evidence is insufficient");
 assert.match(library, /Não disponível/, "missing metrics must use a neutral state instead of a false zero");
+assert.match(library, /Melhor para reaproveitar/, "the full sorting control must expose reuse ranking");
+assert.match(library, /Título A → Z/, "the sorting control must support alphabetical order");
+assert.match(library, /onError=\{\(\) => setFailed\(true\)\}/, "broken thumbnails must fall back without a broken image");
+assert.match(library, /Ensinar à Norwyn/, "structured classification must remain available");
+assert.match(api, /sort === "reuse"/, "reuse sorting must run server-side");
+assert.match(api, /content_library\.load_failed/, "technical query failures must stay in server logs");
+assert.doesNotMatch(library, /schemaErrors\.join/, "technical schema details must not be rendered to users");
 assert.doesNotMatch(validation, /\.limit\(3000\)/, "validation RSC must not serialize the content corpus");
 assert.ok(seed.includes("imersao"), "the current import corpus must contain the imersao search case");
 assert.ok(seed.includes("zumbido"), "the current import corpus must contain the zumbido search case");
