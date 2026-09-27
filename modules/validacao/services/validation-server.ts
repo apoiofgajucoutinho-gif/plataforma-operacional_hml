@@ -348,7 +348,6 @@ export async function getValidationContext(tab: ValidationTab = "hotmart") {
   const auth = await getValidationAuth();
   const client = auth.dataClient;
   const shouldLoadProductValidation = tab === "produtos";
-  const shouldLoadContentValidation = tab === "conteudos";
   const emptyRows = { data: [] as any[], error: null as string | null };
   const [tenantResult, sales, uploads, decisions, knowledge, products, productIdentities, posts, contentEvents, totalSalesCount] = await Promise.all([
     client.from("tenants").select("id, nome").eq("id", auth.tenantId).maybeSingle(),
@@ -358,8 +357,8 @@ export async function getValidationContext(tab: ValidationTab = "hotmart") {
     fetchRowsPaged(client, "norwyn_validation_knowledge", "id, tenant_id, knowledge_type, subject_type, subject_key, predicate, object_type, object_key, confidence, status, source_decision_id, evidence, approved_by, approved_at, created_at, updated_at", auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 5000 }),
     shouldLoadProductValidation ? fetchRowsPaged(client, "products", "id, nome_oficial, produto_base, categoria, ativo, metadata, product_aliases(id, alias, produto_base, principal, ativo), product_components(id, componente, categoria, ativo)", auth.tenantId, { order: "nome_oficial", ascending: true, pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
     shouldLoadProductValidation ? fetchRowsPaged(client, "norwyn_product_external_identities", "id, tenant_id, product_id, product_key, source, external_id, external_name, relationship, revenue_scope, confidence, evidence, status, created_at, updated_at", auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
-    shouldLoadContentValidation ? fetchRowsPaged(client, "instagram_posts", "id, post_id, data_postagem, tipo, legenda, permalink", auth.tenantId, { order: "data_postagem", pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
-    shouldLoadContentValidation ? fetchRowsPaged(client, "norwyn_content_events", "id, source_id, title, caption, published_at, product_tags, theme_tags, objective, funnel_stage, campaign_id, metadata, updated_at", auth.tenantId, { order: "published_at", pageSize: 1000, maxRows: 3000 }) : Promise.resolve(emptyRows),
+    Promise.resolve(emptyRows),
+    Promise.resolve(emptyRows),
     countRows(client, "comercial_vendas", auth.tenantId),
   ]);
   const uploadRows = uploads.data as any[];

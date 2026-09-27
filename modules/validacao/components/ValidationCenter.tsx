@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, type ChangeEvent, type DragEvent } from "react";
 import { AlertTriangle, BookOpenCheck, CheckCircle2, FileSpreadsheet, GraduationCap, Lightbulb, MessageSquareText, PackageCheck, RefreshCw, Sparkles, UploadCloud } from "lucide-react";
 import { ActionCard, DataFreshness, EmptyState, IconPill, InsightCard, MetricCard, PageHeader, SectionHeader, StatusBadge, Surface } from "@/components/ui/norwyn-design-system";
+import { ContentLibrary } from "@/modules/content-library/components/ContentLibrary";
 import type { ValidationTab } from "@/modules/validacao/services/validation-server";
 
 type ValidationContext = Awaited<ReturnType<typeof import("@/modules/validacao/services/validation-server").getValidationContext>>;
@@ -460,54 +461,8 @@ function GroupedDecisionCard({ group }: { group: any }) {
   );
 }
 function ContentsTab({ context }: { context: ValidationContext }) {
-  return (
-    <div className="space-y-5">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={BookOpenCheck} tone="primary" label="Conteúdos revisáveis" value={number(context.contents.rows.length)} />
-        <MetricCard icon={AlertTriangle} tone="warning" label="Sem classificação" value={number(context.contents.pending.length)} />
-        <MetricCard icon={Sparkles} tone="info" label="Feedbacks" value={number(context.decisions.filter((item: any) => item.validation_type === "CONTENT").length)} />
-        <MetricCard icon={Lightbulb} tone="success" label="Aprendizados" value={number(context.knowledge.filter((item: any) => item.subject_type === "content").length)} />
-      </section>
-      <Surface>
-        <SectionHeader title="Conteúdos reais do Instagram" description="Produto pode ser confirmado, trocado ou removido. Nem todo conteúdo precisa estar ligado a um produto." action={<IconPill icon={BookOpenCheck} tone="primary" />} />
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {context.contents.rows.slice(0, 16).map((content: any) => <ValidationCard key={content.id} validationType="CONTENT" entityType="content" entityId={content.id} title={compact(content.title ?? content.caption ?? content.legenda ?? content.tipo, "Conteúdo sem título")} meta={dateLabel(content.published_at ?? content.data_postagem)} description={`Produto sugerido: ${Array.isArray(content.product_tags) && content.product_tags.length ? content.product_tags.join(", ") : "sem produto relacionado"}. Funil: ${content.funnel_stage ?? "não classificado"}.`} />)}
-          {!context.contents.rows.length ? <EmptyState title="Sem conteúdos carregados" /> : null}
-        </div>
-      </Surface>
-    </div>
-  );
-}
-
-function ValidationCard({ validationType, entityType, entityId, title, meta, description }: { validationType: string; entityType: string; entityId: string; title: string; meta: string; description: string }) {
-  const [comment, setComment] = useState("");
-  const [saved, setSaved] = useState(false);
-  async function decide(decisionType: string, learnScope = "single_case") {
-    const response = await fetch("/api/validacao/decision", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ validation_type: validationType, entity_type: entityType, entity_id: entityId, decision_type: decisionType, comment, learn_scope: learnScope, new_value: { title, meta } }),
-    });
-    setSaved(response.ok);
-  }
-  return (
-    <div className="rounded-[var(--ds-radius-md)] border border-[color:var(--ds-border)] bg-[color:var(--ds-surface-solid)] p-4 shadow-[var(--ds-shadow-sm)]">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-[color:var(--ds-text)]">{title}</p>
-          <p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">{meta}</p>
-        </div>
-        {saved ? <StatusBadge tone="success">registrado</StatusBadge> : <StatusBadge tone="warning">revisar</StatusBadge>}
-      </div>
-      <p className="mt-3 text-sm leading-6 text-[color:var(--ds-text-secondary)]">{description}</p>
-      <input value={comment} onChange={(event) => setComment(event.target.value)} className="mt-3 h-10 w-full rounded-full border border-[color:var(--ds-border)] bg-[color:var(--ds-bg-soft)] px-3 text-sm outline-none focus:ring-2 focus:ring-[color:var(--ds-primary)]" placeholder="Comentário opcional" />
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" onClick={() => decide("confirmed", "single_case")} className="rounded-full bg-[color:var(--ds-success-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--ds-success)]">Confirmar</button>
-        <button type="button" onClick={() => decide("corrected", "reusable_learning")} className="rounded-full bg-[color:var(--ds-info-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--ds-info)]">Ensinar à Norwyn</button>
-        <button type="button" onClick={() => decide("no_relation", "single_case")} className="rounded-full bg-[color:var(--ds-bg-soft)] px-3 py-2 text-xs font-semibold text-[color:var(--ds-text-secondary)]">Sem relação</button>
-      </div>
-    </div>
-  );
+  void context;
+  return <ContentLibrary mode="validation" />;
 }
 
 

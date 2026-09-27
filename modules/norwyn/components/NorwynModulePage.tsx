@@ -7,6 +7,7 @@ import { ActionCard, DataFreshness, EmptyState, IconPill, InsightCard, MetricCar
 import { CustomerStudent360 } from "@/modules/norwyn/components/CustomerStudent360";
 import { AdsDashboard } from "@/modules/ads/components/AdsDashboard";
 import { InstagramDashboard } from "@/modules/instagram/components/InstagramDashboard";
+import { ContentLibrary } from "@/modules/content-library/components/ContentLibrary";
 import type { AdsContext } from "@/modules/ads/types";
 import type { InstagramContext } from "@/modules/instagram/types";
 import { canAccessMissionFeature, functionalRoleFor } from "@/lib/auth/roles";
@@ -199,7 +200,7 @@ function MarketingModule({ context, searchParams, adsContext, instagramContext }
       {view === "overview" ? <MarketingOverview context={context} followerTotal={followerTotal} followerFreshness={followerFreshness} adsSpend={adsSpend} reach={reach} pendingContent={pendingContent} /> : null}
       {view === "instagram" ? (instagramContext ? <InstagramDashboard context={instagramContext} initialTab="insights" editorialAuthorized={instagramContext.role === "ADMIN" || instagramContext.role === "SUPORTE"} /> : <MarketingInstagramPanel context={context} followerTotal={followerTotal} followerFreshness={followerFreshness} />) : null}
       {view === "ads" ? (adsContext ? <AdsDashboard context={adsContext} basePath="/marketing" searchParams={searchParams} /> : <EmptyState title="Ads indisponível">Não foi possível carregar Ads dentro de Marketing.</EmptyState>) : null}
-      {view === "content" ? <MarketingContentPanel context={context} pendingContent={pendingContent} /> : null}
+      {view === "content" ? <MarketingContentPanel /> : null}
       {stale(followerFreshness, 48) ? <InsightCard title="Seguidores podem estar defasados" tone="warning">A tela evidencia a data do último snapshot. O número depende da próxima coleta/importação do Instagram.</InsightCard> : null}
     </div>
   );
@@ -251,21 +252,8 @@ function MarketingInstagramPanel({ context, followerTotal, followerFreshness }: 
   );
 }
 
-function MarketingContentPanel({ context, pendingContent }: { context: NorwynModuleContext; pendingContent: any[] }) {
-  return (
-    <Surface>
-      <SectionHeader title="Conteúdo" description="Demandas e capturas de conteúdo já existentes, sem criar um studio novo nesta etapa." />
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <MetricCard label="Capturas" value={number(context.contentCaptures.length)} period="Base real" />
-        <MetricCard label="Pendentes" value={number(pendingContent.length)} period="Aguardando ação" tone={pendingContent.length ? "warning" : "success"} />
-        <MetricCard label="Campanhas" value={number(context.campaigns.length)} period="Relacionadas a Marketing" />
-      </div>
-      <div className="mt-5 grid gap-3">
-        {context.contentCaptures.slice(0, 10).map((item: any) => <ActionCard key={item.id} title={item.title ?? item.titulo ?? "Conteúdo"} meta={item.status ?? "Sem status"} description={item.description ?? item.descricao ?? item.contexto ?? "Sem descrição adicional."} />)}
-        {!context.contentCaptures.length ? <EmptyState title="Sem conteúdos carregados" /> : null}
-      </div>
-    </Surface>
-  );
+function MarketingContentPanel() {
+  return <ContentLibrary mode="marketing" />;
 }
 function ResultsModule({ context }: { context: NorwynModuleContext }) {
   const monthSales = recentThisMonth(context.commercialSales).filter(isBrl);
