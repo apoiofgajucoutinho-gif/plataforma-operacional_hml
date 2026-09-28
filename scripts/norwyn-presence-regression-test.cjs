@@ -21,12 +21,15 @@ assert.ok(serviceKey, "SUPABASE_SERVICE_ROLE_KEY is required");
 const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
 function isQaAsset(asset) {
-  return asset.environment === "dev" || String(asset.url || "").startsWith("https://presence-simulated.invalid/") || String(asset.name || "").startsWith("QA Presence Center");
+  return asset.environment === "dev"
+    || asset.metadata?.check_source_type === "SIMULATED"
+    || String(asset.url || "").startsWith("https://presence-simulated.invalid/")
+    || String(asset.name || "").startsWith("QA Presence Center");
 }
 
 (async () => {
   const [{ data: assets, error: assetsError }, { data: checks, error: checksError }, { data: incidents, error: incidentsError }] = await Promise.all([
-    supabase.from("digital_assets").select("id,name,url,environment,last_health_score,last_status,monitoring_enabled,is_critical,asset_type"),
+    supabase.from("digital_assets").select("id,name,url,environment,last_health_score,last_status,monitoring_enabled,is_critical,asset_type,metadata"),
     supabase.from("presence_checks").select("id,asset_id,source_type,suspicious_evidence,result_json,checked_at").limit(500),
     supabase.from("presence_incidents").select("id,asset_id,source_type,status,incident_type,severity,evidence").limit(500),
   ]);

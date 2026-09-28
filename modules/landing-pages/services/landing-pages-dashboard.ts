@@ -406,6 +406,9 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const lastEventAt = events[0]?.occurred_at ?? allTracking.find((row) => row.landing_key === selected.landingKey)?.occurred_at ?? null;
   const latestHealthQa = (qaResult.data ?? []).find((item: any) => item.technical_results?.schema_version === "landing_health_v1") ?? null;
   const healthView = buildHealthView({ assets: healthAssets, checks: healthChecks, qaRun: latestHealthQa, lastEventAt });
+  const pageDiagnostic = healthView.diagnostics.find((item) => item.key === "page") ?? null;
+  const checkoutDiagnostic = healthView.diagnostics.find((item) => item.key === "checkout") ?? null;
+  const latestHealthCheckAt = healthView.components.map((item) => item.lastCheckedAt).filter(Boolean).sort().at(-1) ?? null;
 
   return {
     role: access.role,
@@ -451,20 +454,20 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
       overallStatus: healthView.overallStatus,
       overallLabel: healthView.overallLabel,
       guidance: healthView.guidance,
-      availability: snapshot?.status_code ? (snapshot.status_code < 400 ? "Disponível" : "Com problema") : "Aguardando monitoramento",
-      httpStatus: snapshot?.status_code ?? null,
-      lastCheckedAt: snapshot?.fetched_at ?? registryRow?.last_checked_at ?? null,
+      availability: pageDiagnostic?.status === "healthy" ? "Disponível" : pageDiagnostic?.status === "critical" ? "Com problema" : snapshot?.status_code ? (snapshot.status_code < 400 ? "Disponível" : "Com problema") : "Aguardando monitoramento",
+      httpStatus: pageDiagnostic?.httpStatus ?? snapshot?.status_code ?? null,
+      lastCheckedAt: latestHealthCheckAt ?? snapshot?.fetched_at ?? registryRow?.last_checked_at ?? null,
       domain: selected.domain,
-      checkout: checkout ? healthLabel(checkout.technical_health) : "Aguardando dados",
-      checkoutCheckedAt: checkout?.last_checked_at ?? null,
+      checkout: checkoutDiagnostic?.status === "healthy" ? "Funcionando" : checkoutDiagnostic?.status === "critical" ? "Com problema" : checkout ? healthLabel(checkout.technical_health) : "Aguardando dados",
+      checkoutCheckedAt: checkoutDiagnostic?.evidence?.checked_at ?? checkout?.last_checked_at ?? null,
       links: Array.isArray(extracted?.ctas) || checkout ? "Links identificados" : "Aguardando dados",
       images: snapshot ? (Number(snapshot.content_length ?? 0) > 0 ? "Página capturada" : "Revisar") : "Não disponível",
       tracking: events.length || lastEventAt ? "Recebendo eventos" : "Aguardando dados",
       recentEventAt: lastEventAt,
       errors: events.length ? eventErrors.length : null,
       seo: extracted?.title ? "Título identificado" : "Não disponível",
-      technicalPerformance: "Não disponível",
-      publishedIntegrity: snapshot?.content_hash ? "Snapshot disponível" : "Aguardando snapshot",
+      technicalPerformance: pageDiagnostic?.responseTimeMs === null || pageDiagnostic?.responseTimeMs === undefined ? "Não disponível" : `${pageDiagnostic.responseTimeMs} ms no último check`,
+      publishedIntegrity: latestHealthQa?.status === "PASS" ? "QA técnico aprovado" : snapshot?.content_hash ? "Snapshot disponível" : "Aguardando snapshot",
       components: healthView.components,
       diagnostics: healthView.diagnostics,
       divergences: divergenceEvents.map((item: any) => item.reason || "Divergência comercial registrada"),
