@@ -166,8 +166,14 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   if (registryResult.error) throw new Error(registryResult.error.message);
   if (productsResult.error) throw new Error(productsResult.error.message);
 
-  const definitions = (definitionsResult.data ?? []).filter((row: any) => !isArchived(row));
-  const registry = (registryResult.data ?? []).filter((row: any) => !isArchived(row));
+  const definitionRows = definitionsResult.data ?? [];
+  const registryRows = registryResult.data ?? [];
+  const archivedLandingKeys = new Set<string>([
+    ...definitionRows.filter((row: any) => isArchived(row)).map((row: any) => String(row.landing_key)),
+    ...registryRows.filter((row: any) => isArchived(row)).map((row: any) => String(row.landing_key)),
+  ]);
+  const definitions = definitionRows.filter((row: any) => !isArchived(row));
+  const registry = registryRows.filter((row: any) => !isArchived(row));
   const products = productsResult.data ?? [];
   const productById = new Map<string, string>(products.map((product: any) => [String(product.id), String(product.name)]));
   const byKey = new Map<string, LandingDashboardItem>();
@@ -192,7 +198,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     });
   }
   for (const event of allTracking) {
-    if (!event.landing_key || byKey.has(event.landing_key)) continue;
+    if (!event.landing_key || byKey.has(event.landing_key) || archivedLandingKeys.has(String(event.landing_key))) continue;
     const identity = landingIdentity(event.landing_key);
     const url = event.landing_key === "imersao_zumbido" ? identity.url : event.page_url;
     byKey.set(event.landing_key, {
