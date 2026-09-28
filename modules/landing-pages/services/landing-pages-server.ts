@@ -17,6 +17,7 @@ type LandingAccess = {
   tenantId: string;
   role: string;
   userId: string | null;
+  userName: string;
   allowedModules: string[];
 };
 
@@ -70,7 +71,10 @@ export async function getLandingAccess(): Promise<LandingAccess | null> {
   if (functionalRoleFor(membershipResult.membership.role) === "ESPECIALISTA" && !allowedModules.includes("landing-pages")) {
     allowedModules.push("landing-pages");
   }
-  return { client: dataClient, tenantId: membershipResult.membership.tenant_id, role: membershipResult.membership.role, userId: currentUser.id ?? null, allowedModules };
+  const metadata = (currentUser as { user_metadata?: Record<string, unknown> }).user_metadata ?? {};
+  const userName = [metadata.preferred_name, metadata.nome_preferido, metadata.full_name, metadata.name, metadata.nome]
+    .find((value) => typeof value === "string" && value.trim()) ?? currentUser.email ?? "Usuário Norwyn";
+  return { client: dataClient, tenantId: membershipResult.membership.tenant_id, role: membershipResult.membership.role, userId: currentUser.id ?? null, userName: String(userName), allowedModules };
 }
 
 function nextVersion(current: string) {

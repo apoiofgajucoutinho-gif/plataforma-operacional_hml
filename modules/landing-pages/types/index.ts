@@ -96,6 +96,9 @@ export type LandingAdminContext = {
 
 export type LandingDashboardTab =
   | "overview"
+  | "insights"
+  | "journey"
+  | "criteria"
   | "performance"
   | "behavior"
   | "attribution"
@@ -108,6 +111,45 @@ export type LandingDashboardTab =
 export type LandingMetric = {
   value: number | null;
   previous: number | null;
+};
+
+export type LandingInsightCriterion = {
+  key: string;
+  name: string;
+  explanation: string;
+  formula: string;
+  whyItExists: string;
+  thresholdPercent: number;
+  windowDays: number;
+  minSessions: number;
+  mediumSample: number;
+  highSample: number;
+  active: boolean;
+  updatedAt: string | null;
+  updatedBy: string | null;
+};
+
+export type LandingJourneyStep = {
+  key: string;
+  label: string;
+  value: number | null;
+  fromPreviousPercent: number | null;
+  fromSessionsPercent: number | null;
+  lossFromPrevious: number | null;
+  available: boolean;
+  note: string | null;
+};
+
+export type LandingInsight = {
+  id: string;
+  title: string;
+  whatHappened: string;
+  whyAttention: string;
+  evidence: string[];
+  hypothesis: string;
+  confidence: "Baixa" | "Média" | "Alta";
+  nextStep: string;
+  criterionKey: string;
 };
 
 export type LandingDashboardItem = {
@@ -144,6 +186,28 @@ export type LandingDashboardContext = {
   };
   daily: Array<{ date: string; pageViews: number; sessions: number; checkoutClicks: number }>;
   funnel: Array<{ label: string; value: number; rate: number | null }>;
+  journey: {
+    detailed: LandingJourneyStep[];
+    executive: LandingJourneyStep[];
+    highlights: {
+      biggestAbsoluteLoss: string | null;
+      biggestPercentageLoss: string | null;
+      bestProgress: string | null;
+      lowestProgress: string | null;
+    };
+    breakdowns: Array<{
+      label: string;
+      sessions: number;
+      offerViews: number;
+      checkoutClicks: number;
+      purchases: number | null;
+      checkoutRate: number | null;
+    }>;
+    availableDimensions: { origin: boolean; campaign: boolean; landingKey: boolean; version: boolean; device: boolean; trafficType: boolean };
+    purchaseLimitation: string | null;
+  };
+  insights: LandingInsight[];
+  criteria: LandingInsightCriterion[];
   topEvents: Array<{ name: string; total: number; sessions: number }>;
   sections: Array<{ id: string; label: string; views: number; share: number | null }>;
   attribution: Array<{ source: string; campaign: string; sessions: number; sessionShare: number; checkoutClicks: number }>;

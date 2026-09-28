@@ -3,6 +3,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { functionalRoleFor } from "@/lib/auth/roles";
 import { getLandingAccess } from "@/modules/landing-pages/services/landing-pages-server";
+import { buildInsights, buildJourney, mergeLandingCriteria } from "@/modules/landing-pages/analytics/landing-insights";
 import type { LandingDashboardContext, LandingDashboardItem, LandingMetric } from "@/modules/landing-pages/types";
 
 type SupabaseAny = any;
@@ -240,6 +241,42 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number)
     }));
 }
 
+function buildJourneyBreakdowns(
+  dimension: string,
+  landingKey: string,
+  rows: any[],
+  attribution: LandingDashboardContext["attribution"],
+): LandingDashboardContext["journey"]["breakdowns"] {
+  if (dimension === "origin") return attribution.map((item) => ({
+    label: item.source,
+    sessions: item.sessions,
+    offerViews: eventSessions(rows.filter((row) => humanOrigin(row.utm_source, row.utm_medium, row.utm_content) === item.source), ["offer_view"]),
+    checkoutClicks: item.checkoutClicks,
+    purchases: null,
+    checkoutRate: item.sessions ? (item.checkoutClicks / item.sessions) * 100 : null,
+  }));
+  const labelFor = (row: any) => {
+    if (dimension === "campaign") return row.utm_campaign || row.campaign_key || "Sem campanha identificada";
+    if (dimension === "version") return row.landing_version || "Versão não identificada";
+    if (dimension === "device") return row.payload?.device_type || row.payload?.event_data?.device_type || "Não disponível";
+    return landingKey;
+  };
+  const labels = [...new Set(rows.map(labelFor))];
+  return labels.map((label) => {
+    const scoped = rows.filter((row) => labelFor(row) === label);
+    const sessions = eventSessions(scoped, ["session_start", "page_view", "landing_view"]);
+    const checkoutClicks = eventSessions(scoped, ["checkout_click"]);
+    return {
+      label,
+      sessions,
+      offerViews: eventSessions(scoped, ["offer_view"]),
+      checkoutClicks,
+      purchases: null,
+      checkoutRate: sessions ? (checkoutClicks / sessions) * 100 : null,
+    };
+  }).sort((a, b) => b.sessions - a.sessions);
+}
+
 function landingIdentity(key: string) {
   if (key === "imersao_zumbido") return { name: "Imersão Zumbido", productName: "Imersão Zumbido", campaign: "Imersão Zumbido", url: "https://imersaozumbido.fgajulianacoutinho.com.br", status: "active" };
   return { name: key.replace(/[-_]/g, " "), productName: "Não vinculado", campaign: "Não informada", url: null, status: "tracking" };
@@ -260,6 +297,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const previousStart = new Date(period.start.getTime() - duration);
   const selectedKeyParam = first(params.lp);
   const includeTest = role === "ADMIN" && first(params.include_test) === "1";
+  const journeyDimension = first(params.journey_by) ?? "origin";
 
   const [definitionsResult, registryResult, productsResult, knowledgeProductsResult, allTracking] = await Promise.all([
     client.from("landing_page_definitions").select("*").eq("tenant_id", tenantId).order("updated_at", { ascending: false }),
@@ -326,25 +364,24 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const selected = byKey.get(selectedKeyParam ?? "imersao_zumbido") ?? landings[0] ?? null;
   if (!selected) return emptyContext(access.role, access.allowedModules, "Nenhuma landing page cadastrada ou rastreada.");
 
-  const [rawEvents, rawPreviousEvents] = await Promise.all([
-    readAll((from, to) => client.from("landing_page_tracking_events")
-      .select("id,event_name,session_id,utm_source,utm_medium,utm_campaign,utm_content,sck,campaign_key,block_id,cta_id,page_url,payload,source_type,occurred_at")
-      .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey)
-      .gte("occurred_at", period.start.toISOString()).lte("occurred_at", period.end.toISOString())
-      .order("occurred_at", { ascending: false }).range(from, to)),
-    readAll((from, to) => client.from("landing_page_tracking_events")
-      .select("event_name,session_id,utm_source,utm_campaign,utm_content,sck,page_url,payload,source_type,occurred_at")
-      .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey)
-      .gte("occurred_at", previousStart.toISOString()).lt("occurred_at", period.start.toISOString())
-      .order("occurred_at", { ascending: false }).range(from, to)),
-  ]);
+  const definition = definitions.find((row: any) => row.landing_key === selected.landingKey) ?? null;
+  const registryRow = registry.find((row: any) => row.landing_key === selected.landingKey) ?? null;
+  const criteria = mergeLandingCriteria(definition?.metadata?.insight_criteria);
+  const maxCriterionWindow = Math.max(1, ...criteria.filter((item) => item.active).map((item) => item.windowDays));
+  const criteriaHistoryStart = new Date(period.end.getTime() - maxCriterionWindow * 2 * 24 * 60 * 60 * 1000);
+  const analysisStart = new Date(Math.min(previousStart.getTime(), criteriaHistoryStart.getTime()));
+  const rawAnalysisEvents = await readAll((from, to) => client.from("landing_page_tracking_events")
+    .select("id,event_name,session_id,utm_source,utm_medium,utm_campaign,utm_content,sck,campaign_key,landing_key,landing_version,block_id,cta_id,page_url,payload,source_type,occurred_at")
+    .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey)
+    .gte("occurred_at", analysisStart.toISOString()).lte("occurred_at", period.end.toISOString())
+    .order("occurred_at", { ascending: false }).range(from, to));
+  const rawEvents = rawAnalysisEvents.filter((row) => new Date(row.occurred_at) >= period.start && new Date(row.occurred_at) <= period.end);
+  const rawPreviousEvents = rawAnalysisEvents.filter((row) => new Date(row.occurred_at) >= previousStart && new Date(row.occurred_at) < period.start);
   const publicEvents = rawEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
   const events = includeTest ? rawEvents : publicEvents;
   const previousEvents = includeTest ? rawPreviousEvents : rawPreviousEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
   const excludedEvents = rawEvents.length - events.length;
 
-  const definition = definitions.find((row: any) => row.landing_key === selected.landingKey) ?? null;
-  const registryRow = registry.find((row: any) => row.landing_key === selected.landingKey) ?? null;
   const pageNames = ["page_view", "landing_view"];
   const visitorCount = unique(events.filter((row) => pageNames.includes(row.event_name)), (row) => row.payload?.visitor_id);
   const previousVisitorCount = unique(previousEvents.filter((row) => pageNames.includes(row.event_name)), (row) => row.payload?.visitor_id);
@@ -375,6 +412,30 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const sections = [...sectionCounts.entries()].map(([id, views]) => ({ id, label: sectionLabels[id] ?? id, views, share: sessionCount ? (views / sessionCount) * 100 : null })).sort((a, b) => b.views - a.views);
   const publicSessionCount = eventSessions(publicEvents, ["session_start", ...pageNames]);
   const attribution = attributionRows(selected.landingKey, publicEvents, publicSessionCount);
+
+  const trackingKeysResult = await client.from("growth_tracking_keys").select("id")
+    .eq("tenant_id", tenantId)
+    .or(`campaign_key.eq.${selected.landingKey},utm_campaign.eq.${selected.landingKey}`);
+  const trackingKeyIds = (trackingKeysResult.data ?? []).map((item: any) => item.id);
+  const bridgeResult = trackingKeyIds.length
+    ? await client.from("hotmart_attribution_bridge_v").select("sale_id,sale_confirmed,data_compra,norwyn_source,tracking_key_id")
+      .eq("tenant_id", tenantId).in("tracking_key_id", trackingKeyIds)
+    : { data: [], error: null };
+  const reconciledSales = bridgeResult.data ?? [];
+  const purchases = reconciledSales.length
+    ? new Set(reconciledSales.filter((item: any) => item.sale_confirmed && new Date(item.data_compra) >= period.start && new Date(item.data_compra) <= period.end).map((item: any) => item.sale_id)).size
+    : null;
+  const journeyBase = buildJourney(events, purchases);
+  const insightPool = includeTest ? rawAnalysisEvents : rawAnalysisEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
+  const insights = criteria.flatMap((criterion) => {
+    if (!criterion.active) return [];
+    const criterionStart = new Date(period.end.getTime() - criterion.windowDays * 24 * 60 * 60 * 1000);
+    const criterionPreviousStart = new Date(criterionStart.getTime() - criterion.windowDays * 24 * 60 * 60 * 1000);
+    const currentRows = insightPool.filter((row) => new Date(row.occurred_at) >= criterionStart && new Date(row.occurred_at) <= period.end);
+    const previousRows = insightPool.filter((row) => new Date(row.occurred_at) >= criterionPreviousStart && new Date(row.occurred_at) < criterionStart);
+    return buildInsights({ journey: buildJourney(currentRows, null), previousJourney: buildJourney(previousRows, null), criteria: [criterion] });
+  });
+  const breakdowns = buildJourneyBreakdowns(journeyDimension, selected.landingKey, events, attribution);
 
   const registryId = registryRow?.id ?? null;
   const catalogProductId = definition?.metadata?.catalog_product_id ?? selected.productId;
@@ -438,6 +499,21 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
       { label: "Oferta visualizada", value: eventSessions(events, ["offer_view"]), rate: sessionCount ? (eventSessions(events, ["offer_view"]) / sessionCount) * 100 : null },
       { label: "Checkout", value: checkoutSessions, rate: sessionCount ? (checkoutSessions / sessionCount) * 100 : null },
     ],
+    journey: {
+      ...journeyBase,
+      breakdowns,
+      availableDimensions: {
+        origin: true,
+        campaign: events.some((row) => Boolean(row.utm_campaign || row.campaign_key)),
+        landingKey: true,
+        version: events.some((row) => Boolean(row.landing_version)),
+        device: events.some((row) => Boolean(row.payload?.device_type || row.payload?.event_data?.device_type)),
+        trafficType: role === "ADMIN",
+      },
+      purchaseLimitation: purchases === null ? "Ainda não existe compra da LP reconciliada de forma confiável via source_sck. Checkout e compra permanecem separados." : null,
+    },
+    insights,
+    criteria,
     topEvents: [...eventCounts.entries()].map(([name, total]) => ({ name, total, sessions: eventSessions(events.filter((row) => row.event_name === name), [name]) })).sort((a, b) => b.total - a.total).slice(0, 10),
     sections,
     attribution,
@@ -571,7 +647,15 @@ function emptyContext(role: string | null, allowedModules: string[], diagnostic:
     period: { key: "30d", label: "Últimos 30 dias", start: new Date().toISOString(), end: new Date().toISOString(), comparisonAvailable: false }, traffic: { includesTest: false, excludedEvents: 0 },
     filters: { products: [], campaigns: [], environments: [], statuses: [], domains: [] }, landings: [], selected: null,
     metrics: { visitors: emptyMetric, sessions: emptyMetric, pageViews: emptyMetric, offerViews: emptyMetric, checkoutClicks: emptyMetric, conversionRate: emptyMetric },
-    daily: [], funnel: [], topEvents: [], sections: [], attribution: [], recentEvents: [],
+    daily: [], funnel: [],
+    journey: {
+      detailed: [], executive: [],
+      highlights: { biggestAbsoluteLoss: null, biggestPercentageLoss: null, bestProgress: null, lowestProgress: null },
+      breakdowns: [],
+      availableDimensions: { origin: false, campaign: false, landingKey: false, version: false, device: false, trafficType: false },
+      purchaseLimitation: null,
+    },
+    insights: [], criteria: [], topEvents: [], sections: [], attribution: [], recentEvents: [],
     content: { title: "Landing Pages", summary: "Aguardando dados", checkoutUrl: null, hotmartProductId: null, hotmartOfferId: null, previewUrl: null },
     health: { overallStatus: "unknown", overallLabel: "Aguardando dados", guidance: null, availability: "Aguardando dados", httpStatus: null, lastCheckedAt: null, domain: "Não disponível", checkout: "Aguardando dados", checkoutCheckedAt: null, links: "Aguardando dados", images: "Aguardando dados", tracking: "Aguardando dados", recentEventAt: null, errors: null, seo: "Não disponível", technicalPerformance: "Não disponível", publishedIntegrity: "Aguardando dados", components: [], diagnostics: [], divergences: [], alerts: [] },
     versions: [], qa: [], approvals: [],

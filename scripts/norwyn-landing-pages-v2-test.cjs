@@ -5,6 +5,8 @@ const ts = require("typescript");
 
 const component = fs.readFileSync("modules/landing-pages/components/LandingPagesAdminPage.tsx", "utf8");
 const service = fs.readFileSync("modules/landing-pages/services/landing-pages-dashboard.ts", "utf8");
+const insights = fs.readFileSync("modules/landing-pages/analytics/landing-insights.ts", "utf8");
+const criteriaEndpoint = fs.readFileSync("app/api/landing-pages/criteria/route.ts", "utf8");
 const accessService = fs.readFileSync("modules/landing-pages/services/landing-pages-server.ts", "utf8");
 const trackingEndpoint = fs.readFileSync("app/api/norwyn/lp-events/route.ts", "utf8");
 const landingTracking = fs.readFileSync("apps/imersao-zumbido-hml/norwyn-tracking.js", "utf8");
@@ -14,8 +16,11 @@ const navigationSource = fs.readFileSync("components/layout/app-navigation.ts", 
 const compiled = ts.transpileModule(navigationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const navigationModule = { exports: {} };
 vm.runInNewContext(compiled, { module: navigationModule, exports: navigationModule.exports });
+const insightsCompiled = ts.transpileModule(insights, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+const insightsModule = { exports: {} };
+vm.runInNewContext(insightsCompiled, { module: insightsModule, exports: insightsModule.exports, Intl, Date, Set, Map, Math });
 
-for (const label of ["Visão Geral", "Desempenho", "Comportamento", "Atribuição", "Conteúdo", "Saúde", "Eventos", "Versões", "QA e Integridade"]) {
+for (const label of ["Visão Geral", "Insights", "Jornada", "Critérios", "Desempenho", "Comportamento", "Atribuição", "Conteúdo", "Saúde", "Eventos", "Versões", "QA e Integridade"]) {
   assert.match(component, new RegExp(label), `missing landing page tab: ${label}`);
 }
 for (const filter of ["Produto", "Campanha", "Ambiente", "Status", "Domínio"]) {
@@ -44,6 +49,28 @@ assert.match(service, /sessionOrigins/);
 assert.match(component, /% das sessões/);
 assert.doesNotMatch(component, /context\.attribution\.slice\(/, "official attribution rows must not be truncated");
 assert.doesNotMatch(service, /Math\.random\(/, "dashboard must not invent metrics");
+assert.match(insights, /buildJourney/);
+assert.match(insights, /buildInsights/);
+assert.match(component, /correla[cç][aã]o em causalidade/i);
+assert.match(insights, /Aguardando primeira reconciliação confiável via source_sck/);
+assert.match(criteriaEndpoint, /insight_criterion_updated/);
+assert.match(criteriaEndpoint, /landing_page_events/);
+assert.match(criteriaEndpoint, /role !== "ADMIN" && role !== "ESPECIALISTA"/);
+assert.doesNotMatch(insights, /Math\.random\(/, "insight confidence must be deterministic");
+const emptyJourney = insightsModule.exports.buildJourney([], null);
+assert.equal(emptyJourney.detailed[0].value, 0, "zero-data journey must show zero sessions");
+assert.equal(emptyJourney.detailed.at(-1).value, null, "unreconciled purchase must remain unavailable");
+const sampleEvents = [
+  { event_name: "session_start", session_id: "s1" }, { event_name: "page_view", session_id: "s1" },
+  { event_name: "scroll_25", session_id: "s1" }, { event_name: "offer_view", session_id: "s1" },
+  { event_name: "cta_view", session_id: "s1" }, { event_name: "cta_click", session_id: "s1" },
+  { event_name: "checkout_click", session_id: "s1" },
+];
+const sampleJourney = insightsModule.exports.buildJourney(sampleEvents, 1);
+assert.equal(sampleJourney.detailed[0].value, 1);
+assert.equal(sampleJourney.detailed.at(-1).value, 1);
+const lowSampleInsights = insightsModule.exports.buildInsights({ journey: sampleJourney, previousJourney: emptyJourney, criteria: insightsModule.exports.defaultLandingCriteria });
+assert.equal(lowSampleInsights.some((item) => item.id === "minimum_sample"), true, "low sample must be explicit");
 assert.match(trackingEndpoint, /imersaozumbido\.fgajulianacoutinho\.com\.br/);
 assert.match(trackingEndpoint, /trafficType === "public" \? "REAL" : "SIMULATED"/);
 assert.match(landingTracking, /traffic_type: trafficTypeFromLocation\(\)/);
@@ -60,6 +87,6 @@ assert.match(accessService, /functionalRoleFor\(membershipResult\.membership\.ro
 const specialistTabs = [...component.matchAll(/\{ key: "([^"]+)", label: "([^"]+)"(?:, adminOnly: true)? \}/g)]
   .filter((match) => !match[0].includes("adminOnly: true"))
   .map((match) => match[2]);
-assert.deepEqual(specialistTabs, ["Visão Geral", "Desempenho", "Conteúdo", "Saúde"]);
+assert.deepEqual(specialistTabs, ["Visão Geral", "Insights", "Jornada", "Critérios", "Desempenho", "Conteúdo", "Saúde"]);
 
 console.log("Landing Pages V2 regression PASS");
