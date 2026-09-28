@@ -10,9 +10,11 @@ const allowedEvents = new Set([
 ]);
 
 const allowedEnvironments = new Set(["hml", "dev", "qa"]);
+const allowedTrafficTypes = new Set(["public", "internal", "test"]);
 const corsOrigins = new Set([
   "https://v0-zumbidoju.vercel.app",
   "https://lp-ju.vercel.app",
+  "https://imersaozumbido.fgajulianacoutinho.com.br",
   "https://plataf-op-hml.vercel.app",
 ]);
 
@@ -97,6 +99,10 @@ export async function POST(request: Request) {
   const sessionId = textValue(body, "session_id");
   const visitorId = textValue(body, "visitor_id");
   const eventData = sanitizedRecord(body.event_data ?? body.params);
+  const requestedTrafficType = textValue(body, "traffic_type")?.toLowerCase();
+  const trafficType = requestedTrafficType && allowedTrafficTypes.has(requestedTrafficType)
+    ? requestedTrafficType
+    : textValue(body, "source_type") === "SIMULATED" ? "test" : "public";
 
   const admin = createAdminClient();
   let stored = false;
@@ -142,6 +148,7 @@ export async function POST(request: Request) {
       first_touch: sanitizedRecord(body.first_touch),
       current_touch: sanitizedRecord(body.current_touch),
       event_data: eventData,
+      traffic_type: trafficType,
     };
 
     const { error } = await admin.from("landing_page_tracking_events").insert({
@@ -165,7 +172,7 @@ export async function POST(request: Request) {
       utm_term: attribution.utm_term,
       sck: attribution.sck,
       page_url: textValue(body, "url") ?? textValue(body, "page_url"),
-      source_type: textValue(body, "source_type") === "SIMULATED" ? "SIMULATED" : "REAL",
+      source_type: trafficType === "public" ? "REAL" : "SIMULATED",
       payload: normalizedPayload,
       occurred_at: timestampValue(body),
     });

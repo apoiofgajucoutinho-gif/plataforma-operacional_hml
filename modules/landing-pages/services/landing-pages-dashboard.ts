@@ -103,8 +103,38 @@ function eventSessions(rows: any[], eventNames: string[]) {
   return unique(rows.filter((row) => eventNames.includes(row.event_name)), (row) => row.session_id);
 }
 
+function isArchived(row: any) {
+  return row?.metadata?.operational_visibility === "archived";
+}
+
+function isKnownTestTraffic(row: any) {
+  const campaign = String(row.utm_campaign ?? "").toLowerCase();
+  const source = String(row.utm_source ?? "").toLowerCase();
+  const sck = String(row.sck ?? "").toLowerCase();
+  const trafficType = String(row.payload?.traffic_type ?? "").toLowerCase();
+  const host = domainOf(row.page_url);
+  return trafficType === "test" || trafficType === "internal"
+    || source === "codex_qa"
+    || campaign.startsWith("codex_hml_qa_")
+    || sck === "teste123" || sck === "qa_endpoint" || sck.startsWith("codex_")
+    || host === "lp-ju.vercel.app" || host === "v0-zumbidoju.vercel.app";
+}
+
+function humanOrigin(sourceValue: string | null | undefined, mediumValue: string | null | undefined, contentValue: string | null | undefined) {
+  const source = String(sourceValue ?? "").toLowerCase();
+  const medium = String(mediumValue ?? "").toLowerCase();
+  const content = String(contentValue ?? "").toLowerCase();
+  if (source === "instagram" && content === "stories") return "Instagram · Stories";
+  if (source === "instagram" && content === "bio") return "Instagram · Link da bio";
+  if (source === "whatsapp" && (medium === "group" || content === "grupo_whatsapp")) return "WhatsApp · Grupo";
+  if (source === "site" && content === "site_juliana") return "Site Juliana";
+  if (source === "meta" && medium === "paid") return "Meta Ads";
+  if (!source) return "Direto / sem identificação";
+  return source.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function landingIdentity(key: string) {
-  if (key === "imersao_zumbido") return { name: "Imersão Zumbido", productName: "Imersão Zumbido", campaign: "Imersão Zumbido", url: "https://lp-ju.vercel.app", status: "active" };
+  if (key === "imersao_zumbido") return { name: "Imersão Zumbido", productName: "Imersão Zumbido", campaign: "Imersão Zumbido", url: "https://imersaozumbido.fgajulianacoutinho.com.br", status: "active" };
   return { name: key.replace(/[-_]/g, " "), productName: "Não vinculado", campaign: "Não informada", url: null, status: "tracking" };
 }
 
@@ -122,6 +152,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const duration = Math.max(1, period.end.getTime() - period.start.getTime());
   const previousStart = new Date(period.start.getTime() - duration);
   const selectedKeyParam = first(params.lp);
+  const includeTest = role === "ADMIN" && first(params.include_test) === "1";
 
   const [definitionsResult, registryResult, productsResult, allTracking] = await Promise.all([
     client.from("landing_page_definitions").select("*").eq("tenant_id", tenantId).order("updated_at", { ascending: false }),
@@ -135,8 +166,8 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   if (registryResult.error) throw new Error(registryResult.error.message);
   if (productsResult.error) throw new Error(productsResult.error.message);
 
-  const definitions = definitionsResult.data ?? [];
-  const registry = registryResult.data ?? [];
+  const definitions = (definitionsResult.data ?? []).filter((row: any) => !isArchived(row));
+  const registry = (registryResult.data ?? []).filter((row: any) => !isArchived(row));
   const products = productsResult.data ?? [];
   const productById = new Map<string, string>(products.map((product: any) => [String(product.id), String(product.name)]));
   const byKey = new Map<string, LandingDashboardItem>();
@@ -177,18 +208,21 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const selected = byKey.get(selectedKeyParam ?? "imersao_zumbido") ?? landings[0] ?? null;
   if (!selected) return emptyContext(access.role, access.allowedModules, "Nenhuma landing page cadastrada ou rastreada.");
 
-  const [events, previousEvents] = await Promise.all([
+  const [rawEvents, rawPreviousEvents] = await Promise.all([
     readAll((from, to) => client.from("landing_page_tracking_events")
-      .select("id,event_name,session_id,utm_source,utm_medium,utm_campaign,campaign_key,block_id,cta_id,page_url,payload,occurred_at")
-      .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey).eq("source_type", "REAL")
+      .select("id,event_name,session_id,utm_source,utm_medium,utm_campaign,utm_content,sck,campaign_key,block_id,cta_id,page_url,payload,source_type,occurred_at")
+      .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey)
       .gte("occurred_at", period.start.toISOString()).lte("occurred_at", period.end.toISOString())
       .order("occurred_at", { ascending: false }).range(from, to)),
     readAll((from, to) => client.from("landing_page_tracking_events")
-      .select("event_name,session_id,payload,occurred_at")
-      .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey).eq("source_type", "REAL")
+      .select("event_name,session_id,utm_source,utm_campaign,utm_content,sck,page_url,payload,source_type,occurred_at")
+      .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey)
       .gte("occurred_at", previousStart.toISOString()).lt("occurred_at", period.start.toISOString())
       .order("occurred_at", { ascending: false }).range(from, to)),
   ]);
+  const events = includeTest ? rawEvents : rawEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
+  const previousEvents = includeTest ? rawPreviousEvents : rawPreviousEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
+  const excludedEvents = rawEvents.length - events.length;
 
   const definition = definitions.find((row: any) => row.landing_key === selected.landingKey) ?? null;
   const registryRow = registry.find((row: any) => row.landing_key === selected.landingKey) ?? null;
@@ -222,7 +256,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const sections = [...sectionCounts.entries()].map(([id, views]) => ({ id, label: sectionLabels[id] ?? id, views, share: sessionCount ? (views / sessionCount) * 100 : null })).sort((a, b) => b.views - a.views);
   const attributionMap = new Map<string, { source: string; campaign: string; sessions: Set<string>; checkoutClicks: number }>();
   for (const row of events) {
-    const source = row.utm_source || "Direto / não identificado";
+    const source = humanOrigin(row.utm_source, row.utm_medium, row.utm_content);
     const campaign = row.utm_campaign || row.campaign_key || "Sem campanha identificada";
     const key = `${source}::${campaign}`;
     const item = attributionMap.get(key) ?? { source, campaign, sessions: new Set<string>(), checkoutClicks: 0 };
@@ -258,6 +292,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     allowedModules: access.allowedModules.includes("landing-pages") ? access.allowedModules : [...access.allowedModules, "landing-pages"],
     diagnostic: null,
     period: { key: period.key, label: period.label, start: period.start.toISOString(), end: period.end.toISOString(), comparisonAvailable: previousEvents.length > 0 },
+    traffic: { includesTest: includeTest, excludedEvents },
     filters: {
       products: [...new Set(landings.map((item) => item.productName))].sort(), campaigns: [...new Set(landings.map((item) => item.campaign))].sort(),
       environments: [...new Set(landings.map((item) => item.environment))].sort(), statuses: [...new Set(landings.map((item) => item.status))].sort(),
@@ -282,7 +317,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     topEvents: [...eventCounts.entries()].map(([name, total]) => ({ name, total, sessions: eventSessions(events.filter((row) => row.event_name === name), [name]) })).sort((a, b) => b.total - a.total).slice(0, 10),
     sections,
     attribution: [...attributionMap.values()].map((item) => ({ source: item.source, campaign: item.campaign, sessions: item.sessions.size, checkoutClicks: item.checkoutClicks })).sort((a, b) => b.sessions - a.sessions),
-    recentEvents: events.slice(0, 50).map((row) => ({ id: row.id, name: row.event_name, label: eventLabels[row.event_name] ?? row.event_name, occurredAt: row.occurred_at, section: row.block_id ? sectionLabels[row.block_id] ?? row.block_id : null, source: row.utm_source || "Direto / não identificado" })),
+    recentEvents: events.slice(0, 50).map((row) => ({ id: row.id, name: row.event_name, label: eventLabels[row.event_name] ?? row.event_name, occurredAt: row.occurred_at, section: row.block_id ? sectionLabels[row.block_id] ?? row.block_id : null, source: humanOrigin(row.utm_source, row.utm_medium, row.utm_content) })),
     content: {
       title: selected.name,
       summary: selected.landingKey === "imersao_zumbido" ? "Página da Imersão Zumbido com oferta clínica, módulos, especialistas, provas, checkout e dúvidas frequentes." : String(definition?.metadata?.change_summary ?? extracted?.headline?.value ?? "Aguardando conteúdo estruturado."),
@@ -324,7 +359,7 @@ function emptyContext(role: string | null, allowedModules: string[], diagnostic:
   const emptyMetric = metric(null, null);
   return {
     role, roleMode: functionalRoleFor(role) === "ADMIN" ? "ADMIN" : "ESPECIALISTA", allowedModules, diagnostic,
-    period: { key: "30d", label: "Últimos 30 dias", start: new Date().toISOString(), end: new Date().toISOString(), comparisonAvailable: false },
+    period: { key: "30d", label: "Últimos 30 dias", start: new Date().toISOString(), end: new Date().toISOString(), comparisonAvailable: false }, traffic: { includesTest: false, excludedEvents: 0 },
     filters: { products: [], campaigns: [], environments: [], statuses: [], domains: [] }, landings: [], selected: null,
     metrics: { visitors: emptyMetric, sessions: emptyMetric, pageViews: emptyMetric, offerViews: emptyMetric, checkoutClicks: emptyMetric, conversionRate: emptyMetric },
     daily: [], funnel: [], topEvents: [], sections: [], attribution: [], recentEvents: [],

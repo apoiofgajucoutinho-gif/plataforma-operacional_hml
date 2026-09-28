@@ -3,6 +3,7 @@
 
   const SESSION_TTL_MS = 30 * 60 * 1000;
   const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "sck", "src"];
+  const TRAFFIC_TYPES = new Set(["public", "internal", "test"]);
   const STORAGE = {
     visitor: "norwyn_visitor_id_v1",
     session: "norwyn_session_v1",
@@ -60,6 +61,11 @@
     touch.landing_url = location.href;
     touch.captured_at = new Date().toISOString();
     return touch;
+  }
+
+  function trafficTypeFromLocation() {
+    const value = new URLSearchParams(location.search).get("traffic_type");
+    return value && TRAFFIC_TYPES.has(value.toLowerCase()) ? value.toLowerCase() : "public";
   }
 
   function hasCampaign(touch) {
@@ -134,6 +140,7 @@
       page_version: config.pageVersion,
       content_version: config.contentVersion,
       environment: config.environment,
+      traffic_type: trafficTypeFromLocation(),
       url: location.href,
       referrer: document.referrer || null,
       landing_url: context.currentTouch.landing_url,

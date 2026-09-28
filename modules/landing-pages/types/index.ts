@@ -130,6 +130,7 @@ export type LandingDashboardContext = {
   allowedModules: string[];
   diagnostic: string | null;
   period: { key: string; label: string; start: string; end: string; comparisonAvailable: boolean };
+  traffic: { includesTest: boolean; excludedEvents: number };
   filters: { products: string[]; campaigns: string[]; environments: string[]; statuses: string[]; domains: string[] };
   landings: LandingDashboardItem[];
   selected: LandingDashboardItem | null;
