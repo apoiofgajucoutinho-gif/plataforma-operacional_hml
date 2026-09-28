@@ -12,6 +12,8 @@ const allowedOrigins = new Set([
   "https://imersaozumbido.fgajulianacoutinho.com.br",
   "https://plataf-op-hml.vercel.app",
 ]);
+type LandingRegistry = { tenant_id: string; product_id: string | null; campaign_key: string | null; url: string | null };
+let registryCache: { value: LandingRegistry; expiresAt: number } | null = null;
 
 function headers(request: Request) {
   const origin = request.headers.get("origin");
@@ -65,6 +67,17 @@ function isSmoke(body: Record<string, unknown>) {
   return clean(body.traffic_type)?.toLowerCase() === "test" && body.smoke === true;
 }
 
+async function landingRegistry(admin: NonNullable<ReturnType<typeof createAdminClient>>) {
+  if (registryCache && registryCache.expiresAt > Date.now()) return registryCache.value;
+  const { data } = await admin.from("norwyn_landing_registry")
+    .select("tenant_id,product_id,campaign_key,url")
+    .eq("landing_key", LANDING_KEY).eq("status", "active").limit(1).maybeSingle();
+  if (!data?.tenant_id) return null;
+  const value = data as LandingRegistry;
+  registryCache = { value, expiresAt: Date.now() + 5 * 60 * 1000 };
+  return value;
+}
+
 export async function OPTIONS(request: Request) {
   return new NextResponse(null, { status: 204, headers: headers(request) });
 }
@@ -72,7 +85,12 @@ export async function OPTIONS(request: Request) {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const smoke = url.searchParams.get("traffic_type") === "test" && url.searchParams.get("smoke") === "1";
-  return NextResponse.json({ enabled: globalEnabled() || smoke, mode: globalEnabled() ? "enabled" : smoke ? "smoke" : "disabled" }, { headers: headers(request) });
+  const enabled = globalEnabled() || smoke;
+  if (enabled) {
+    const admin = createAdminClient();
+    if (admin) await landingRegistry(admin);
+  }
+  return NextResponse.json({ enabled, mode: globalEnabled() ? "enabled" : smoke ? "smoke" : "disabled" }, { headers: headers(request) });
 }
 
 export async function POST(request: Request) {
@@ -93,9 +111,7 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
   if (!admin) return NextResponse.json({ enabled: true, bridged: false, checkout_url: fallback, reason: "storage_unavailable" }, { status: 503, headers: responseHeaders });
 
-  const { data: registry } = await admin.from("norwyn_landing_registry")
-    .select("tenant_id,product_id,campaign_key,url")
-    .eq("landing_key", LANDING_KEY).eq("status", "active").limit(1).maybeSingle();
+  const registry = await landingRegistry(admin);
   if (!registry?.tenant_id) return NextResponse.json({ enabled: true, bridged: false, checkout_url: fallback, reason: "landing_not_registered" }, { status: 503, headers: responseHeaders });
 
   const currentTouch = safeTouch(body.current_touch);
@@ -146,12 +162,11 @@ export async function POST(request: Request) {
     metadata,
   };
 
-  const { data: existing } = await admin.from("growth_tracking_keys").select("id,metadata")
-    .eq("tenant_id", registry.tenant_id).eq("source_sck", sck).limit(1).maybeSingle();
-  const operation = existing
-    ? admin.from("growth_tracking_keys").update({ ...payload, metadata: { ...record(existing.metadata), ...metadata } }).eq("id", existing.id)
-    : admin.from("growth_tracking_keys").insert(payload);
-  const { error } = await operation;
+  const { error: insertError } = await admin.from("growth_tracking_keys").insert(payload);
+  const { error } = insertError?.code === "23505"
+    ? await admin.from("growth_tracking_keys").update(payload)
+      .eq("tenant_id", registry.tenant_id).eq("source_sck", sck)
+    : { error: insertError };
   if (error) return NextResponse.json({ enabled: true, bridged: false, checkout_url: fallback, reason: "persistence_failed" }, { status: 503, headers: responseHeaders });
 
   return NextResponse.json({ enabled: true, bridged: true, sck, checkout_url: checkout.toString(), confidence: payload.tracking_confidence }, { headers: responseHeaders });
