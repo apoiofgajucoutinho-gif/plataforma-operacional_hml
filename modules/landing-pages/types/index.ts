@@ -157,6 +157,9 @@ export type LandingDashboardContext = {
     previewUrl: string | null;
   };
   health: {
+    overallStatus: "healthy" | "warning" | "critical" | "unknown";
+    overallLabel: string;
+    guidance: string | null;
     availability: string;
     httpStatus: number | null;
     lastCheckedAt: string | null;
@@ -171,6 +174,31 @@ export type LandingDashboardContext = {
     seo: string;
     technicalPerformance: string;
     publishedIntegrity: string;
+    components: Array<{
+      key: string;
+      label: string;
+      status: "healthy" | "warning" | "critical" | "unknown";
+      lastCheckedAt: string | null;
+      message: string;
+    }>;
+    diagnostics: Array<{
+      key: string;
+      label: string;
+      url: string;
+      status: "healthy" | "warning" | "critical" | "unknown";
+      httpStatus: number | null;
+      redirectChain: string[];
+      sslOk: boolean | null;
+      sslExpiresAt: string | null;
+      responseTimeMs: number | null;
+      expectedOrigin: string | null;
+      observedOrigin: string | null;
+      expectedCheckout: string | null;
+      observedCheckout: boolean | null;
+      tracking: boolean | null;
+      error: string | null;
+      evidence: Record<string, unknown>;
+    }>;
     divergences: string[];
     alerts: string[];
   };

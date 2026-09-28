@@ -71,6 +71,9 @@ export async function getAtividadesContext(): Promise<AtividadesContext> {
       templateTarefas: [],
       recorrencias: [],
       logs: [],
+      products: [],
+      campaigns: [],
+      landings: [],
       updatedAt: null,
     };
   }
@@ -103,6 +106,9 @@ export async function getAtividadesContext(): Promise<AtividadesContext> {
       templateTarefas: [],
       recorrencias: [],
       logs: [],
+      products: [],
+      campaigns: [],
+      landings: [],
       updatedAt: null,
     };
   }
@@ -110,7 +116,7 @@ export async function getAtividadesContext(): Promise<AtividadesContext> {
   const teams = allowedTeamsForRole(membership.role);
   const canAdmin = membership.role === "ADMIN" || membership.role === "SUPORTE";
   const canWrite = membership.role === "ADMIN" || membership.role === "ESPECIALISTA" || membership.role === "OPERACIONAL" || Boolean(permission?.can_write);
-  const [tenantResult, projetosResult, tarefasResult, templatesResult, templateTarefasResult, recorrenciasResult, logsResult] =
+  const [tenantResult, projetosResult, tarefasResult, templatesResult, templateTarefasResult, recorrenciasResult, logsResult, productsResult, campaignsResult, landingsResult] =
     await Promise.all([
       dataClient.from("tenants").select("id, nome").eq("id", membership.tenant_id).maybeSingle(),
       dataClient
@@ -151,6 +157,9 @@ export async function getAtividadesContext(): Promise<AtividadesContext> {
         .eq("tenant_id", membership.tenant_id)
         .order("created_at", { ascending: false })
         .limit(150),
+      dataClient.from("products").select("id,nome_oficial").eq("tenant_id", membership.tenant_id).eq("ativo", true).order("nome_oficial"),
+      dataClient.from("campaigns").select("id,name,product_id").eq("tenant_id", membership.tenant_id).order("name"),
+      dataClient.from("landing_page_definitions").select("id,landing_key,name,product_id,campaign_id").eq("tenant_id", membership.tenant_id).order("name"),
     ]);
 
   const rows = [
@@ -175,6 +184,9 @@ export async function getAtividadesContext(): Promise<AtividadesContext> {
     templateTarefas: templateTarefasResult.data ?? [],
     recorrencias: recorrenciasResult.data ?? [],
     logs: logsResult.data ?? [],
+    products: (productsResult.data ?? []).map((item: { id: string; nome_oficial: string }) => ({ id: item.id, name: item.nome_oficial })),
+    campaigns: campaignsResult.data ?? [],
+    landings: landingsResult.data ?? [],
     updatedAt: latestDate(rows),
   };
 }

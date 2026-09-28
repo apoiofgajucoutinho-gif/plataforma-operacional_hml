@@ -32,7 +32,7 @@ export type AtividadeTarefa = {
   id: string;
   tenant_id: string;
   projeto_id: string | null;
-  parent_id: string | null;
+  template_tarefa_id: string | null;
   titulo: string;
   descricao: string | null;
   time_responsavel: AtividadeTime;
@@ -42,7 +42,6 @@ export type AtividadeTarefa = {
   data_inicio: string | null;
   prazo: string | null;
   concluida_em: string | null;
-  concluida_at?: string | null;
   validacao_obrigatoria: boolean;
   validada_em?: string | null;
   motivo_ignorado: string | null;
@@ -78,6 +77,10 @@ export type AtividadeTemplate = {
   created_at: string;
   updated_at: string;
 };
+
+export type AtividadeProductOption = { id: string; name: string };
+export type AtividadeCampaignOption = { id: string; name: string; product_id: string | null };
+export type AtividadeLandingOption = { id: string; landing_key: string; name: string; product_id: string | null; campaign_id: string | null };
 
 export type AtividadeTemplateTarefa = {
   id: string;
@@ -120,7 +123,7 @@ export type AtividadeLog = {
   entidade: string;
   entidade_id: string | null;
   acao: string;
-  descricao: string | null;
+  detalhe: string | null;
   user_id: string | null;
   created_at: string;
 };
@@ -138,5 +141,8 @@ export type AtividadesContext = {
   templateTarefas: AtividadeTemplateTarefa[];
   recorrencias: AtividadeRecorrencia[];
   logs: AtividadeLog[];
+  products: AtividadeProductOption[];
+  campaigns: AtividadeCampaignOption[];
+  landings: AtividadeLandingOption[];
   updatedAt: string | null;
 };

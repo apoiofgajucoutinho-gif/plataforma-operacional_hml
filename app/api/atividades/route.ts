@@ -77,7 +77,7 @@ async function writeLog(
     entidade: input.entity,
     entidade_id: input.id ?? null,
     acao: input.action,
-    descricao: input.description ?? null,
+    detalhe: input.description ?? null,
     user_id: input.userId,
   });
 }
@@ -87,12 +87,69 @@ export async function POST(request: Request) {
   const entity = String(body.entity ?? "");
   const action = String(body.action ?? "create");
 
+  const auth = await getAuthContext();
+  if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  if (action === "start_playbook") {
+    const input = body.payload && typeof body.payload === "object" ? body.payload as Record<string, unknown> : {};
+    const templateId = String(input.template_id ?? "");
+    const name = String(input.nome ?? "").trim();
+    const owner = String(input.responsavel_nome ?? "").trim();
+    const targetDate = String(input.data_alvo ?? "");
+    const productId = input.product_id ? String(input.product_id) : null;
+    const campaignId = input.campaign_id ? String(input.campaign_id) : null;
+    const landingPageId = input.landing_page_id ? String(input.landing_page_id) : null;
+    if (!templateId || !name || !targetDate) return NextResponse.json({ error: "Template, nome e data alvo sao obrigatorios." }, { status: 400 });
+
+    const { data: template } = await auth.dataClient.from("atividades_templates").select("id,nome,categoria,duracao_dias").eq("tenant_id", auth.tenantId).eq("id", templateId).eq("ativo", true).maybeSingle();
+    if (!template) return NextResponse.json({ error: "Playbook nao encontrado." }, { status: 404 });
+    const team = auth.role === "OPERACIONAL" ? "suporte" : auth.role === "ESPECIALISTA" ? "especialista" : "gestao_dados";
+    const startedAt = new Date().toISOString().slice(0, 10);
+    const contextMetadata = { playbook: template.nome, product_id: productId, campaign_id: campaignId, landing_page_id: landingPageId, target_date: targetDate, source: "playbook_v1" };
+    const { data: project, error: projectError } = await auth.dataClient.from("atividades_projetos").insert({
+      tenant_id: auth.tenantId,
+      nome: name,
+      categoria: template.categoria,
+      descricao: `Playbook ${template.nome}. Contexto operacional registrado nas tarefas do projeto.`,
+      time_responsavel: team,
+      responsavel_nome: owner || null,
+      data_inicio: startedAt,
+      data_fim: targetDate,
+      status: "em_andamento",
+      template_id: template.id,
+      created_by: auth.userId,
+    }).select("*").single();
+    if (projectError) return NextResponse.json({ error: projectError.message }, { status: 400 });
+
+    try {
+      const { data: expanded, error: expansionError } = await auth.dataClient.rpc("atividades_expandir_template", { p_projeto_id: project.id });
+      if (expansionError) throw new Error(expansionError.message);
+      const { error: taskUpdateError } = await auth.dataClient.from("atividades_tarefas").update({
+        product_id: productId,
+        campaign_id: campaignId,
+        responsavel_nome: owner || null,
+        source_module: "landing-pages",
+        source_event: "playbook_started",
+        metadata: contextMetadata,
+      }).eq("tenant_id", auth.tenantId).eq("projeto_id", project.id);
+      if (taskUpdateError) throw new Error(taskUpdateError.message);
+      const { data: tasks, error: taskError } = await auth.dataClient.from("atividades_tarefas").select("*").eq("tenant_id", auth.tenantId).eq("projeto_id", project.id).order("ordem");
+      if (taskError) throw new Error(taskError.message);
+      const taskIds = (tasks ?? []).map((task: { id: string }) => task.id);
+      const { count: dependencyCount } = taskIds.length
+        ? await auth.dataClient.from("atividades_dependencias").select("id", { count: "exact", head: true }).eq("tenant_id", auth.tenantId).in("tarefa_id", taskIds)
+        : { count: 0 };
+      await writeLog(auth.dataClient, { tenantId: auth.tenantId, entity: "projeto", id: project.id, action: "start_playbook", description: `${template.nome}: ${expanded ?? 0} tarefas`, userId: auth.userId });
+      return NextResponse.json({ project, tasks: tasks ?? [], created: expanded ?? 0, dependencies: dependencyCount ?? 0 });
+    } catch (error) {
+      await auth.dataClient.from("atividades_projetos").delete().eq("tenant_id", auth.tenantId).eq("id", project.id);
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Falha ao iniciar playbook." }, { status: 400 });
+    }
+  }
+
   if (!writableEntities.has(entity)) {
     return NextResponse.json({ error: "Entidade invalida." }, { status: 400 });
   }
-
-  const auth = await getAuthContext();
-  if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const rawPayload = cleanPayload({ ...(body.payload ?? {}), tenant_id: auth.tenantId });
   const team = String(rawPayload.time_responsavel ?? "");

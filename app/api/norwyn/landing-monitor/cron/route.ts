@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzeLandingHtml, type LandingRegistryEntry } from "@/modules/norwyn/services/landing-intelligence";
 import { runPresenceAutomation } from "@/modules/presence/services/presence-automation";
+import { runLandingHealthV1 } from "@/modules/landing-pages/health/landing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -133,7 +134,13 @@ export async function GET(request: Request) {
     const entries = await loadDueLandings(dataClient, tenantId);
     const results = await Promise.all(entries.map((entry: LandingRegistryEntry & { id?: string }) => monitorLanding(dataClient, tenantId, entry)));
     const presence = await runPresenceAutomation({ force: true, limit: 120 });
-    return NextResponse.json({ ok: true, monitored: entries.length, operationMode: "REGISTRY_DRIVEN_READ_ONLY", results, presence });
+    let landingHealth = null;
+    try {
+      landingHealth = await runLandingHealthV1(dataClient, tenantId);
+    } catch (error) {
+      landingHealth = { error: error instanceof Error ? error.message : "Falha no Health da Landing Page." };
+    }
+    return NextResponse.json({ ok: true, monitored: entries.length, operationMode: "REGISTRY_DRIVEN_READ_ONLY", results, presence, landingHealth });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha no monitoramento." }, { status: 500 });
   }

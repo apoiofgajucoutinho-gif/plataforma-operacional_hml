@@ -261,10 +261,11 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const selectedKeyParam = first(params.lp);
   const includeTest = role === "ADMIN" && first(params.include_test) === "1";
 
-  const [definitionsResult, registryResult, productsResult, allTracking] = await Promise.all([
+  const [definitionsResult, registryResult, productsResult, knowledgeProductsResult, allTracking] = await Promise.all([
     client.from("landing_page_definitions").select("*").eq("tenant_id", tenantId).order("updated_at", { ascending: false }),
     client.from("norwyn_landing_registry").select("*").eq("tenant_id", tenantId).order("updated_at", { ascending: false }),
     client.from("catalog_products").select("id,name").eq("tenant_id", tenantId),
+    client.from("products").select("id,nome_oficial").eq("tenant_id", tenantId),
     readAll((from, to) => client.from("landing_page_tracking_events")
       .select("landing_key,landing_version,environment,product_key,campaign_key,page_url,event_name,occurred_at")
       .eq("tenant_id", tenantId).eq("source_type", "REAL").order("occurred_at", { ascending: false }).range(from, to)),
@@ -272,6 +273,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   if (definitionsResult.error) throw new Error(definitionsResult.error.message);
   if (registryResult.error) throw new Error(registryResult.error.message);
   if (productsResult.error) throw new Error(productsResult.error.message);
+  if (knowledgeProductsResult.error) throw new Error(knowledgeProductsResult.error.message);
 
   const definitionRows = definitionsResult.data ?? [];
   const registryRows = registryResult.data ?? [];
@@ -282,7 +284,10 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const definitions = definitionRows.filter((row: any) => !isArchived(row));
   const registry = registryRows.filter((row: any) => !isArchived(row));
   const products = productsResult.data ?? [];
-  const productById = new Map<string, string>(products.map((product: any) => [String(product.id), String(product.name)]));
+  const productById = new Map<string, string>([
+    ...products.map((product: any) => [String(product.id), String(product.name)] as [string, string]),
+    ...(knowledgeProductsResult.data ?? []).map((product: any) => [String(product.id), String(product.nome_oficial)] as [string, string]),
+  ]);
   const byKey = new Map<string, LandingDashboardItem>();
 
   for (const row of registry) {
@@ -372,16 +377,24 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const attribution = attributionRows(selected.landingKey, publicEvents, publicSessionCount);
 
   const registryId = registryRow?.id ?? null;
-  const [snapshotResult, monitorResult, issuesResult, versionsResult, qaResult, approvalsResult, linksResult, historyResult] = await Promise.all([
+  const catalogProductId = definition?.metadata?.catalog_product_id ?? selected.productId;
+  const [snapshotResult, monitorResult, issuesResult, versionsResult, qaResult, approvalsResult, linksResult, historyResult, assetsResult] = await Promise.all([
     registryId ? client.from("norwyn_landing_snapshots").select("*").eq("tenant_id", tenantId).eq("landing_id", registryId).order("fetched_at", { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null, error: null }),
     registryId ? client.from("norwyn_landing_monitor_log").select("*").eq("tenant_id", tenantId).eq("landing_id", registryId).order("detected_at", { ascending: false }).limit(20) : Promise.resolve({ data: [], error: null }),
     registryId ? client.from("norwyn_landing_qa_issues").select("*").eq("tenant_id", tenantId).eq("landing_id", registryId).eq("status", "open").order("created_at", { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
     definition ? client.from("landing_page_versions").select("*").eq("tenant_id", tenantId).eq("landing_id", definition.id).order("created_at", { ascending: false }).limit(50) : Promise.resolve({ data: [], error: null }),
     definition ? client.from("landing_page_qa_runs").select("*").eq("tenant_id", tenantId).eq("landing_id", definition.id).order("completed_at", { ascending: false }).limit(50) : Promise.resolve({ data: [], error: null }),
     definition ? client.from("landing_page_approvals").select("*").eq("tenant_id", tenantId).eq("landing_id", definition.id).order("requested_at", { ascending: false }).limit(50) : Promise.resolve({ data: [], error: null }),
-    selected.productId ? client.from("catalog_sales_links").select("*").eq("tenant_id", tenantId).eq("product_id", selected.productId).order("is_main_link", { ascending: false }).limit(20) : Promise.resolve({ data: [], error: null }),
-    selected.productId ? client.from("catalog_link_history").select("*").eq("tenant_id", tenantId).eq("product_id", selected.productId).order("created_at", { ascending: false }).limit(30) : Promise.resolve({ data: [], error: null }),
+    catalogProductId ? client.from("catalog_sales_links").select("*").eq("tenant_id", tenantId).eq("product_id", catalogProductId).order("is_main_link", { ascending: false }).limit(20) : Promise.resolve({ data: [], error: null }),
+    catalogProductId ? client.from("catalog_link_history").select("*").eq("tenant_id", tenantId).eq("product_id", catalogProductId).order("created_at", { ascending: false }).limit(30) : Promise.resolve({ data: [], error: null }),
+    client.from("digital_assets").select("*").eq("tenant_id", tenantId).contains("metadata", { landing_key: selected.landingKey }),
   ]);
+  const healthAssets = assetsResult.data ?? [];
+  const healthAssetIds = healthAssets.map((asset: any) => asset.id);
+  const healthChecksResult = healthAssetIds.length
+    ? await client.from("presence_checks").select("*").eq("tenant_id", tenantId).in("asset_id", healthAssetIds).order("checked_at", { ascending: false }).limit(200)
+    : { data: [], error: null };
+  const healthChecks = healthChecksResult.data ?? [];
   const snapshot = snapshotResult.data;
   const checkoutLinks = linksResult.data ?? [];
   const checkout = checkoutLinks.find((link: any) => link.hotmart_offer_id === "lov69pen") ?? checkoutLinks.find((link: any) => link.is_main_link) ?? checkoutLinks[0] ?? null;
@@ -391,6 +404,8 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const eventErrors = events.filter((row) => /error|fail|exception/i.test(row.event_name));
   const extracted = snapshot?.extracted_json ?? {};
   const lastEventAt = events[0]?.occurred_at ?? allTracking.find((row) => row.landing_key === selected.landingKey)?.occurred_at ?? null;
+  const latestHealthQa = (qaResult.data ?? []).find((item: any) => item.technical_results?.schema_version === "landing_health_v1") ?? null;
+  const healthView = buildHealthView({ assets: healthAssets, checks: healthChecks, qaRun: latestHealthQa, lastEventAt });
 
   return {
     role: access.role,
@@ -433,6 +448,9 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
       previewUrl: selected.url,
     },
     health: {
+      overallStatus: healthView.overallStatus,
+      overallLabel: healthView.overallLabel,
+      guidance: healthView.guidance,
       availability: snapshot?.status_code ? (snapshot.status_code < 400 ? "Disponível" : "Com problema") : "Aguardando monitoramento",
       httpStatus: snapshot?.status_code ?? null,
       lastCheckedAt: snapshot?.fetched_at ?? registryRow?.last_checked_at ?? null,
@@ -447,6 +465,8 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
       seo: extracted?.title ? "Título identificado" : "Não disponível",
       technicalPerformance: "Não disponível",
       publishedIntegrity: snapshot?.content_hash ? "Snapshot disponível" : "Aguardando snapshot",
+      components: healthView.components,
+      diagnostics: healthView.diagnostics,
       divergences: divergenceEvents.map((item: any) => item.reason || "Divergência comercial registrada"),
       alerts: [...openIssues.map((item: any) => item.title), ...monitorAlerts.map((item: any) => item.message || "Alteração detectada")].slice(0, 12),
     },
@@ -454,6 +474,86 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     qa: (qaResult.data ?? []).map((item: any) => ({ id: item.id, status: item.status, passed: item.passed_tests ?? 0, warnings: item.warning_tests ?? 0, blockers: item.blocker_tests ?? 0, completedAt: item.completed_at })),
     approvals: (approvalsResult.data ?? []).map((item: any) => ({ id: item.id, type: item.approval_type, decision: item.decision, requestedAt: item.requested_at, decidedAt: item.decided_at })),
   };
+}
+
+type HealthViewState = "healthy" | "warning" | "critical" | "unknown";
+
+function normalizedHealthState(value: unknown): HealthViewState {
+  return value === "healthy" || value === "warning" || value === "critical" ? value : "unknown";
+}
+
+function buildHealthView({ assets, checks, qaRun, lastEventAt }: { assets: any[]; checks: any[]; qaRun: any; lastEventAt: string | null }) {
+  const latestByAsset = new Map<string, any>();
+  for (const check of checks) {
+    if (!latestByAsset.has(String(check.asset_id))) latestByAsset.set(String(check.asset_id), check);
+  }
+  const linkSummaries = new Map<string, any>((qaRun?.technical_results?.campaign_links ?? []).map((item: any) => [String(item.key), item]));
+  const componentOrder: Record<string, number> = { page: 1, checkout: 2, tracking: 3, stories: 4, bio: 5, whatsapp: 6, site: 7, ads: 8 };
+  const labels: Record<string, string> = { page: "Página", checkout: "Checkout", tracking: "Tracking", stories: "Stories", bio: "Bio", whatsapp: "WhatsApp", site: "Site", ads: "Ads" };
+  const components: LandingDashboardContext["health"]["components"] = [];
+  const diagnostics: LandingDashboardContext["health"]["diagnostics"] = [];
+
+  for (const asset of assets) {
+    const component = String(asset.metadata?.component ?? "");
+    const key = component === "campaign_link" ? String(asset.metadata?.route_key ?? asset.id) : component;
+    if (!key || !labels[key]) continue;
+    const check = latestByAsset.get(String(asset.id));
+    const summary = linkSummaries.get(key);
+    const status = normalizedHealthState(summary?.state ?? check?.status);
+    const message = summary?.message
+      ?? (status === "healthy" ? `${labels[key]} funcionando normalmente.` : status === "critical" ? `${labels[key]} com problema. É necessário revisar.` : status === "warning" ? `${labels[key]} precisa de atenção.` : `${labels[key]} ainda não foi verificado.`);
+    const landingHealth = check?.result_json?.landing_health ?? {};
+    const expectedOrigin = landingHealth.expected_origin
+      ? [landingHealth.expected_origin.source, landingHealth.expected_origin.medium, landingHealth.expected_origin.content].filter(Boolean).join(" · ")
+      : null;
+    const observedOrigin = landingHealth.observed_origin
+      ? [landingHealth.observed_origin.source, landingHealth.observed_origin.medium, landingHealth.observed_origin.content].filter(Boolean).join(" · ")
+      : null;
+    components.push({ key, label: labels[key], status, lastCheckedAt: summary?.checkedAt ?? check?.checked_at ?? null, message });
+    diagnostics.push({
+      key,
+      label: labels[key],
+      url: String(asset.url ?? ""),
+      status,
+      httpStatus: check?.http_status ?? summary?.httpStatus ?? null,
+      redirectChain: Array.isArray(check?.redirect_chain) ? check.redirect_chain : Array.isArray(landingHealth.redirect_chain) ? landingHealth.redirect_chain : [],
+      sslOk: typeof check?.ssl_ok === "boolean" ? check.ssl_ok : null,
+      sslExpiresAt: check?.ssl_expires_at ?? null,
+      responseTimeMs: check?.response_time_ms ?? summary?.responseTimeMs ?? null,
+      expectedOrigin,
+      observedOrigin,
+      expectedCheckout: landingHealth.checkout_expected ?? asset.metadata?.expected_checkout ?? null,
+      observedCheckout: typeof landingHealth.checkout_observed === "boolean" ? landingHealth.checkout_observed : null,
+      tracking: typeof landingHealth.tracking_recent === "boolean" ? landingHealth.tracking_recent : null,
+      error: check?.error_message ?? null,
+      evidence: landingHealth,
+    });
+  }
+
+  const trackingStatus = normalizedHealthState(qaRun?.technical_results?.tracking?.status);
+  components.push({
+    key: "tracking",
+    label: labels.tracking,
+    status: trackingStatus,
+    lastCheckedAt: qaRun?.completed_at ?? lastEventAt,
+    message: trackingStatus === "healthy" ? "Tracking recebendo eventos reais." : trackingStatus === "warning" ? "Tracking sem evento real recente; revisar se a campanha está ativa." : "Tracking ainda não foi verificado.",
+  });
+  diagnostics.push({
+    key: "tracking", label: labels.tracking, url: "", status: trackingStatus, httpStatus: null, redirectChain: [], sslOk: null,
+    sslExpiresAt: null, responseTimeMs: null, expectedOrigin: null, observedOrigin: null, expectedCheckout: null, observedCheckout: null,
+    tracking: trackingStatus === "healthy", error: null, evidence: qaRun?.technical_results?.tracking ?? {},
+  });
+
+  components.sort((a, b) => (componentOrder[a.key] ?? 99) - (componentOrder[b.key] ?? 99));
+  diagnostics.sort((a, b) => (componentOrder[a.key] ?? 99) - (componentOrder[b.key] ?? 99));
+  const computed = components.some((item) => item.status === "critical") ? "critical"
+    : components.some((item) => item.status === "warning") ? "warning"
+      : components.length && components.every((item) => item.status === "healthy") ? "healthy" : "unknown";
+  const overallStatus = normalizedHealthState(qaRun?.technical_results?.overall ?? computed);
+  const overallLabel = overallStatus === "healthy" ? "Saudável" : overallStatus === "warning" ? "Atenção" : overallStatus === "critical" ? "Crítico" : "Aguardando verificação";
+  const problem = components.find((item) => item.status === "critical") ?? components.find((item) => item.status === "warning");
+  const guidance = problem ? `${problem.label} precisa de revisão. ${problem.message}` : overallStatus === "healthy" ? "Página, checkout, tracking e links de entrada funcionando." : null;
+  return { overallStatus, overallLabel, guidance, components, diagnostics };
 }
 
 function healthLabel(value: string | null | undefined) {
@@ -470,7 +570,7 @@ function emptyContext(role: string | null, allowedModules: string[], diagnostic:
     metrics: { visitors: emptyMetric, sessions: emptyMetric, pageViews: emptyMetric, offerViews: emptyMetric, checkoutClicks: emptyMetric, conversionRate: emptyMetric },
     daily: [], funnel: [], topEvents: [], sections: [], attribution: [], recentEvents: [],
     content: { title: "Landing Pages", summary: "Aguardando dados", checkoutUrl: null, hotmartProductId: null, hotmartOfferId: null, previewUrl: null },
-    health: { availability: "Aguardando dados", httpStatus: null, lastCheckedAt: null, domain: "Não disponível", checkout: "Aguardando dados", checkoutCheckedAt: null, links: "Aguardando dados", images: "Aguardando dados", tracking: "Aguardando dados", recentEventAt: null, errors: null, seo: "Não disponível", technicalPerformance: "Não disponível", publishedIntegrity: "Aguardando dados", divergences: [], alerts: [] },
+    health: { overallStatus: "unknown", overallLabel: "Aguardando dados", guidance: null, availability: "Aguardando dados", httpStatus: null, lastCheckedAt: null, domain: "Não disponível", checkout: "Aguardando dados", checkoutCheckedAt: null, links: "Aguardando dados", images: "Aguardando dados", tracking: "Aguardando dados", recentEventAt: null, errors: null, seo: "Não disponível", technicalPerformance: "Não disponível", publishedIntegrity: "Aguardando dados", components: [], diagnostics: [], divergences: [], alerts: [] },
     versions: [], qa: [], approvals: [],
   };
 }

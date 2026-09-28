@@ -548,6 +548,7 @@ type RunPresenceCheckOptions = {
   origin?: "manual" | "automatic";
   retryOnFailure?: boolean;
   retryDelayMs?: number;
+  sourceType?: "REAL" | "SIMULATED";
 };
 
 function shouldRetryPresenceCheck(result: CheckResult) {
@@ -560,6 +561,7 @@ function waitForRetry(delayMs: number) {
 
 export async function runPresenceCheck(client: SupabaseAny, asset: PresenceAsset, options: RunPresenceCheckOptions = {}) {
   const origin = options.origin ?? "manual";
+  const sourceType = options.sourceType ?? "REAL";
   const firstResult = await buildPresenceCheck(client, asset);
   let result = firstResult;
   let retryAttempted = false;
@@ -605,15 +607,17 @@ export async function runPresenceCheck(client: SupabaseAny, asset: PresenceAsset
       status: result.status,
       result_json: enrichedResultJson,
       error_message: result.error_message,
-      source_type: "REAL",
+      source_type: sourceType,
       suspicious_evidence: result.suspicious_evidence,
     })
     .select("*")
     .single();
 
   if (error) throw new Error(error.message);
-  await syncIncidents(client, asset, check.id, result.issues, "REAL");
-  await client.from("digital_assets").update({ last_checked_at: nowIso(), last_status: result.status, last_health_score: result.health_score, last_check_id: check.id, updated_at: nowIso() }).eq("id", asset.id);
+  await syncIncidents(client, asset, check.id, result.issues, sourceType);
+  if (sourceType === "REAL") {
+    await client.from("digital_assets").update({ last_checked_at: nowIso(), last_status: result.status, last_health_score: result.health_score, last_check_id: check.id, updated_at: nowIso() }).eq("id", asset.id);
+  }
   return { check, result };
 }
 

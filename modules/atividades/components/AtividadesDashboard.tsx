@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArrowDownUp,
+  BookOpenCheck,
   CalendarDays,
   CheckCircle2,
   ClipboardCheck,
@@ -349,7 +350,7 @@ export function AtividadesDashboard({ context }: { context: AtividadesContext })
             Projetos, rotinas, tarefas e gestão à vista para acompanhar execução, atrasos, validações e responsabilidades.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2"><div className="text-sm font-semibold text-brand-teal/60">{updatedAtLabel(context.updatedAt)}</div>{context.canWrite ? <Button type="button" onClick={() => setActiveTab("atividades")}><Plus className="h-4 w-4" />Nova atividade</Button> : null}</div>
+        <div className="flex flex-wrap items-center gap-2"><div className="text-sm font-semibold text-brand-teal/60">{updatedAtLabel(context.updatedAt)}</div>{context.canWrite ? <><Button type="button" variant="secondary" onClick={() => setActiveTab("projetos")}><BookOpenCheck className="h-4 w-4" />Iniciar Playbook</Button><Button type="button" onClick={() => setActiveTab("atividades")}><Plus className="h-4 w-4" />Nova atividade</Button></> : null}</div>
       </header>
 
       <nav className="flex flex-wrap gap-2 rounded-lg border border-white/70 bg-white/70 p-2 shadow-soft">
@@ -589,9 +590,21 @@ function ProjectsTab({
     data_fim: addDays(20),
     template_id: "",
   });
+  const playbookTemplate = context.templates.find((item) => item.nome === "Publicar nova Landing Page" && item.ativo) ?? null;
+  const [playbook, setPlaybook] = useState({
+    nome: "",
+    product_id: "",
+    campaign_id: "",
+    landing_page_id: "",
+    responsavel_nome: "",
+    data_alvo: addDays(playbookTemplate?.duracao_dias ?? 30),
+  });
+  const campaignOptions = context.campaigns.filter((item) => !playbook.product_id || item.product_id === playbook.product_id);
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[0.75fr_1.25fr]">
+    <div className="space-y-5">
+      {canWrite ? <Card className="border-brand-clay/35 bg-white/85 p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div className="flex items-start gap-3"><span className="rounded-md bg-brand-cream p-3 text-brand-clay"><BookOpenCheck className="h-5 w-5" /></span><div><p className="text-xs font-black uppercase text-brand-clay">Playbook operacional</p><h2 className="mt-1 text-xl font-black text-brand-teal">Publicar nova Landing Page</h2><p className="mt-1 max-w-3xl text-sm leading-6 text-brand-teal/65">Cria o projeto, expande as fases, aplica contexto e materializa dependências usando o motor atual de Atividades.</p></div></div><Badge>{playbookTemplate ? `${context.templateTarefas.filter((item) => item.template_id === playbookTemplate.id).length} atividades` : "Aguardando template"}</Badge></div>{playbookTemplate ? <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3"><Field label="Nome do projeto" value={playbook.nome} onChange={(value) => setPlaybook({ ...playbook, nome: value })} placeholder="Ex.: LP Formação AASI" /><Select label="Produto" value={playbook.product_id} onChange={(value) => setPlaybook({ ...playbook, product_id: value, campaign_id: "" })} options={[["", "Selecionar produto"], ...context.products.map((item) => [item.id, item.name] as [string, string])]} /><Select label="Campanha" value={playbook.campaign_id} onChange={(value) => setPlaybook({ ...playbook, campaign_id: value })} options={[["", "Sem campanha definida"], ...campaignOptions.map((item) => [item.id, item.name] as [string, string])]} /><Select label="Landing Page" value={playbook.landing_page_id} onChange={(value) => setPlaybook({ ...playbook, landing_page_id: value })} options={[["", "Ainda não cadastrada"], ...context.landings.map((item) => [item.id, item.name] as [string, string])]} /><Field label="Responsável principal" value={playbook.responsavel_nome} onChange={(value) => setPlaybook({ ...playbook, responsavel_nome: value })} placeholder="Nome do responsável" /><Field label="Data alvo" type="date" value={playbook.data_alvo} onChange={(value) => setPlaybook({ ...playbook, data_alvo: value })} /><div className="md:col-span-2 xl:col-span-3"><Button disabled={isPending || !playbook.nome.trim() || !playbook.product_id || !playbook.data_alvo} onClick={() => void mutate({ action: "start_playbook", payload: { ...playbook, template_id: playbookTemplate.id } }, "Playbook iniciado: projeto, atividades e dependências criados.")}><BookOpenCheck className="h-4 w-4" />Iniciar Playbook</Button></div></div> : <p className="mt-4 text-sm font-semibold text-amber-700">O template ainda não foi aplicado ao HML.</p>}</Card> : null}
+      <div className="grid gap-5 xl:grid-cols-[0.75fr_1.25fr]">
       {canWrite ? (
         <Card className="p-5">
           <div className="flex items-center gap-3">
@@ -670,6 +683,7 @@ function ProjectsTab({
           {!context.projetos.length ? <p className="text-sm text-brand-teal/60">Nenhum projeto cadastrado ainda.</p> : null}
         </div>
       </Card>
+      </div>
     </div>
   );
 }
@@ -1306,7 +1320,7 @@ function AdminTab({ context }: { context: AtividadesContext }) {
           {context.logs.map((log) => (
             <div key={log.id} className="rounded-md border border-brand-sand/70 bg-white/60 p-3">
               <p className="text-sm font-black text-brand-teal">{log.acao} · {log.entidade}</p>
-              <p className="text-xs text-brand-teal/60">{log.descricao ?? "Sem descrição"} · {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(log.created_at))}</p>
+              <p className="text-xs text-brand-teal/60">{log.detalhe ?? "Sem descrição"} · {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(log.created_at))}</p>
             </div>
           ))}
         </div>
