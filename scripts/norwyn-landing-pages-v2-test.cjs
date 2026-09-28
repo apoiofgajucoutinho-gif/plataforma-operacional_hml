@@ -35,6 +35,12 @@ assert.match(service, /payload\?\.visitor_id/);
 assert.match(service, /isKnownTestTraffic/);
 assert.match(service, /operational_visibility === "archived"/);
 assert.match(service, /Instagram · Stories/);
+for (const source of ["Instagram · Stories", "Instagram · Link da bio", "WhatsApp · Grupo", "Site Juliana", "Meta Ads", "Direto \/ sem identificação"]) {
+  assert.match(service, new RegExp(source), `missing official attribution source: ${source}`);
+}
+assert.match(service, /sessionShare: totalSessions \?/);
+assert.match(component, /% das sessões/);
+assert.doesNotMatch(component, /context\.attribution\.slice\(/, "official attribution rows must not be truncated");
 assert.doesNotMatch(service, /Math\.random\(/, "dashboard must not invent metrics");
 assert.match(trackingEndpoint, /imersaozumbido\.fgajulianacoutinho\.com\.br/);
 assert.match(trackingEndpoint, /trafficType === "public" \? "REAL" : "SIMULATED"/);

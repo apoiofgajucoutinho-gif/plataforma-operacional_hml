@@ -133,6 +133,70 @@ function humanOrigin(sourceValue: string | null | undefined, mediumValue: string
   return source.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+type OfficialAttributionSource = {
+  source: string;
+  medium: string;
+  content: string;
+  displayName: string;
+  campaign: string;
+  sortOrder: number;
+  active: boolean;
+};
+
+const officialAttributionSourcesByLanding: Record<string, OfficialAttributionSource[]> = {
+  imersao_zumbido: [
+    { source: "instagram", medium: "organic", content: "stories", displayName: "Instagram · Stories", campaign: "Imersão Zumbido", sortOrder: 1, active: true },
+    { source: "instagram", medium: "organic", content: "bio", displayName: "Instagram · Link da bio", campaign: "Imersão Zumbido", sortOrder: 2, active: true },
+    { source: "whatsapp", medium: "group", content: "grupo_whatsapp", displayName: "WhatsApp · Grupo", campaign: "Imersão Zumbido", sortOrder: 3, active: true },
+    { source: "site", medium: "owned", content: "site_juliana", displayName: "Site Juliana", campaign: "Imersão Zumbido", sortOrder: 4, active: true },
+    { source: "meta", medium: "paid", content: "ads", displayName: "Meta Ads", campaign: "Imersão Zumbido", sortOrder: 5, active: true },
+    { source: "", medium: "", content: "", displayName: "Direto / sem identificação", campaign: "Sem campanha identificada", sortOrder: 6, active: true },
+  ],
+};
+
+function attributionRows(landingKey: string, rows: any[], totalSessions: number) {
+  const officialSources = (officialAttributionSourcesByLanding[landingKey] ?? []).filter((item) => item.active);
+  const officialByName = new Map(officialSources.map((item) => [item.displayName, item]));
+  const attributionMap = new Map<string, { source: string; campaign: string; sessions: Set<string>; checkoutClicks: number; sortOrder: number }>();
+
+  for (const item of officialSources) {
+    attributionMap.set(`official:${item.sortOrder}`, {
+      source: item.displayName,
+      campaign: item.campaign,
+      sessions: new Set<string>(),
+      checkoutClicks: 0,
+      sortOrder: item.sortOrder,
+    });
+  }
+
+  for (const row of rows) {
+    const source = humanOrigin(row.utm_source, row.utm_medium, row.utm_content);
+    const official = officialByName.get(source);
+    const campaign = official?.campaign ?? row.utm_campaign ?? row.campaign_key ?? "Sem campanha identificada";
+    const key = official ? `official:${official.sortOrder}` : `extra:${source}::${campaign}`;
+    const item = attributionMap.get(key) ?? {
+      source,
+      campaign,
+      sessions: new Set<string>(),
+      checkoutClicks: 0,
+      sortOrder: officialSources.length + attributionMap.size + 1,
+    };
+    if (row.session_id) item.sessions.add(row.session_id);
+    if (row.event_name === "checkout_click") item.checkoutClicks += 1;
+    attributionMap.set(key, item);
+  }
+
+  return [...attributionMap.values()]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((item) => ({
+      source: item.source,
+      campaign: item.campaign,
+      sessions: item.sessions.size,
+      sessionShare: totalSessions ? (item.sessions.size / totalSessions) * 100 : 0,
+      checkoutClicks: item.checkoutClicks,
+    }));
+}
+
 function landingIdentity(key: string) {
   if (key === "imersao_zumbido") return { name: "Imersão Zumbido", productName: "Imersão Zumbido", campaign: "Imersão Zumbido", url: "https://imersaozumbido.fgajulianacoutinho.com.br", status: "active" };
   return { name: key.replace(/[-_]/g, " "), productName: "Não vinculado", campaign: "Não informada", url: null, status: "tracking" };
@@ -226,7 +290,8 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
       .gte("occurred_at", previousStart.toISOString()).lt("occurred_at", period.start.toISOString())
       .order("occurred_at", { ascending: false }).range(from, to)),
   ]);
-  const events = includeTest ? rawEvents : rawEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
+  const publicEvents = rawEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
+  const events = includeTest ? rawEvents : publicEvents;
   const previousEvents = includeTest ? rawPreviousEvents : rawPreviousEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
   const excludedEvents = rawEvents.length - events.length;
 
@@ -260,16 +325,8 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const sectionRows = events.filter((row) => row.event_name === "section_view" && row.block_id);
   const sectionCounts = countBy(sectionRows, (row) => row.block_id);
   const sections = [...sectionCounts.entries()].map(([id, views]) => ({ id, label: sectionLabels[id] ?? id, views, share: sessionCount ? (views / sessionCount) * 100 : null })).sort((a, b) => b.views - a.views);
-  const attributionMap = new Map<string, { source: string; campaign: string; sessions: Set<string>; checkoutClicks: number }>();
-  for (const row of events) {
-    const source = humanOrigin(row.utm_source, row.utm_medium, row.utm_content);
-    const campaign = row.utm_campaign || row.campaign_key || "Sem campanha identificada";
-    const key = `${source}::${campaign}`;
-    const item = attributionMap.get(key) ?? { source, campaign, sessions: new Set<string>(), checkoutClicks: 0 };
-    if (row.session_id) item.sessions.add(row.session_id);
-    if (row.event_name === "checkout_click") item.checkoutClicks += 1;
-    attributionMap.set(key, item);
-  }
+  const publicSessionCount = eventSessions(publicEvents, ["session_start", ...pageNames]);
+  const attribution = attributionRows(selected.landingKey, publicEvents, publicSessionCount);
 
   const registryId = registryRow?.id ?? null;
   const [snapshotResult, monitorResult, issuesResult, versionsResult, qaResult, approvalsResult, linksResult, historyResult] = await Promise.all([
@@ -322,7 +379,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     ],
     topEvents: [...eventCounts.entries()].map(([name, total]) => ({ name, total, sessions: eventSessions(events.filter((row) => row.event_name === name), [name]) })).sort((a, b) => b.total - a.total).slice(0, 10),
     sections,
-    attribution: [...attributionMap.values()].map((item) => ({ source: item.source, campaign: item.campaign, sessions: item.sessions.size, checkoutClicks: item.checkoutClicks })).sort((a, b) => b.sessions - a.sessions),
+    attribution,
     recentEvents: events.slice(0, 50).map((row) => ({ id: row.id, name: row.event_name, label: eventLabels[row.event_name] ?? row.event_name, occurredAt: row.occurred_at, section: row.block_id ? sectionLabels[row.block_id] ?? row.block_id : null, source: humanOrigin(row.utm_source, row.utm_medium, row.utm_content) })),
     content: {
       title: selected.name,

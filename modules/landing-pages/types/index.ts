@@ -146,7 +146,7 @@ export type LandingDashboardContext = {
   funnel: Array<{ label: string; value: number; rate: number | null }>;
   topEvents: Array<{ name: string; total: number; sessions: number }>;
   sections: Array<{ id: string; label: string; views: number; share: number | null }>;
-  attribution: Array<{ source: string; campaign: string; sessions: number; checkoutClicks: number }>;
+  attribution: Array<{ source: string; campaign: string; sessions: number; sessionShare: number; checkoutClicks: number }>;
   recentEvents: Array<{ id: string; name: string; label: string; occurredAt: string; section: string | null; source: string }>;
   content: {
     title: string;
