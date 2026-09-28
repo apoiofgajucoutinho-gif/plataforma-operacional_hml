@@ -3,6 +3,33 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/stories",
+      "destination": "/?utm_source=instagram&utm_medium=organic&utm_campaign=imersao_zumbido&utm_content=stories",
+      "permanent": false
+    },
+    {
+      "source": "/bio",
+      "destination": "/?utm_source=instagram&utm_medium=organic&utm_campaign=imersao_zumbido&utm_content=bio",
+      "permanent": false
+    },
+    {
+      "source": "/whatsapp",
+      "destination": "/?utm_source=whatsapp&utm_medium=group&utm_campaign=imersao_zumbido&utm_content=grupo_whatsapp",
+      "permanent": false
+    },
+    {
+      "source": "/site",
+      "destination": "/?utm_source=site&utm_medium=owned&utm_campaign=imersao_zumbido&utm_content=site_juliana",
+      "permanent": false
+    },
+    {
+      "source": "/ads",
+      "destination": "/?utm_source=meta&utm_medium=paid&utm_campaign=imersao_zumbido&utm_content=ads",
+      "permanent": false
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
