@@ -1,0 +1,39 @@
+.proof-gallery {
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  align-items: center;
+  gap: 18px;
+}
+
+.proof-card {
+  min-width: 0;
+  margin: 0;
+}
+
+.proof-gallery .proof-card img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  background: #fff;
+  border: 6px solid #f5f1e9;
+  box-shadow: 14px 14px #b96d512e;
+}
+
+.proof-card:last-child {
+  transform: translateY(24px);
+}
+
+@media (max-width: 800px) {
+  .proof-gallery {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .proof-gallery .proof-card img {
+    border-width: 4px;
+    box-shadow: 10px 10px #b96d512e;
+  }
+
+  .proof-card:last-child {
+    transform: none;
+  }
+}
