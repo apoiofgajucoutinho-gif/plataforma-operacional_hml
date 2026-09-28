@@ -5,6 +5,9 @@ const ts = require("typescript");
 
 const component = fs.readFileSync("modules/landing-pages/components/LandingPagesAdminPage.tsx", "utf8");
 const service = fs.readFileSync("modules/landing-pages/services/landing-pages-dashboard.ts", "utf8");
+const accessService = fs.readFileSync("modules/landing-pages/services/landing-pages-server.ts", "utf8");
+const moduleMigration = fs.readFileSync("supabase/migrations/20260927211000_add_landing_pages_module_key.sql", "utf8");
+const permissionMigration = fs.readFileSync("supabase/migrations/20260927211100_enable_specialist_landing_pages.sql", "utf8");
 const navigationSource = fs.readFileSync("components/layout/app-navigation.ts", "utf8");
 const compiled = ts.transpileModule(navigationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const navigationModule = { exports: {} };
@@ -31,5 +34,14 @@ const admin = navigationModule.exports.navigationDefinitionsForRole("ADMIN");
 const specialist = navigationModule.exports.navigationDefinitionsForRole("ESPECIALISTA");
 assert.equal(admin.some((item) => item.href === "/landing-pages"), true, "ADMIN must see Landing Pages");
 assert.equal(specialist.some((item) => item.href === "/landing-pages"), true, "SPECIALIST must see Landing Pages");
+assert.match(moduleMigration, /add value if not exists 'landing-pages'/);
+assert.match(permissionMigration, /members\.role = 'ESPECIALISTA'/);
+assert.match(permissionMigration, /can_read = true/);
+assert.match(accessService, /functionalRoleFor\(membershipResult\.membership\.role\) === "ESPECIALISTA"/);
+
+const specialistTabs = [...component.matchAll(/\{ key: "([^"]+)", label: "([^"]+)"(?:, adminOnly: true)? \}/g)]
+  .filter((match) => !match[0].includes("adminOnly: true"))
+  .map((match) => match[2]);
+assert.deepEqual(specialistTabs, ["Visão Geral", "Desempenho", "Conteúdo", "Saúde"]);
 
 console.log("Landing Pages V2 regression PASS");
