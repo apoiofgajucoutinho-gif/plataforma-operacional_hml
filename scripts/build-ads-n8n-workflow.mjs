@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const metaUrl =
-  "={{ 'https://graph.facebook.com/v23.0/' + (($env.META_AD_ACCOUNT_ID || 'act_3360327820914673').startsWith('act_') ? ($env.META_AD_ACCOUNT_ID || 'act_3360327820914673') : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}";
+  "={{ 'https://graph.facebook.com/v23.0/' + ($env.META_AD_ACCOUNT_ID.startsWith('act_') ? $env.META_AD_ACCOUNT_ID : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}";
 
 const fields = [
   "campaign_id",
@@ -74,12 +74,26 @@ const untilStr = fmt(today);
 console.log(\`[FGA Ads incremental] Buscando de \${sinceStr} ate \${untilStr}\`);
 return [{ json: { since: sinceStr, until: untilStr, mode: 'incremental' } }];`;
 
+const calculateSmoke = `const SMOKE_DAYS = Math.min(2, Math.max(1, Number($env.META_ADS_SMOKE_DAYS || 1)));
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+const since = new Date(today.getTime() - (SMOKE_DAYS - 1) * 24 * 60 * 60 * 1000);
+const fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+return [{ json: { since: fmt(since), until: fmt(today), mode: 'smoke_manual', smoke: true } }];`;
+
+const tagSmokeCode = `const persist = String($env.META_ADS_SMOKE_PERSIST || 'false').toLowerCase() === 'true';
+return items.map(item => ({ json: { ...item.json, _norwyn_mode: 'smoke_manual', _norwyn_smoke_persist: persist } }));`;
+
 const paginationCode = `let allData = [];
 const maxPages = Number($env.META_ADS_MAX_PAGES || 100);
 
 for (const item of items) {
   const response = item.json;
-  let batchData = Array.isArray(response.data) ? [...response.data] : [];
+  const executionContext = {
+    _norwyn_mode: response._norwyn_mode || null,
+    _norwyn_smoke_persist: response._norwyn_smoke_persist === true,
+  };
+  let batchData = Array.isArray(response.data) ? response.data.map(row => ({ ...row, ...executionContext })) : [];
   let nextUrl = response.paging?.next || null;
   let pageCount = 1;
 
@@ -95,7 +109,7 @@ for (const item of items) {
     }
 
     const pageData = pageResp.data ?? pageResp;
-    batchData = batchData.concat(Array.isArray(pageData.data) ? pageData.data : []);
+    batchData = batchData.concat(Array.isArray(pageData.data) ? pageData.data.map(row => ({ ...row, ...executionContext })) : []);
     nextUrl = pageData.paging?.next || null;
     await new Promise(resolve => setTimeout(resolve, 300));
   }
@@ -115,12 +129,16 @@ const cache = new Map();
 
 let landings = [];
 if (supabaseUrl && serviceKey && tenantId) {
-  const response = await $http.request({
-    method: 'GET',
-    url: supabaseUrl + '/rest/v1/norwyn_landing_registry?select=landing_key,campaign_key,url,product_id,metadata&tenant_id=eq.' + encodeURIComponent(tenantId),
-    headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey },
-  });
-  landings = response.data ?? response ?? [];
+  try {
+    const response = await $http.request({
+      method: 'GET',
+      url: supabaseUrl + '/rest/v1/norwyn_landing_registry?select=landing_key,campaign_key,url,product_id,metadata&tenant_id=eq.' + encodeURIComponent(tenantId),
+      headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey },
+    });
+    landings = response.data ?? response ?? [];
+  } catch (error) {
+    console.log('[FGA Ads] Registry de LP indisponivel; coleta continua sem resolver landing_key.');
+  }
 }
 
 function firstUrl(creative) {
@@ -154,7 +172,7 @@ for (const item of items) {
       const response = await $http.request({
         method: 'GET',
         url: 'https://graph.facebook.com/v23.0/' + encodeURIComponent(adId),
-        qs: { fields: 'id,name,creative{id,name,thumbnail_url,image_url,object_url,url_tags,object_story_spec,asset_feed_spec}', access_token: token },
+        qs: { fields: 'id,name,effective_status,creative{id,name,thumbnail_url,image_url,object_url,url_tags,object_story_spec,asset_feed_spec}', access_token: token },
       });
       cache.set(adId, response.data ?? response ?? {});
     } catch (error) {
@@ -164,6 +182,7 @@ for (const item of items) {
   }
   const ad = cache.get(adId);
   const creative = ad?.creative || {};
+  row.effective_status = ad?.effective_status || row.effective_status || null;
   row.creative_id = creative.id || null;
   row.creative_name = creative.name || null;
   row.thumbnail_url = creative.thumbnail_url || creative.image_url || null;
@@ -224,7 +243,8 @@ return items.map(item => {
   const conjunto = String(d.adset_name || '').trim();
   const anuncio = String(d.ad_name || '').trim();
   const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();
-  const leads = actionValue(d.actions, leadTypes);
+  const leadsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_lead', 'lead', 'omni_lead', 'onsite_conversion.lead_grouped']);
+  const leads = leadsMetric.value;
   const linkClicksMetric = canonicalAction(d.actions, ['link_click']);
   const landingPageViewsMetric = canonicalAction(d.actions, ['landing_page_view', 'omni_landing_page_view']);
   const initiateCheckoutsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);
@@ -293,28 +313,39 @@ return items.map(item => {
       performance_score: Math.round(performance_score * 100) / 100,
       origem: 'n8n_meta_ads',
       row_key: rowKey,
-      raw_payload: { ...d, _norwyn_foundation: { collector_version: 'v9', action_semantics: 'canonical_alias_priority', action_sources: { link_clicks: linkClicksMetric.action_type, landing_page_views: landingPageViewsMetric.action_type, initiate_checkouts: initiateCheckoutsMetric.action_type, purchases: purchasesMetric.action_type, purchase_value: purchaseValueMetric.action_type }, creative: d._creative_enrichment || null, landing: d._landing_resolution || null } },
+      raw_payload: { ...d, _norwyn_foundation: { collector_version: 'v9', baseline: 'Instagram Ads Daily Collector_V3', action_semantics: 'canonical_alias_priority', action_sources: { leads: leadsMetric.action_type, link_clicks: linkClicksMetric.action_type, landing_page_views: landingPageViewsMetric.action_type, initiate_checkouts: initiateCheckoutsMetric.action_type, purchases: purchasesMetric.action_type, purchase_value: purchaseValueMetric.action_type }, idempotency: { persisted_row_key: 'date|campaign_name|adset_name|ad_name', candidate_id_key: [dataRef, d.campaign_id, d.adset_id, d.ad_id].join('|') }, creative: d._creative_enrichment || null, landing: d._landing_resolution || null } },
       imported_at: new Date().toISOString()
     }
   };
 });`;
 
 const batchCode = `const batchSize = Number($env.SUPABASE_UPSERT_BATCH_SIZE || 50);
+const uniqueMap = new Map();
+
+for (const item of items) {
+  const row = item.json;
+  if (!row.row_key) throw new Error('Registro sem row_key.');
+  uniqueMap.set(row.row_key, row);
+}
+
+const uniqueRows = Array.from(uniqueMap.values());
 const batches = [];
 
-for (let index = 0; index < items.length; index += batchSize) {
+for (let index = 0; index < uniqueRows.length; index += batchSize) {
   batches.push({
     json: {
-      rows: items.slice(index, index + batchSize).map(item => item.json),
+      rows: uniqueRows.slice(index, index + batchSize),
       batch_start: index + 1,
-      batch_end: Math.min(index + batchSize, items.length),
-      batch_size: Math.min(batchSize, items.length - index),
-      total_items: items.length,
+      batch_end: Math.min(index + batchSize, uniqueRows.length),
+      batch_size: Math.min(batchSize, uniqueRows.length - index),
+      total_items: uniqueRows.length,
+      original_items: items.length,
+      removed_duplicates: items.length - uniqueRows.length,
     }
   });
 }
 
-console.log(\`[FGA Ads] Preparados \${batches.length} lote(s) para upsert. Total: \${items.length} registro(s).\`);
+console.log(\`[FGA Ads] Preparados \${batches.length} lote(s). Original: \${items.length}. Unicos: \${uniqueRows.length}.\`);
 return batches;`;
 
 const workflow = {
@@ -334,6 +365,8 @@ const workflow = {
         ],
       },
     }),
+    node("manual-smoke", "Executar Smoke Manual", "n8n-nodes-base.manualTrigger", 1, [-4240, -160]),
+    node("calc-smoke", "Calcular Smoke 1-2 dias", "n8n-nodes-base.code", 2, [-4000, -160], { jsCode: calculateSmoke }),
     node("calc-incremental", "Calcular Incremental", "n8n-nodes-base.code", 2, [-4000, 160], { jsCode: calculateIncremental }),
     node("meta-backfill", "Meta Ads API - Backfill 2026", "n8n-nodes-base.httpRequest", 4.2, [-3760, 560], {
       url: metaUrl,
@@ -349,7 +382,7 @@ const workflow = {
         ],
       },
       options: {},
-    }),
+    }, { retryOnFail: true, maxTries: 3, waitBetweenTries: 1500 }),
     node("meta-incremental", "Meta Ads API - Incremental", "n8n-nodes-base.httpRequest", 4.2, [-3760, 160], {
       url: metaUrl,
       sendQuery: true,
@@ -364,7 +397,21 @@ const workflow = {
         ],
       },
       options: {},
-    }),
+    }, { retryOnFail: true, maxTries: 3, waitBetweenTries: 1500 }),
+    node("meta-smoke", "Meta Ads API - Smoke", "n8n-nodes-base.httpRequest", 4.2, [-3760, -160], {
+      url: metaUrl,
+      sendQuery: true,
+      queryParameters: { parameters: [
+        { name: "fields", value: fields },
+        { name: "level", value: "ad" },
+        { name: "time_range", value: "={{ JSON.stringify({ since: $json.since, until: $json.until }) }}" },
+        { name: "time_increment", value: "1" },
+        { name: "limit", value: "500" },
+        { name: "access_token", value: "={{ $env.META_ADS_ACCESS_TOKEN }}" },
+      ] },
+      options: {},
+    }, { retryOnFail: true, maxTries: 3, waitBetweenTries: 1500 }),
+    node("tag-smoke", "Marcar Smoke Dry Run", "n8n-nodes-base.code", 2, [-3600, -160], { jsCode: tagSmokeCode }),
     node("pagination", "Tratar Paginacao", "n8n-nodes-base.code", 2, [-3480, 360], { jsCode: paginationCode }),
     node("enrichment", "Enriquecer Criativos e Destinos", "n8n-nodes-base.code", 2, [-3340, 360], { jsCode: enrichmentCode }),
     node("transform", "Normalizar para Supabase", "n8n-nodes-base.code", 2, [-3200, 360], { jsCode: transformCode }),
@@ -395,6 +442,19 @@ const workflow = {
       },
       options: {},
     }),
+    node("persist-check", "Persistir coleta?", "n8n-nodes-base.if", 2.2, [-2780, 280], {
+      conditions: {
+        options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
+        conditions: [{
+          id: "persist_collection",
+          leftValue: "={{ $json.raw_payload?._norwyn_mode !== 'smoke_manual' || $json.raw_payload?._norwyn_smoke_persist === true }}",
+          rightValue: true,
+          operator: { type: "boolean", operation: "equals", singleValue: true },
+        }],
+        combinator: "and",
+      },
+      options: {},
+    }),
     node("batch", "Montar Lotes Supabase", "n8n-nodes-base.code", 2, [-2640, 280], { jsCode: batchCode }, {
       notes: "Agrupa registros para evitar timeout no Supabase/n8n. Ajuste SUPABASE_UPSERT_BATCH_SIZE se precisar; padrao 50.",
     }),
@@ -417,10 +477,17 @@ const workflow = {
         timeout: 120000,
       },
     }, {
+      retryOnFail: true,
+      maxTries: 3,
+      waitBetweenTries: 1500,
       notes: "Usa REST upsert em lote para atualizar linhas existentes por tenant_id,row_key. Nao exponha SUPABASE_SERVICE_ROLE_KEY fora do n8n.",
     }),
     node("discarded", "Log Descartados", "n8n-nodes-base.code", 2, [-2640, 520], {
       jsCode: "const count = items.length;\nconsole.log(`[FGA Ads] ${count} registro(s) descartado(s).`);\nreturn [{ json: { discarded_count: count, timestamp: new Date().toISOString() } }];",
+    }),
+    node("smoke-summary", "Resumo Smoke sem Persistir", "n8n-nodes-base.code", 2, [-2500, 440], {
+      jsCode: "console.log(`[FGA Ads smoke] ${items.length} registro(s) normalizados; nenhum upsert executado.`); return items;",
+      notes: "Dry-run por padrão. Defina META_ADS_SMOKE_PERSIST=true somente após validar a comparação.",
     }),
   ],
   pinData: {},
@@ -428,16 +495,26 @@ const workflow = {
     "Executar Backfill 2026": { main: [[{ node: "Calcular Periodo 2026", type: "main", index: 0 }]] },
     "Calcular Periodo 2026": { main: [[{ node: "Meta Ads API - Backfill 2026", type: "main", index: 0 }]] },
     "20h30 Daily": { main: [[{ node: "Calcular Incremental", type: "main", index: 0 }]] },
+    "Executar Smoke Manual": { main: [[{ node: "Calcular Smoke 1-2 dias", type: "main", index: 0 }]] },
+    "Calcular Smoke 1-2 dias": { main: [[{ node: "Meta Ads API - Smoke", type: "main", index: 0 }]] },
     "Calcular Incremental": { main: [[{ node: "Meta Ads API - Incremental", type: "main", index: 0 }]] },
     "Meta Ads API - Backfill 2026": { main: [[{ node: "Tratar Paginacao", type: "main", index: 0 }]] },
     "Meta Ads API - Incremental": { main: [[{ node: "Tratar Paginacao", type: "main", index: 0 }]] },
+    "Meta Ads API - Smoke": { main: [[{ node: "Marcar Smoke Dry Run", type: "main", index: 0 }]] },
+    "Marcar Smoke Dry Run": { main: [[{ node: "Tratar Paginacao", type: "main", index: 0 }]] },
     "Tratar Paginacao": { main: [[{ node: "Enriquecer Criativos e Destinos", type: "main", index: 0 }]] },
     "Enriquecer Criativos e Destinos": { main: [[{ node: "Normalizar para Supabase", type: "main", index: 0 }]] },
     "Normalizar para Supabase": { main: [[{ node: "Registro valido?", type: "main", index: 0 }]] },
     "Registro valido?": {
       main: [
-        [{ node: "Montar Lotes Supabase", type: "main", index: 0 }],
+        [{ node: "Persistir coleta?", type: "main", index: 0 }],
         [{ node: "Log Descartados", type: "main", index: 0 }],
+      ],
+    },
+    "Persistir coleta?": {
+      main: [
+        [{ node: "Montar Lotes Supabase", type: "main", index: 0 }],
+        [{ node: "Resumo Smoke sem Persistir", type: "main", index: 0 }],
       ],
     },
     "Montar Lotes Supabase": { main: [[{ node: "Upsert Supabase Ads", type: "main", index: 0 }]] },

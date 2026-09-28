@@ -48,6 +48,30 @@
       }
     },
     {
+      "id": "manual-smoke",
+      "name": "Executar Smoke Manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -4240,
+        -160
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "calc-smoke",
+      "name": "Calcular Smoke 1-2 dias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4000,
+        -160
+      ],
+      "parameters": {
+        "jsCode": "const SMOKE_DAYS = Math.min(2, Math.max(1, Number($env.META_ADS_SMOKE_DAYS || 1)));\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst since = new Date(today.getTime() - (SMOKE_DAYS - 1) * 24 * 60 * 60 * 1000);\nconst fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nreturn [{ json: { since: fmt(since), until: fmt(today), mode: 'smoke_manual', smoke: true } }];"
+      }
+    },
+    {
       "id": "calc-incremental",
       "name": "Calcular Incremental",
       "type": "n8n-nodes-base.code",
@@ -70,7 +94,7 @@
         560
       ],
       "parameters": {
-        "url": "={{ 'https://graph.facebook.com/v23.0/' + (($env.META_AD_ACCOUNT_ID || 'act_3360327820914673').startsWith('act_') ? ($env.META_AD_ACCOUNT_ID || 'act_3360327820914673') : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
+        "url": "={{ 'https://graph.facebook.com/v23.0/' + ($env.META_AD_ACCOUNT_ID.startsWith('act_') ? $env.META_AD_ACCOUNT_ID : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -101,7 +125,10 @@
           ]
         },
         "options": {}
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
     },
     {
       "id": "meta-incremental",
@@ -113,7 +140,7 @@
         160
       ],
       "parameters": {
-        "url": "={{ 'https://graph.facebook.com/v23.0/' + (($env.META_AD_ACCOUNT_ID || 'act_3360327820914673').startsWith('act_') ? ($env.META_AD_ACCOUNT_ID || 'act_3360327820914673') : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
+        "url": "={{ 'https://graph.facebook.com/v23.0/' + ($env.META_AD_ACCOUNT_ID.startsWith('act_') ? $env.META_AD_ACCOUNT_ID : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -144,6 +171,68 @@
           ]
         },
         "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "meta-smoke",
+      "name": "Meta Ads API - Smoke",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3760,
+        -160
+      ],
+      "parameters": {
+        "url": "={{ 'https://graph.facebook.com/v23.0/' + ($env.META_AD_ACCOUNT_ID.startsWith('act_') ? $env.META_AD_ACCOUNT_ID : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,reach,clicks,ctr,cpc,cpm,frequency,spend,objective,date_start,date_stop,actions,action_values,cost_per_action_type,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
+            },
+            {
+              "name": "level",
+              "value": "ad"
+            },
+            {
+              "name": "time_range",
+              "value": "={{ JSON.stringify({ since: $json.since, until: $json.until }) }}"
+            },
+            {
+              "name": "time_increment",
+              "value": "1"
+            },
+            {
+              "name": "limit",
+              "value": "500"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500
+    },
+    {
+      "id": "tag-smoke",
+      "name": "Marcar Smoke Dry Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3600,
+        -160
+      ],
+      "parameters": {
+        "jsCode": "const persist = String($env.META_ADS_SMOKE_PERSIST || 'false').toLowerCase() === 'true';\nreturn items.map(item => ({ json: { ...item.json, _norwyn_mode: 'smoke_manual', _norwyn_smoke_persist: persist } }));"
       }
     },
     {
@@ -156,7 +245,7 @@
         360
       ],
       "parameters": {
-        "jsCode": "let allData = [];\nconst maxPages = Number($env.META_ADS_MAX_PAGES || 100);\n\nfor (const item of items) {\n  const response = item.json;\n  let batchData = Array.isArray(response.data) ? [...response.data] : [];\n  let nextUrl = response.paging?.next || null;\n  let pageCount = 1;\n\n  while (nextUrl && pageCount < maxPages) {\n    pageCount++;\n    console.log(`[FGA Ads] Pagina ${pageCount}...`);\n\n    let pageResp;\n    try {\n      pageResp = await $http.request({ method: 'GET', url: nextUrl });\n    } catch (error) {\n      throw new Error(`Falha ao buscar pagina ${pageCount} da Meta Ads API: ${error.message}`);\n    }\n\n    const pageData = pageResp.data ?? pageResp;\n    batchData = batchData.concat(Array.isArray(pageData.data) ? pageData.data : []);\n    nextUrl = pageData.paging?.next || null;\n    await new Promise(resolve => setTimeout(resolve, 300));\n  }\n\n  allData = allData.concat(batchData);\n  console.log(`[FGA Ads] Lote coletado: ${batchData.length} registros em ${pageCount} pagina(s).`);\n}\n\nconsole.log(`[FGA Ads] Total coletado: ${allData.length} registros.`);\nreturn allData.map(row => ({ json: row }));"
+        "jsCode": "let allData = [];\nconst maxPages = Number($env.META_ADS_MAX_PAGES || 100);\n\nfor (const item of items) {\n  const response = item.json;\n  const executionContext = {\n    _norwyn_mode: response._norwyn_mode || null,\n    _norwyn_smoke_persist: response._norwyn_smoke_persist === true,\n  };\n  let batchData = Array.isArray(response.data) ? response.data.map(row => ({ ...row, ...executionContext })) : [];\n  let nextUrl = response.paging?.next || null;\n  let pageCount = 1;\n\n  while (nextUrl && pageCount < maxPages) {\n    pageCount++;\n    console.log(`[FGA Ads] Pagina ${pageCount}...`);\n\n    let pageResp;\n    try {\n      pageResp = await $http.request({ method: 'GET', url: nextUrl });\n    } catch (error) {\n      throw new Error(`Falha ao buscar pagina ${pageCount} da Meta Ads API: ${error.message}`);\n    }\n\n    const pageData = pageResp.data ?? pageResp;\n    batchData = batchData.concat(Array.isArray(pageData.data) ? pageData.data.map(row => ({ ...row, ...executionContext })) : []);\n    nextUrl = pageData.paging?.next || null;\n    await new Promise(resolve => setTimeout(resolve, 300));\n  }\n\n  allData = allData.concat(batchData);\n  console.log(`[FGA Ads] Lote coletado: ${batchData.length} registros em ${pageCount} pagina(s).`);\n}\n\nconsole.log(`[FGA Ads] Total coletado: ${allData.length} registros.`);\nreturn allData.map(row => ({ json: row }));"
       }
     },
     {
@@ -169,7 +258,7 @@
         360
       ],
       "parameters": {
-        "jsCode": "const token = String($env.META_ADS_ACCESS_TOKEN || '').trim();\nconst supabaseUrl = String($env.SUPABASE_URL || '').replace(/\\/$/, '');\nconst serviceKey = String($env.SUPABASE_SERVICE_ROLE_KEY || '').trim();\nconst tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();\nconst cache = new Map();\n\nlet landings = [];\nif (supabaseUrl && serviceKey && tenantId) {\n  const response = await $http.request({\n    method: 'GET',\n    url: supabaseUrl + '/rest/v1/norwyn_landing_registry?select=landing_key,campaign_key,url,product_id,metadata&tenant_id=eq.' + encodeURIComponent(tenantId),\n    headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey },\n  });\n  landings = response.data ?? response ?? [];\n}\n\nfunction firstUrl(creative) {\n  const spec = creative?.object_story_spec || {};\n  const candidates = [spec.link_data?.link, spec.video_data?.call_to_action?.value?.link, creative?.object_url];\n  const feedLinks = creative?.asset_feed_spec?.link_urls || [];\n  for (const entry of feedLinks) candidates.push(entry?.website_url || entry?.deeplink_url);\n  return candidates.find(value => typeof value === 'string' && /^https?:\\/\\//i.test(value)) || null;\n}\n\nfunction resolveLanding(destinationUrl, urlTags) {\n  let destinationHost = null;\n  try { destinationHost = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch {}\n  for (const landing of landings) {\n    let landingHost = null;\n    try { landingHost = new URL(landing.url).hostname.toLowerCase(); } catch {}\n    if (destinationHost && landingHost === destinationHost) return { landing_key: landing.landing_key, confidence: 'high', reason: 'destination_domain_exact' };\n    if (urlTags && (urlTags.includes('landing_key=' + landing.landing_key) || urlTags.includes('utm_campaign=' + landing.campaign_key))) {\n      return { landing_key: landing.landing_key, confidence: 'high', reason: 'url_tags_exact' };\n    }\n  }\n  return { landing_key: null, confidence: 'unresolved', reason: 'no_explicit_destination_match' };\n}\n\nfor (const item of items) {\n  const row = item.json;\n  const adId = String(row.ad_id || '').trim();\n  if (!adId || !token) continue;\n  if (!cache.has(adId)) {\n    try {\n      const response = await $http.request({\n        method: 'GET',\n        url: 'https://graph.facebook.com/v23.0/' + encodeURIComponent(adId),\n        qs: { fields: 'id,name,creative{id,name,thumbnail_url,image_url,object_url,url_tags,object_story_spec,asset_feed_spec}', access_token: token },\n      });\n      cache.set(adId, response.data ?? response ?? {});\n    } catch (error) {\n      cache.set(adId, { _enrichment_error: String(error.message || error).slice(0, 300) });\n    }\n    await new Promise(resolve => setTimeout(resolve, 120));\n  }\n  const ad = cache.get(adId);\n  const creative = ad?.creative || {};\n  row.creative_id = creative.id || null;\n  row.creative_name = creative.name || null;\n  row.thumbnail_url = creative.thumbnail_url || creative.image_url || null;\n  row.preview_url = null;\n  row.destination_url = firstUrl(creative);\n  row.destination_domain = row.destination_url ? new URL(row.destination_url).hostname.toLowerCase() : null;\n  row.url_tags = creative.url_tags || null;\n  row._landing_resolution = resolveLanding(row.destination_url, row.url_tags);\n  row.landing_key = row._landing_resolution.landing_key;\n  row._creative_enrichment = creative.id ? { confidence: 'high', source: 'meta_ad_creative' } : { confidence: 'unresolved', source: 'meta_ad_creative', error: ad?._enrichment_error || null };\n}\n\nreturn items;"
+        "jsCode": "const token = String($env.META_ADS_ACCESS_TOKEN || '').trim();\nconst supabaseUrl = String($env.SUPABASE_URL || '').replace(/\\/$/, '');\nconst serviceKey = String($env.SUPABASE_SERVICE_ROLE_KEY || '').trim();\nconst tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();\nconst cache = new Map();\n\nlet landings = [];\nif (supabaseUrl && serviceKey && tenantId) {\n  try {\n    const response = await $http.request({\n      method: 'GET',\n      url: supabaseUrl + '/rest/v1/norwyn_landing_registry?select=landing_key,campaign_key,url,product_id,metadata&tenant_id=eq.' + encodeURIComponent(tenantId),\n      headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey },\n    });\n    landings = response.data ?? response ?? [];\n  } catch (error) {\n    console.log('[FGA Ads] Registry de LP indisponivel; coleta continua sem resolver landing_key.');\n  }\n}\n\nfunction firstUrl(creative) {\n  const spec = creative?.object_story_spec || {};\n  const candidates = [spec.link_data?.link, spec.video_data?.call_to_action?.value?.link, creative?.object_url];\n  const feedLinks = creative?.asset_feed_spec?.link_urls || [];\n  for (const entry of feedLinks) candidates.push(entry?.website_url || entry?.deeplink_url);\n  return candidates.find(value => typeof value === 'string' && /^https?:\\/\\//i.test(value)) || null;\n}\n\nfunction resolveLanding(destinationUrl, urlTags) {\n  let destinationHost = null;\n  try { destinationHost = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch {}\n  for (const landing of landings) {\n    let landingHost = null;\n    try { landingHost = new URL(landing.url).hostname.toLowerCase(); } catch {}\n    if (destinationHost && landingHost === destinationHost) return { landing_key: landing.landing_key, confidence: 'high', reason: 'destination_domain_exact' };\n    if (urlTags && (urlTags.includes('landing_key=' + landing.landing_key) || urlTags.includes('utm_campaign=' + landing.campaign_key))) {\n      return { landing_key: landing.landing_key, confidence: 'high', reason: 'url_tags_exact' };\n    }\n  }\n  return { landing_key: null, confidence: 'unresolved', reason: 'no_explicit_destination_match' };\n}\n\nfor (const item of items) {\n  const row = item.json;\n  const adId = String(row.ad_id || '').trim();\n  if (!adId || !token) continue;\n  if (!cache.has(adId)) {\n    try {\n      const response = await $http.request({\n        method: 'GET',\n        url: 'https://graph.facebook.com/v23.0/' + encodeURIComponent(adId),\n        qs: { fields: 'id,name,effective_status,creative{id,name,thumbnail_url,image_url,object_url,url_tags,object_story_spec,asset_feed_spec}', access_token: token },\n      });\n      cache.set(adId, response.data ?? response ?? {});\n    } catch (error) {\n      cache.set(adId, { _enrichment_error: String(error.message || error).slice(0, 300) });\n    }\n    await new Promise(resolve => setTimeout(resolve, 120));\n  }\n  const ad = cache.get(adId);\n  const creative = ad?.creative || {};\n  row.effective_status = ad?.effective_status || row.effective_status || null;\n  row.creative_id = creative.id || null;\n  row.creative_name = creative.name || null;\n  row.thumbnail_url = creative.thumbnail_url || creative.image_url || null;\n  row.preview_url = null;\n  row.destination_url = firstUrl(creative);\n  row.destination_domain = row.destination_url ? new URL(row.destination_url).hostname.toLowerCase() : null;\n  row.url_tags = creative.url_tags || null;\n  row._landing_resolution = resolveLanding(row.destination_url, row.url_tags);\n  row.landing_key = row._landing_resolution.landing_key;\n  row._creative_enrichment = creative.id ? { confidence: 'high', source: 'meta_ad_creative' } : { confidence: 'unresolved', source: 'meta_ad_creative', error: ad?._enrichment_error || null };\n}\n\nreturn items;"
       }
     },
     {
@@ -182,7 +271,7 @@
         360
       ],
       "parameters": {
-        "jsCode": "function actionValue(actions, types) {\n  if (!Array.isArray(actions)) return 0;\n  return actions\n    .filter(action => types.has(String(action.action_type || '').toLowerCase()))\n    .reduce((sum, action) => sum + Number(action.value || 0), 0);\n}\n\nfunction canonicalAction(actions, priority) {\n  if (!Array.isArray(actions)) return { value: 0, action_type: null };\n  for (const actionType of priority) {\n    const found = actions.find(action => String(action.action_type || '').toLowerCase() === actionType);\n    if (found) return { value: Number(found.value || 0), action_type: actionType };\n  }\n  return { value: 0, action_type: null };\n}\n\nconst leadTypes = new Set([\n  'lead',\n  'onsite_conversion.lead_grouped',\n  'offsite_conversion.fb_pixel_lead',\n  'omni_lead',\n]);\nconst videoViewTypes = new Set(['video_view']);\nconst thruplayTypes = new Set(['video_view', 'thruplay']);\n\nreturn items.map(item => {\n  const d = item.json;\n  const ctr = Number(d.ctr || 0);\n  const cpc = Number(d.cpc || 0);\n  const cpm = Number(d.cpm || 0);\n  const freq = Number(d.frequency || 0);\n  const spend = Number(d.spend || 0);\n  const clicks = Number(d.clicks || 0);\n  const impressions = Number(d.impressions || 0);\n  const reach = Number(d.reach || 0);\n  const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];\n  const tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();\n\n  if (!tenantId) {\n    throw new Error('Configure PLATAFORMA_TENANT_ID no ambiente do n8n.');\n  }\n\n  const campanha = String(d.campaign_name || '').trim();\n  const conjunto = String(d.adset_name || '').trim();\n  const anuncio = String(d.ad_name || '').trim();\n  const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();\n  const leads = actionValue(d.actions, leadTypes);\n  const linkClicksMetric = canonicalAction(d.actions, ['link_click']);\n  const landingPageViewsMetric = canonicalAction(d.actions, ['landing_page_view', 'omni_landing_page_view']);\n  const initiateCheckoutsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);\n  const purchasesMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const purchaseValueMetric = canonicalAction(d.action_values, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const conversoes = purchasesMetric.value;\n  const linkClicks = linkClicksMetric.value;\n  const landingPageViews = landingPageViewsMetric.value;\n  const initiateCheckouts = initiateCheckoutsMetric.value;\n\n  let performance_status = 'OK';\n  if (cpm > 50 && ctr < 1) performance_status = 'PUBLICO RUIM';\n  else if (freq > 3) performance_status = 'SATURADO';\n  else if (ctr < 1) performance_status = 'CTR BAIXO';\n\n  const performance_score = (ctr * 40) + ((clicks > 0 ? ctr : 0) * 40) - (cpc * 10) - (freq * 10);\n  const rowKey = [dataRef, campanha, conjunto, anuncio].join('|');\n\n  return {\n    json: {\n      tenant_id: tenantId,\n      data_referencia: dataRef,\n      campanha,\n      conjunto: conjunto || null,\n      anuncio,\n      status,\n      objetivo: d.objective || null,\n      alcance: Math.round(reach),\n      impressoes: Math.round(impressions),\n      cliques: Math.round(clicks),\n      ctr,\n      cpc,\n      cpm,\n      frequencia: freq,\n      valor_gasto: spend,\n      conversoes: Math.round(conversoes),\n      leads: Math.round(leads),\n      campaign_id: d.campaign_id || null,\n      adset_id: d.adset_id || null,\n      ad_id: d.ad_id || null,\n      creative_id: d.creative_id || null,\n      creative_name: d.creative_name || null,\n      placement: d.placement || null,\n      publisher_platform: d.publisher_platform || null,\n      device_platform: d.device_platform || null,\n      link_clicks: Math.round(linkClicks),\n      landing_page_views: Math.round(landingPageViews),\n      initiate_checkouts: Math.round(initiateCheckouts),\n      meta_purchases: Math.round(conversoes),\n      meta_purchase_value: purchaseValueMetric.action_type ? purchaseValueMetric.value : null,\n      video_views: Math.round(actionValue(d.actions, videoViewTypes)),\n      video_plays_3s: Math.round(actionValue(d.actions, videoViewTypes)),\n      video_p25: Math.round(actionValue(d.video_p25_watched_actions, videoViewTypes)),\n      video_p50: Math.round(actionValue(d.video_p50_watched_actions, videoViewTypes)),\n      video_p75: Math.round(actionValue(d.video_p75_watched_actions, videoViewTypes)),\n      video_p95: Math.round(actionValue(d.video_p95_watched_actions, videoViewTypes)),\n      video_p100: Math.round(actionValue(d.video_p100_watched_actions, videoViewTypes)),\n      thruplays: Math.round(actionValue(d.video_thruplay_watched_actions, thruplayTypes)),\n      preview_url: d.preview_url || null,\n      thumbnail_url: d.thumbnail_url || null,\n      destination_url: d.destination_url || null,\n      destination_domain: d.destination_domain || null,\n      url_tags: d.url_tags || null,\n      landing_key: d.landing_key || null,\n      performance_status,\n      performance_score: Math.round(performance_score * 100) / 100,\n      origem: 'n8n_meta_ads',\n      row_key: rowKey,\n      raw_payload: { ...d, _norwyn_foundation: { collector_version: 'v9', action_semantics: 'canonical_alias_priority', action_sources: { link_clicks: linkClicksMetric.action_type, landing_page_views: landingPageViewsMetric.action_type, initiate_checkouts: initiateCheckoutsMetric.action_type, purchases: purchasesMetric.action_type, purchase_value: purchaseValueMetric.action_type }, creative: d._creative_enrichment || null, landing: d._landing_resolution || null } },\n      imported_at: new Date().toISOString()\n    }\n  };\n});"
+        "jsCode": "function actionValue(actions, types) {\n  if (!Array.isArray(actions)) return 0;\n  return actions\n    .filter(action => types.has(String(action.action_type || '').toLowerCase()))\n    .reduce((sum, action) => sum + Number(action.value || 0), 0);\n}\n\nfunction canonicalAction(actions, priority) {\n  if (!Array.isArray(actions)) return { value: 0, action_type: null };\n  for (const actionType of priority) {\n    const found = actions.find(action => String(action.action_type || '').toLowerCase() === actionType);\n    if (found) return { value: Number(found.value || 0), action_type: actionType };\n  }\n  return { value: 0, action_type: null };\n}\n\nconst leadTypes = new Set([\n  'lead',\n  'onsite_conversion.lead_grouped',\n  'offsite_conversion.fb_pixel_lead',\n  'omni_lead',\n]);\nconst videoViewTypes = new Set(['video_view']);\nconst thruplayTypes = new Set(['video_view', 'thruplay']);\n\nreturn items.map(item => {\n  const d = item.json;\n  const ctr = Number(d.ctr || 0);\n  const cpc = Number(d.cpc || 0);\n  const cpm = Number(d.cpm || 0);\n  const freq = Number(d.frequency || 0);\n  const spend = Number(d.spend || 0);\n  const clicks = Number(d.clicks || 0);\n  const impressions = Number(d.impressions || 0);\n  const reach = Number(d.reach || 0);\n  const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];\n  const tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();\n\n  if (!tenantId) {\n    throw new Error('Configure PLATAFORMA_TENANT_ID no ambiente do n8n.');\n  }\n\n  const campanha = String(d.campaign_name || '').trim();\n  const conjunto = String(d.adset_name || '').trim();\n  const anuncio = String(d.ad_name || '').trim();\n  const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();\n  const leadsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_lead', 'lead', 'omni_lead', 'onsite_conversion.lead_grouped']);\n  const leads = leadsMetric.value;\n  const linkClicksMetric = canonicalAction(d.actions, ['link_click']);\n  const landingPageViewsMetric = canonicalAction(d.actions, ['landing_page_view', 'omni_landing_page_view']);\n  const initiateCheckoutsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);\n  const purchasesMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const purchaseValueMetric = canonicalAction(d.action_values, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const conversoes = purchasesMetric.value;\n  const linkClicks = linkClicksMetric.value;\n  const landingPageViews = landingPageViewsMetric.value;\n  const initiateCheckouts = initiateCheckoutsMetric.value;\n\n  let performance_status = 'OK';\n  if (cpm > 50 && ctr < 1) performance_status = 'PUBLICO RUIM';\n  else if (freq > 3) performance_status = 'SATURADO';\n  else if (ctr < 1) performance_status = 'CTR BAIXO';\n\n  const performance_score = (ctr * 40) + ((clicks > 0 ? ctr : 0) * 40) - (cpc * 10) - (freq * 10);\n  const rowKey = [dataRef, campanha, conjunto, anuncio].join('|');\n\n  return {\n    json: {\n      tenant_id: tenantId,\n      data_referencia: dataRef,\n      campanha,\n      conjunto: conjunto || null,\n      anuncio,\n      status,\n      objetivo: d.objective || null,\n      alcance: Math.round(reach),\n      impressoes: Math.round(impressions),\n      cliques: Math.round(clicks),\n      ctr,\n      cpc,\n      cpm,\n      frequencia: freq,\n      valor_gasto: spend,\n      conversoes: Math.round(conversoes),\n      leads: Math.round(leads),\n      campaign_id: d.campaign_id || null,\n      adset_id: d.adset_id || null,\n      ad_id: d.ad_id || null,\n      creative_id: d.creative_id || null,\n      creative_name: d.creative_name || null,\n      placement: d.placement || null,\n      publisher_platform: d.publisher_platform || null,\n      device_platform: d.device_platform || null,\n      link_clicks: Math.round(linkClicks),\n      landing_page_views: Math.round(landingPageViews),\n      initiate_checkouts: Math.round(initiateCheckouts),\n      meta_purchases: Math.round(conversoes),\n      meta_purchase_value: purchaseValueMetric.action_type ? purchaseValueMetric.value : null,\n      video_views: Math.round(actionValue(d.actions, videoViewTypes)),\n      video_plays_3s: Math.round(actionValue(d.actions, videoViewTypes)),\n      video_p25: Math.round(actionValue(d.video_p25_watched_actions, videoViewTypes)),\n      video_p50: Math.round(actionValue(d.video_p50_watched_actions, videoViewTypes)),\n      video_p75: Math.round(actionValue(d.video_p75_watched_actions, videoViewTypes)),\n      video_p95: Math.round(actionValue(d.video_p95_watched_actions, videoViewTypes)),\n      video_p100: Math.round(actionValue(d.video_p100_watched_actions, videoViewTypes)),\n      thruplays: Math.round(actionValue(d.video_thruplay_watched_actions, thruplayTypes)),\n      preview_url: d.preview_url || null,\n      thumbnail_url: d.thumbnail_url || null,\n      destination_url: d.destination_url || null,\n      destination_domain: d.destination_domain || null,\n      url_tags: d.url_tags || null,\n      landing_key: d.landing_key || null,\n      performance_status,\n      performance_score: Math.round(performance_score * 100) / 100,\n      origem: 'n8n_meta_ads',\n      row_key: rowKey,\n      raw_payload: { ...d, _norwyn_foundation: { collector_version: 'v9', baseline: 'Instagram Ads Daily Collector_V3', action_semantics: 'canonical_alias_priority', action_sources: { leads: leadsMetric.action_type, link_clicks: linkClicksMetric.action_type, landing_page_views: landingPageViewsMetric.action_type, initiate_checkouts: initiateCheckoutsMetric.action_type, purchases: purchasesMetric.action_type, purchase_value: purchaseValueMetric.action_type }, idempotency: { persisted_row_key: 'date|campaign_name|adset_name|ad_name', candidate_id_key: [dataRef, d.campaign_id, d.adset_id, d.ad_id].join('|') }, creative: d._creative_enrichment || null, landing: d._landing_resolution || null } },\n      imported_at: new Date().toISOString()\n    }\n  };\n});"
       }
     },
     {
@@ -239,6 +328,40 @@
       }
     },
     {
+      "id": "persist-check",
+      "name": "Persistir coleta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2780,
+        280
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "persist_collection",
+              "leftValue": "={{ $json.raw_payload?._norwyn_mode !== 'smoke_manual' || $json.raw_payload?._norwyn_smoke_persist === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
       "id": "batch",
       "name": "Montar Lotes Supabase",
       "type": "n8n-nodes-base.code",
@@ -248,7 +371,7 @@
         280
       ],
       "parameters": {
-        "jsCode": "const batchSize = Number($env.SUPABASE_UPSERT_BATCH_SIZE || 50);\nconst batches = [];\n\nfor (let index = 0; index < items.length; index += batchSize) {\n  batches.push({\n    json: {\n      rows: items.slice(index, index + batchSize).map(item => item.json),\n      batch_start: index + 1,\n      batch_end: Math.min(index + batchSize, items.length),\n      batch_size: Math.min(batchSize, items.length - index),\n      total_items: items.length,\n    }\n  });\n}\n\nconsole.log(`[FGA Ads] Preparados ${batches.length} lote(s) para upsert. Total: ${items.length} registro(s).`);\nreturn batches;"
+        "jsCode": "const batchSize = Number($env.SUPABASE_UPSERT_BATCH_SIZE || 50);\nconst uniqueMap = new Map();\n\nfor (const item of items) {\n  const row = item.json;\n  if (!row.row_key) throw new Error('Registro sem row_key.');\n  uniqueMap.set(row.row_key, row);\n}\n\nconst uniqueRows = Array.from(uniqueMap.values());\nconst batches = [];\n\nfor (let index = 0; index < uniqueRows.length; index += batchSize) {\n  batches.push({\n    json: {\n      rows: uniqueRows.slice(index, index + batchSize),\n      batch_start: index + 1,\n      batch_end: Math.min(index + batchSize, uniqueRows.length),\n      batch_size: Math.min(batchSize, uniqueRows.length - index),\n      total_items: uniqueRows.length,\n      original_items: items.length,\n      removed_duplicates: items.length - uniqueRows.length,\n    }\n  });\n}\n\nconsole.log(`[FGA Ads] Preparados ${batches.length} lote(s). Original: ${items.length}. Unicos: ${uniqueRows.length}.`);\nreturn batches;"
       },
       "notes": "Agrupa registros para evitar timeout no Supabase/n8n. Ajuste SUPABASE_UPSERT_BATCH_SIZE se precisar; padrao 50."
     },
@@ -292,6 +415,9 @@
           "timeout": 120000
         }
       },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1500,
       "notes": "Usa REST upsert em lote para atualizar linhas existentes por tenant_id,row_key. Nao exponha SUPABASE_SERVICE_ROLE_KEY fora do n8n."
     },
     {
@@ -305,6 +431,20 @@
       ],
       "parameters": {
         "jsCode": "const count = items.length;\nconsole.log(`[FGA Ads] ${count} registro(s) descartado(s).`);\nreturn [{ json: { discarded_count: count, timestamp: new Date().toISOString() } }];"
+      }
+    },
+    {
+      "id": "smoke-summary",
+      "name": "Resumo Smoke sem Persistir",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2500,
+        440
+      ],
+      "parameters": {
+        "jsCode": "console.log(`[FGA Ads smoke] ${items.length} registro(s) normalizados; nenhum upsert executado.`); return items;",
+        "notes": "Dry-run por padrão. Defina META_ADS_SMOKE_PERSIST=true somente após validar a comparação."
       }
     }
   ],
@@ -343,6 +483,28 @@
         ]
       ]
     },
+    "Executar Smoke Manual": {
+      "main": [
+        [
+          {
+            "node": "Calcular Smoke 1-2 dias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Smoke 1-2 dias": {
+      "main": [
+        [
+          {
+            "node": "Meta Ads API - Smoke",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Calcular Incremental": {
       "main": [
         [
@@ -366,6 +528,28 @@
       ]
     },
     "Meta Ads API - Incremental": {
+      "main": [
+        [
+          {
+            "node": "Tratar Paginacao",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Ads API - Smoke": {
+      "main": [
+        [
+          {
+            "node": "Marcar Smoke Dry Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Smoke Dry Run": {
       "main": [
         [
           {
@@ -413,7 +597,7 @@
       "main": [
         [
           {
-            "node": "Montar Lotes Supabase",
+            "node": "Persistir coleta?",
             "type": "main",
             "index": 0
           }
@@ -421,6 +605,24 @@
         [
           {
             "node": "Log Descartados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persistir coleta?": {
+      "main": [
+        [
+          {
+            "node": "Montar Lotes Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resumo Smoke sem Persistir",
             "type": "main",
             "index": 0
           }
