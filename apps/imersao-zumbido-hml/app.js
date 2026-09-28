@@ -3,6 +3,8 @@
 
   const tracking = window.norwyn;
   tracking.initialize();
+  const attributionBridge = window.NorwynHotmartBridge;
+  if (attributionBridge) void attributionBridge.initialize();
 
   document.querySelectorAll("[data-module-id]").forEach((item, index) => {
     const button = item.querySelector("button");
@@ -82,30 +84,59 @@
 
   document.querySelectorAll("[data-cta-id]").forEach((cta) => {
     ctaObserver.observe(cta);
-    cta.addEventListener("click", (event) => {
+    cta.addEventListener("click", async (event) => {
       const isCheckout = cta.dataset.destinationType === "checkout";
-      const destination = isCheckout ? tracking.trackedCheckoutUrl() : cta.getAttribute("href");
+      if (!isCheckout) {
+        tracking.track("cta_click", {
+          cta_id: cta.dataset.ctaId,
+          cta_text: cta.textContent.trim(),
+          section_id: cta.dataset.sectionId,
+          destination: cta.getAttribute("href"),
+          destination_type: cta.dataset.destinationType,
+        });
+        return;
+      }
+
+      event.preventDefault();
+      let destination = tracking.trackedCheckoutUrl();
+      let bridgeReason = "bridge_unavailable";
+      try {
+        const context = tracking.context();
+        const result = attributionBridge
+          ? await attributionBridge.prepare({
+              sessionId: context.session.id,
+              visitorId: context.visitorId,
+              firstTouch: context.firstTouch,
+              currentTouch: context.currentTouch,
+            })
+          : null;
+        if (result?.url && attributionBridge.isValid(result.url)) destination = result.url;
+        if (result?.sck) tracking.applyBridgeAttribution(result.sck);
+        bridgeReason = result?.reason || (result?.bridged ? "bridged" : "feature_disabled");
+      } catch {
+        destination = tracking.trackedCheckoutUrl();
+      }
+
       const ctaEvent = tracking.track("cta_click", {
         cta_id: cta.dataset.ctaId,
         cta_text: cta.textContent.trim(),
         section_id: cta.dataset.sectionId,
         destination,
         destination_type: cta.dataset.destinationType,
+        attribution_bridge: bridgeReason,
       });
-      if (isCheckout) {
-        event.preventDefault();
-        const checkoutEvent = tracking.track("checkout_click", {
-          cta_id: cta.dataset.ctaId,
-          checkout_url: destination,
-          hotmart_product_id: "B47092539B",
-          hotmart_offer_id: "lov69pen",
-        });
-        cta.href = destination;
-        Promise.race([
-          Promise.allSettled([ctaEvent, checkoutEvent]),
-          new Promise((resolve) => setTimeout(resolve, 600)),
-        ]).finally(() => location.assign(destination));
-      }
+      const checkoutEvent = tracking.track("checkout_click", {
+        cta_id: cta.dataset.ctaId,
+        checkout_url: destination,
+        hotmart_product_id: "B47092539B",
+        hotmart_offer_id: "lov69pen",
+        attribution_bridge: bridgeReason,
+      });
+      cta.href = destination;
+      Promise.race([
+        Promise.allSettled([ctaEvent, checkoutEvent]),
+        new Promise((resolve) => setTimeout(resolve, 450)),
+      ]).finally(() => location.assign(destination));
     });
   });
 

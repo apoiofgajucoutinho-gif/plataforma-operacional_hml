@@ -21,6 +21,8 @@ First touch is captured once per visitor and never overwritten. Current touch be
 
 The configured checkout is `https://pay.hotmart.com/B47092539B?off=lov69pen`. Supported campaign parameters are appended with `URLSearchParams`, preserving the existing Hotmart `off` parameter.
 
+The optional Attribution Bridge is controlled server-side by `HOTMART_ATTRIBUTION_BRIDGE`. It starts disabled and never blocks checkout: when disabled, unavailable, timed out, or invalid, the original checkout remains usable. Test traffic can use `traffic_type=test&bridge_test=1` for an isolated smoke that is excluded from public metrics. The opaque `nw_<hash>` key contains no PII and maps anonymous visitor/session identifiers in `growth_tracking_keys`.
+
 ## Official short links
 
 The campaign entry points are temporary redirects configured in `vercel.json`:

@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, rmSync } from "node:fs";
 rmSync("dist", { recursive: true, force: true });
 mkdirSync("dist", { recursive: true });
 
-for (const file of ["index.html", "styles.css", "norwyn-tracking.js", "app.js"]) {
+for (const file of ["index.html", "styles.css", "hotmart-attribution-bridge.js", "norwyn-tracking.js", "app.js"]) {
   cpSync(file, `dist/${file}`);
 }
 cpSync("imersao-zumbido", "dist/imersao-zumbido", { recursive: true });

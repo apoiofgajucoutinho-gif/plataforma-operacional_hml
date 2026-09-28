@@ -10,6 +10,7 @@
     firstTouch: "norwyn_first_touch_v1",
     once: "norwyn_tracking_once_v1",
   };
+  const memoryStorage = {};
   const config = {
     endpoint: "https://plataf-op-hml.vercel.app/api/norwyn/lp-events",
     pageId: "imersao_zumbido",
@@ -23,18 +24,23 @@
   };
 
   function uuid() {
-    return crypto.randomUUID ? crypto.randomUUID() : `nw_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    try {
+      return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `nw_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    } catch {
+      return `nw_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
   }
 
   function read(key, fallback) {
     try {
-      return JSON.parse(localStorage.getItem(key)) || fallback;
+      return JSON.parse(localStorage.getItem(key)) || memoryStorage[key] || fallback;
     } catch {
-      return fallback;
+      return memoryStorage[key] || fallback;
     }
   }
 
   function write(key, value) {
+    memoryStorage[key] = value;
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch {
@@ -162,6 +168,14 @@
     return url.toString();
   }
 
+  function applyBridgeAttribution(sck) {
+    if (typeof sck !== "string" || !/^nw_[A-Za-z0-9_-]{12,64}$/.test(sck)) return false;
+    const context = currentContext();
+    context.session.current_touch = { ...(context.session.current_touch || {}), sck };
+    write(STORAGE.session, context.session);
+    return true;
+  }
+
   function initialize() {
     const context = currentContext();
     if (context.isNewSession) track("session_start", {}, { once: true });
@@ -171,5 +185,5 @@
     }
   }
 
-  window.norwyn = { track, trackedCheckoutUrl, initialize, context: currentContext, config };
+  window.norwyn = { track, trackedCheckoutUrl, applyBridgeAttribution, initialize, context: currentContext, config };
 })();
