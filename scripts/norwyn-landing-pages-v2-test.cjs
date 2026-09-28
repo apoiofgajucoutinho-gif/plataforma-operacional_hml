@@ -39,6 +39,8 @@ for (const source of ["Instagram · Stories", "Instagram · Link da bio", "Whats
   assert.match(service, new RegExp(source), `missing official attribution source: ${source}`);
 }
 assert.match(service, /sessionShare: totalSessions \?/);
+assert.match(service, /eligibleSessionIds/);
+assert.match(service, /sessionOrigins/);
 assert.match(component, /% das sessões/);
 assert.doesNotMatch(component, /context\.attribution\.slice\(/, "official attribution rows must not be truncated");
 assert.doesNotMatch(service, /Math\.random\(/, "dashboard must not invent metrics");

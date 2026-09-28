@@ -158,6 +158,8 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number)
   const officialSources = (officialAttributionSourcesByLanding[landingKey] ?? []).filter((item) => item.active);
   const officialByName = new Map(officialSources.map((item) => [item.displayName, item]));
   const attributionMap = new Map<string, { source: string; campaign: string; sessions: Set<string>; checkoutClicks: number; sortOrder: number }>();
+  const eligibleSessionIds = new Set(rows.filter((row) => ["session_start", "page_view", "landing_view"].includes(row.event_name)).map((row) => row.session_id).filter(Boolean));
+  const sessionOrigins = new Map<string, { source: string; campaign: string; sortOrder: number; score: number }>();
 
   for (const item of officialSources) {
     attributionMap.set(`official:${item.sortOrder}`, {
@@ -169,21 +171,62 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number)
     });
   }
 
-  for (const row of rows) {
+  function originFor(row: any) {
     const source = humanOrigin(row.utm_source, row.utm_medium, row.utm_content);
     const official = officialByName.get(source);
     const campaign = official?.campaign ?? row.utm_campaign ?? row.campaign_key ?? "Sem campanha identificada";
     const key = official ? `official:${official.sortOrder}` : `extra:${source}::${campaign}`;
-    const item = attributionMap.get(key) ?? {
-      source,
-      campaign,
+    const sortOrder = official?.sortOrder ?? officialSources.length + attributionMap.size + 1;
+    return { source, campaign, key, sortOrder };
+  }
+
+  function ensureAttributionItem(origin: ReturnType<typeof originFor>) {
+    const item = attributionMap.get(origin.key) ?? {
+      source: origin.source,
+      campaign: origin.campaign,
       sessions: new Set<string>(),
       checkoutClicks: 0,
-      sortOrder: officialSources.length + attributionMap.size + 1,
+      sortOrder: origin.sortOrder,
     };
-    if (row.session_id) item.sessions.add(row.session_id);
-    if (row.event_name === "checkout_click") item.checkoutClicks += 1;
-    attributionMap.set(key, item);
+    attributionMap.set(origin.key, item);
+    return item;
+  }
+
+  for (const row of rows) {
+    if (!row.session_id || !eligibleSessionIds.has(row.session_id)) continue;
+    const origin = originFor(row);
+    const identified = origin.source !== "Direto / sem identificação";
+    const entryEvent = row.event_name === "session_start" ? 2 : ["page_view", "landing_view"].includes(row.event_name) ? 1 : 0;
+    const score = (identified ? 10 : 0) + entryEvent;
+    const current = sessionOrigins.get(row.session_id);
+    if (!current || score > current.score) {
+      sessionOrigins.set(row.session_id, { source: origin.source, campaign: origin.campaign, sortOrder: origin.sortOrder, score });
+    }
+  }
+
+  for (const [sessionId, sessionOrigin] of sessionOrigins) {
+    const official = officialByName.get(sessionOrigin.source);
+    const key = official ? `official:${official.sortOrder}` : `extra:${sessionOrigin.source}::${sessionOrigin.campaign}`;
+    ensureAttributionItem({ ...sessionOrigin, key }).sessions.add(sessionId);
+  }
+
+  for (const row of rows) {
+    if (row.event_name !== "checkout_click") continue;
+    let origin = originFor(row);
+    if (origin.source === "Direto / sem identificação" && row.session_id) {
+      const sessionOrigin = sessionOrigins.get(row.session_id);
+      if (sessionOrigin) {
+        const official = officialByName.get(sessionOrigin.source);
+        origin = {
+          source: sessionOrigin.source,
+          campaign: sessionOrigin.campaign,
+          key: official ? `official:${official.sortOrder}` : `extra:${sessionOrigin.source}::${sessionOrigin.campaign}`,
+          sortOrder: sessionOrigin.sortOrder,
+        };
+      }
+    }
+    const item = ensureAttributionItem(origin);
+    item.checkoutClicks += 1;
   }
 
   return [...attributionMap.values()]
