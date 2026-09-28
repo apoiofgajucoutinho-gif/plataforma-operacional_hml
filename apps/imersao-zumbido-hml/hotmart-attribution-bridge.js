@@ -63,7 +63,7 @@
     const fetcher = options?.fetchImpl || root.fetch;
     if (typeof fetcher !== "function") return { url: fallback, bridged: false, reason: "fetch_unavailable" };
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timeout = setTimeout(() => controller?.abort(), options?.timeoutMs || 450);
+    const timeout = setTimeout(() => controller?.abort(), options?.timeoutMs || 1200);
     try {
       const response = await fetcher(ENDPOINT, {
         method: "POST",

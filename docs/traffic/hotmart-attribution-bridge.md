@@ -30,7 +30,7 @@ The bridge stores no email, phone, name, document, or other direct PII.
 `HOTMART_ATTRIBUTION_BRIDGE` controls public traffic. It is disabled unless its
 value is `1`, `true`, `on`, or `enabled`. With the flag disabled, unavailable, or
 timed out, checkout continues through the original validated URL. Client bridge
-requests time out after 450 ms and tracking persistence never gates navigation.
+requests time out after 1.2 seconds and tracking persistence never gates navigation.
 
 Controlled HML smoke traffic may use
 `traffic_type=test&bridge_test=1`. Its LP events are stored as `SIMULATED` and do
