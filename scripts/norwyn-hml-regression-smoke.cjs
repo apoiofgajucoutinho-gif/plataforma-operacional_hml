@@ -11,6 +11,7 @@ const tests = [
   "scripts/norwyn-content-library-regression-test.cjs",
   "scripts/norwyn-landing-pages-v2-test.cjs",
   "scripts/norwyn-landing-health-playbook-v1-test.cjs",
+  "scripts/norwyn-traffic-foundation-v1-test.cjs",
   "scripts/norwyn-reports-v3-regression-test.cjs",
   "scripts/norwyn-student360-searchparams-test.cjs",
   "scripts/norwyn-student-enrollment-backfill-tests.cjs",

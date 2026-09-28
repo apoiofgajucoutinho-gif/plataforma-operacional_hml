@@ -107,11 +107,91 @@ for (const item of items) {
 console.log(\`[FGA Ads] Total coletado: \${allData.length} registros.\`);
 return allData.map(row => ({ json: row }));`;
 
+const enrichmentCode = `const token = String($env.META_ADS_ACCESS_TOKEN || '').trim();
+const supabaseUrl = String($env.SUPABASE_URL || '').replace(/\\/$/, '');
+const serviceKey = String($env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();
+const cache = new Map();
+
+let landings = [];
+if (supabaseUrl && serviceKey && tenantId) {
+  const response = await $http.request({
+    method: 'GET',
+    url: supabaseUrl + '/rest/v1/norwyn_landing_registry?select=landing_key,campaign_key,url,product_id,metadata&tenant_id=eq.' + encodeURIComponent(tenantId),
+    headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey },
+  });
+  landings = response.data ?? response ?? [];
+}
+
+function firstUrl(creative) {
+  const spec = creative?.object_story_spec || {};
+  const candidates = [spec.link_data?.link, spec.video_data?.call_to_action?.value?.link, creative?.object_url];
+  const feedLinks = creative?.asset_feed_spec?.link_urls || [];
+  for (const entry of feedLinks) candidates.push(entry?.website_url || entry?.deeplink_url);
+  return candidates.find(value => typeof value === 'string' && /^https?:\\/\\//i.test(value)) || null;
+}
+
+function resolveLanding(destinationUrl, urlTags) {
+  let destinationHost = null;
+  try { destinationHost = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch {}
+  for (const landing of landings) {
+    let landingHost = null;
+    try { landingHost = new URL(landing.url).hostname.toLowerCase(); } catch {}
+    if (destinationHost && landingHost === destinationHost) return { landing_key: landing.landing_key, confidence: 'high', reason: 'destination_domain_exact' };
+    if (urlTags && (urlTags.includes('landing_key=' + landing.landing_key) || urlTags.includes('utm_campaign=' + landing.campaign_key))) {
+      return { landing_key: landing.landing_key, confidence: 'high', reason: 'url_tags_exact' };
+    }
+  }
+  return { landing_key: null, confidence: 'unresolved', reason: 'no_explicit_destination_match' };
+}
+
+for (const item of items) {
+  const row = item.json;
+  const adId = String(row.ad_id || '').trim();
+  if (!adId || !token) continue;
+  if (!cache.has(adId)) {
+    try {
+      const response = await $http.request({
+        method: 'GET',
+        url: 'https://graph.facebook.com/v23.0/' + encodeURIComponent(adId),
+        qs: { fields: 'id,name,creative{id,name,thumbnail_url,image_url,object_url,url_tags,object_story_spec,asset_feed_spec}', access_token: token },
+      });
+      cache.set(adId, response.data ?? response ?? {});
+    } catch (error) {
+      cache.set(adId, { _enrichment_error: String(error.message || error).slice(0, 300) });
+    }
+    await new Promise(resolve => setTimeout(resolve, 120));
+  }
+  const ad = cache.get(adId);
+  const creative = ad?.creative || {};
+  row.creative_id = creative.id || null;
+  row.creative_name = creative.name || null;
+  row.thumbnail_url = creative.thumbnail_url || creative.image_url || null;
+  row.preview_url = null;
+  row.destination_url = firstUrl(creative);
+  row.destination_domain = row.destination_url ? new URL(row.destination_url).hostname.toLowerCase() : null;
+  row.url_tags = creative.url_tags || null;
+  row._landing_resolution = resolveLanding(row.destination_url, row.url_tags);
+  row.landing_key = row._landing_resolution.landing_key;
+  row._creative_enrichment = creative.id ? { confidence: 'high', source: 'meta_ad_creative' } : { confidence: 'unresolved', source: 'meta_ad_creative', error: ad?._enrichment_error || null };
+}
+
+return items;`;
+
 const transformCode = `function actionValue(actions, types) {
   if (!Array.isArray(actions)) return 0;
   return actions
     .filter(action => types.has(String(action.action_type || '').toLowerCase()))
     .reduce((sum, action) => sum + Number(action.value || 0), 0);
+}
+
+function canonicalAction(actions, priority) {
+  if (!Array.isArray(actions)) return { value: 0, action_type: null };
+  for (const actionType of priority) {
+    const found = actions.find(action => String(action.action_type || '').toLowerCase() === actionType);
+    if (found) return { value: Number(found.value || 0), action_type: actionType };
+  }
+  return { value: 0, action_type: null };
 }
 
 const leadTypes = new Set([
@@ -120,16 +200,6 @@ const leadTypes = new Set([
   'offsite_conversion.fb_pixel_lead',
   'omni_lead',
 ]);
-const conversionTypes = new Set([
-  'purchase',
-  'omni_purchase',
-  'offsite_conversion.fb_pixel_purchase',
-  'onsite_conversion.purchase',
-  'complete_registration',
-]);
-const linkClickTypes = new Set(['link_click']);
-const landingPageViewTypes = new Set(['landing_page_view', 'omni_landing_page_view']);
-const checkoutTypes = new Set(['initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);
 const videoViewTypes = new Set(['video_view']);
 const thruplayTypes = new Set(['video_view', 'thruplay']);
 
@@ -155,10 +225,15 @@ return items.map(item => {
   const anuncio = String(d.ad_name || '').trim();
   const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();
   const leads = actionValue(d.actions, leadTypes);
-  const conversoes = actionValue(d.actions, conversionTypes);
-  const linkClicks = actionValue(d.actions, linkClickTypes);
-  const landingPageViews = actionValue(d.actions, landingPageViewTypes);
-  const initiateCheckouts = actionValue(d.actions, checkoutTypes);
+  const linkClicksMetric = canonicalAction(d.actions, ['link_click']);
+  const landingPageViewsMetric = canonicalAction(d.actions, ['landing_page_view', 'omni_landing_page_view']);
+  const initiateCheckoutsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);
+  const purchasesMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);
+  const purchaseValueMetric = canonicalAction(d.action_values, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);
+  const conversoes = purchasesMetric.value;
+  const linkClicks = linkClicksMetric.value;
+  const landingPageViews = landingPageViewsMetric.value;
+  const initiateCheckouts = initiateCheckoutsMetric.value;
 
   let performance_status = 'OK';
   if (cpm > 50 && ctr < 1) performance_status = 'PUBLICO RUIM';
@@ -199,6 +274,7 @@ return items.map(item => {
       landing_page_views: Math.round(landingPageViews),
       initiate_checkouts: Math.round(initiateCheckouts),
       meta_purchases: Math.round(conversoes),
+      meta_purchase_value: purchaseValueMetric.action_type ? purchaseValueMetric.value : null,
       video_views: Math.round(actionValue(d.actions, videoViewTypes)),
       video_plays_3s: Math.round(actionValue(d.actions, videoViewTypes)),
       video_p25: Math.round(actionValue(d.video_p25_watched_actions, videoViewTypes)),
@@ -210,11 +286,14 @@ return items.map(item => {
       preview_url: d.preview_url || null,
       thumbnail_url: d.thumbnail_url || null,
       destination_url: d.destination_url || null,
+      destination_domain: d.destination_domain || null,
+      url_tags: d.url_tags || null,
+      landing_key: d.landing_key || null,
       performance_status,
       performance_score: Math.round(performance_score * 100) / 100,
       origem: 'n8n_meta_ads',
       row_key: rowKey,
-      raw_payload: d,
+      raw_payload: { ...d, _norwyn_foundation: { collector_version: 'v9', action_semantics: 'canonical_alias_priority', action_sources: { link_clicks: linkClicksMetric.action_type, landing_page_views: landingPageViewsMetric.action_type, initiate_checkouts: initiateCheckoutsMetric.action_type, purchases: purchasesMetric.action_type, purchase_value: purchaseValueMetric.action_type }, creative: d._creative_enrichment || null, landing: d._landing_resolution || null } },
       imported_at: new Date().toISOString()
     }
   };
@@ -239,7 +318,7 @@ console.log(\`[FGA Ads] Preparados \${batches.length} lote(s) para upsert. Total
 return batches;`;
 
 const workflow = {
-  name: "Instagram Ads Daily Collector_V8_Supabase_2026",
+  name: "Instagram Ads Daily Collector_V9_Traffic_Foundation",
   nodes: [
     node("manual-backfill", "Executar Backfill 2026", "n8n-nodes-base.manualTrigger", 1, [-4240, 560]),
     node("calc-backfill", "Calcular Periodo 2026", "n8n-nodes-base.code", 2, [-4000, 560], { jsCode: calculateBackfill }),
@@ -287,6 +366,7 @@ const workflow = {
       options: {},
     }),
     node("pagination", "Tratar Paginacao", "n8n-nodes-base.code", 2, [-3480, 360], { jsCode: paginationCode }),
+    node("enrichment", "Enriquecer Criativos e Destinos", "n8n-nodes-base.code", 2, [-3340, 360], { jsCode: enrichmentCode }),
     node("transform", "Normalizar para Supabase", "n8n-nodes-base.code", 2, [-3200, 360], { jsCode: transformCode }),
     node("valid", "Registro valido?", "n8n-nodes-base.if", 2.2, [-2920, 360], {
       conditions: {
@@ -351,7 +431,8 @@ const workflow = {
     "Calcular Incremental": { main: [[{ node: "Meta Ads API - Incremental", type: "main", index: 0 }]] },
     "Meta Ads API - Backfill 2026": { main: [[{ node: "Tratar Paginacao", type: "main", index: 0 }]] },
     "Meta Ads API - Incremental": { main: [[{ node: "Tratar Paginacao", type: "main", index: 0 }]] },
-    "Tratar Paginacao": { main: [[{ node: "Normalizar para Supabase", type: "main", index: 0 }]] },
+    "Tratar Paginacao": { main: [[{ node: "Enriquecer Criativos e Destinos", type: "main", index: 0 }]] },
+    "Enriquecer Criativos e Destinos": { main: [[{ node: "Normalizar para Supabase", type: "main", index: 0 }]] },
     "Normalizar para Supabase": { main: [[{ node: "Registro valido?", type: "main", index: 0 }]] },
     "Registro valido?": {
       main: [
@@ -372,6 +453,6 @@ const workflow = {
   tags: [],
 };
 
-const outputPath = join(process.cwd(), "modules", "ads", "Instagram Ads Daily Collector_V8_Supabase_2026.json");
+const outputPath = join(process.cwd(), "modules", "ads", "Instagram Ads Daily Collector_V9_Traffic_Foundation.json");
 writeFileSync(outputPath, `${JSON.stringify(workflow, null, 2)}\n`, "utf8");
 console.log(outputPath);

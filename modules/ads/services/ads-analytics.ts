@@ -44,6 +44,41 @@ function actionValue(payload: JsonRecord, keys: Set<string>) {
   }, 0);
 }
 
+export type CanonicalActionMetric = {
+  value: number;
+  actionType: string | null;
+  available: boolean;
+};
+
+/** Meta commonly returns equivalent attribution aliases with the same value. Pick one
+ * documented source by priority instead of adding aliases together. */
+export function canonicalActionValue(payload: JsonRecord, priority: readonly string[]): CanonicalActionMetric {
+  const actions = Array.isArray(payload.actions) ? payload.actions : [];
+  for (const actionType of priority) {
+    const match = actions.find((action) => String(asRecord(action).action_type ?? "").toLowerCase() === actionType);
+    if (match) return { value: asNumber(asRecord(match).value), actionType, available: true };
+  }
+  return { value: 0, actionType: null, available: false };
+}
+
+export const canonicalMetaActions = {
+  linkClicks: ["link_click"],
+  landingPageViews: ["landing_page_view", "omni_landing_page_view"],
+  initiateCheckouts: [
+    "offsite_conversion.fb_pixel_initiate_checkout",
+    "initiate_checkout",
+    "omni_initiated_checkout",
+    "onsite_web_initiate_checkout",
+  ],
+  purchases: [
+    "offsite_conversion.fb_pixel_purchase",
+    "purchase",
+    "omni_purchase",
+    "onsite_web_purchase",
+    "onsite_conversion.purchase",
+  ],
+} as const;
+
 function firstValue(row: JsonRecord, payload: JsonRecord, keys: string[]) {
   for (const key of keys) {
     const fromRow = asString(row[key]);
