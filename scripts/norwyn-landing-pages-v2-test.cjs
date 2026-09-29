@@ -56,6 +56,9 @@ assert.match(insights, /Aguardando primeira reconciliação confiável via sourc
 assert.match(criteriaEndpoint, /insight_criterion_updated/);
 assert.match(criteriaEndpoint, /landing_page_events/);
 assert.match(criteriaEndpoint, /role !== "ADMIN" && role !== "ESPECIALISTA"/);
+assert.match(criteriaEndpoint, /insight_maturity_updated/);
+assert.match(component, /Aguardando prévia/);
+assert.match(component, /Em observação/);
 assert.doesNotMatch(insights, /Math\.random\(/, "insight confidence must be deterministic");
 const emptyJourney = insightsModule.exports.buildJourney([], null);
 assert.equal(emptyJourney.detailed[0].value, 0, "zero-data journey must show zero sessions");
@@ -69,8 +72,37 @@ const sampleEvents = [
 const sampleJourney = insightsModule.exports.buildJourney(sampleEvents, 1);
 assert.equal(sampleJourney.detailed[0].value, 1);
 assert.equal(sampleJourney.detailed.at(-1).value, 1);
-const lowSampleInsights = insightsModule.exports.buildInsights({ journey: sampleJourney, previousJourney: emptyJourney, criteria: insightsModule.exports.defaultLandingCriteria });
+assert.equal(sampleJourney.detailed.some((step) => step.key === "cta_view"), false, "generic CTA views must not be forced into the sequential journey");
+const repeatedCtaEvents = [
+  { event_name: "session_start", session_id: "repeat" },
+  { event_name: "cta_view", session_id: "repeat", cta_id: "hero_primary" },
+  { event_name: "cta_view", session_id: "repeat", cta_id: "offer_primary" },
+  { event_name: "cta_click", session_id: "repeat", cta_id: "hero_primary" },
+  { event_name: "cta_click", session_id: "repeat", cta_id: "hero_primary" },
+];
+const repeatedJourney = insightsModule.exports.buildJourney(repeatedCtaEvents, null);
+assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_view").sessions, 1, "journey behavior must deduplicate CTA views by session");
+assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_view").events, 2, "behavior must preserve raw CTA view count");
+assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_click").sessions, 1, "journey behavior must deduplicate repeated CTA clicks by session");
+assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_click").events, 2, "behavior must preserve raw CTA click count");
+assert.equal(repeatedJourney.detailed.find((step) => step.key === "offer_view").value, 0, "out-of-order CTA events must not fabricate an offer view");
+const boundaryJourney = insightsModule.exports.buildJourney([
+  { event_name: "session_start", session_id: "inside" },
+  { event_name: "cta_view", session_id: "inside" },
+  { event_name: "cta_view", session_id: "started-before-window" },
+], null);
+assert.equal(boundaryJourney.detailed[0].value, 1);
+assert.equal(boundaryJourney.behavioral.find((item) => item.key === "cta_view").sessions, 1, "events from sessions outside the period cohort must not exceed the session base");
+assert.equal(insightsModule.exports.maturityForSample(0, insightsModule.exports.defaultLandingMaturity), null);
+assert.equal(insightsModule.exports.maturityForSample(19, insightsModule.exports.defaultLandingMaturity), null);
+assert.equal(insightsModule.exports.maturityForSample(20, insightsModule.exports.defaultLandingMaturity), "Prévia");
+assert.equal(insightsModule.exports.maturityForSample(49, insightsModule.exports.defaultLandingMaturity), "Prévia");
+assert.equal(insightsModule.exports.maturityForSample(50, insightsModule.exports.defaultLandingMaturity), "Em observação");
+assert.equal(insightsModule.exports.maturityForSample(99, insightsModule.exports.defaultLandingMaturity), "Em observação");
+assert.equal(insightsModule.exports.maturityForSample(100, insightsModule.exports.defaultLandingMaturity), "Insight");
+const lowSampleInsights = insightsModule.exports.buildInsights({ journey: sampleJourney, previousJourney: emptyJourney, criteria: insightsModule.exports.defaultLandingCriteria, maturity: insightsModule.exports.defaultLandingMaturity });
 assert.equal(lowSampleInsights.some((item) => item.id === "minimum_sample"), true, "low sample must be explicit");
+assert.equal(lowSampleInsights.find((item) => item.id === "minimum_sample").confidence, null, "confidence must not be shown before Insight maturity");
 assert.match(trackingEndpoint, /imersaozumbido\.fgajulianacoutinho\.com\.br/);
 assert.match(trackingEndpoint, /trafficType === "public" \? "REAL" : "SIMULATED"/);
 assert.match(landingTracking, /traffic_type: trafficTypeFromLocation\(\)/);

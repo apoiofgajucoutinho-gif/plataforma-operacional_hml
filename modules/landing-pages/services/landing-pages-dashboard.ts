@@ -3,7 +3,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { functionalRoleFor } from "@/lib/auth/roles";
 import { getLandingAccess } from "@/modules/landing-pages/services/landing-pages-server";
-import { buildInsights, buildJourney, mergeLandingCriteria } from "@/modules/landing-pages/analytics/landing-insights";
+import { buildInsights, buildJourney, mergeLandingCriteria, mergeLandingMaturity } from "@/modules/landing-pages/analytics/landing-insights";
 import type { LandingDashboardContext, LandingDashboardItem, LandingMetric } from "@/modules/landing-pages/types";
 
 type SupabaseAny = any;
@@ -367,6 +367,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const definition = definitions.find((row: any) => row.landing_key === selected.landingKey) ?? null;
   const registryRow = registry.find((row: any) => row.landing_key === selected.landingKey) ?? null;
   const criteria = mergeLandingCriteria(definition?.metadata?.insight_criteria);
+  const insightMaturity = mergeLandingMaturity(definition?.metadata?.insight_maturity);
   const maxCriterionWindow = Math.max(1, ...criteria.filter((item) => item.active).map((item) => item.windowDays));
   const criteriaHistoryStart = new Date(period.end.getTime() - maxCriterionWindow * 2 * 24 * 60 * 60 * 1000);
   const analysisStart = new Date(Math.min(previousStart.getTime(), criteriaHistoryStart.getTime()));
@@ -433,7 +434,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     const criterionPreviousStart = new Date(criterionStart.getTime() - criterion.windowDays * 24 * 60 * 60 * 1000);
     const currentRows = insightPool.filter((row) => new Date(row.occurred_at) >= criterionStart && new Date(row.occurred_at) <= period.end);
     const previousRows = insightPool.filter((row) => new Date(row.occurred_at) >= criterionPreviousStart && new Date(row.occurred_at) < criterionStart);
-    return buildInsights({ journey: buildJourney(currentRows, null), previousJourney: buildJourney(previousRows, null), criteria: [criterion] });
+    return buildInsights({ journey: buildJourney(currentRows, null), previousJourney: buildJourney(previousRows, null), criteria: [criterion], maturity: insightMaturity });
   });
   const breakdowns = buildJourneyBreakdowns(journeyDimension, selected.landingKey, events, attribution);
 
@@ -513,6 +514,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
       purchaseLimitation: purchases === null ? "Ainda não existe compra da LP reconciliada de forma confiável via source_sck. Checkout e compra permanecem separados." : null,
     },
     insights,
+    insightMaturity,
     criteria,
     topEvents: [...eventCounts.entries()].map(([name, total]) => ({ name, total, sessions: eventSessions(events.filter((row) => row.event_name === name), [name]) })).sort((a, b) => b.total - a.total).slice(0, 10),
     sections,
@@ -649,13 +651,13 @@ function emptyContext(role: string | null, allowedModules: string[], diagnostic:
     metrics: { visitors: emptyMetric, sessions: emptyMetric, pageViews: emptyMetric, offerViews: emptyMetric, checkoutClicks: emptyMetric, conversionRate: emptyMetric },
     daily: [], funnel: [],
     journey: {
-      detailed: [], executive: [],
+      detailed: [], executive: [], behavioral: [],
       highlights: { biggestAbsoluteLoss: null, biggestPercentageLoss: null, bestProgress: null, lowestProgress: null },
       breakdowns: [],
       availableDimensions: { origin: false, campaign: false, landingKey: false, version: false, device: false, trafficType: false },
       purchaseLimitation: null,
     },
-    insights: [], criteria: [], topEvents: [], sections: [], attribution: [], recentEvents: [],
+    insights: [], insightMaturity: mergeLandingMaturity(null), criteria: [], topEvents: [], sections: [], attribution: [], recentEvents: [],
     content: { title: "Landing Pages", summary: "Aguardando dados", checkoutUrl: null, hotmartProductId: null, hotmartOfferId: null, previewUrl: null },
     health: { overallStatus: "unknown", overallLabel: "Aguardando dados", guidance: null, availability: "Aguardando dados", httpStatus: null, lastCheckedAt: null, domain: "Não disponível", checkout: "Aguardando dados", checkoutCheckedAt: null, links: "Aguardando dados", images: "Aguardando dados", tracking: "Aguardando dados", recentEventAt: null, errors: null, seo: "Não disponível", technicalPerformance: "Não disponível", publishedIntegrity: "Aguardando dados", components: [], diagnostics: [], divergences: [], alerts: [] },
     versions: [], qa: [], approvals: [],

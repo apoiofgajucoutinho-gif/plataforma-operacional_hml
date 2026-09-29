@@ -129,6 +129,14 @@ export type LandingInsightCriterion = {
   updatedBy: string | null;
 };
 
+export type LandingInsightMaturity = {
+  previewMinSessions: number;
+  observationMinSessions: number;
+  insightMinSessions: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+};
+
 export type LandingJourneyStep = {
   key: string;
   label: string;
@@ -147,7 +155,10 @@ export type LandingInsight = {
   whyAttention: string;
   evidence: string[];
   hypothesis: string;
-  confidence: "Baixa" | "Média" | "Alta";
+  maturity: "Prévia" | "Em observação" | "Insight" | null;
+  analyzedSessions: number;
+  confidence: "Baixa" | "Média" | "Alta" | null;
+  allowedAction: "Acompanhar" | "Verificar" | "Investigar" | "Comparar" | "Testar";
   nextStep: string;
   criterionKey: string;
 };
@@ -189,6 +200,7 @@ export type LandingDashboardContext = {
   journey: {
     detailed: LandingJourneyStep[];
     executive: LandingJourneyStep[];
+    behavioral: Array<{ key: string; label: string; sessions: number; events: number; note: string }>;
     highlights: {
       biggestAbsoluteLoss: string | null;
       biggestPercentageLoss: string | null;
@@ -207,6 +219,7 @@ export type LandingDashboardContext = {
     purchaseLimitation: string | null;
   };
   insights: LandingInsight[];
+  insightMaturity: LandingInsightMaturity;
   criteria: LandingInsightCriterion[];
   topEvents: Array<{ name: string; total: number; sessions: number }>;
   sections: Array<{ id: string; label: string; views: number; share: number | null }>;

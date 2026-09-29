@@ -18,10 +18,10 @@ excluídos por padrão. Apenas ADMIN pode incluí-los para diagnóstico.
 
 ## Jornada
 
-Todas as etapas comportamentais contam sessões distintas, não volume bruto de
-eventos. A jornada detalhada é:
+Todas as etapas contam sessões distintas, não volume bruto de eventos. A jornada
+principal usa somente eventos que representam avanço sequencial defensável:
 
-`Sessão -> 25% -> Oferta -> CTA visto -> CTA clicado -> Checkout -> Compra confirmada`
+`Sessão -> 25% -> Oferta -> Checkout -> Compra confirmada`
 
 Fórmulas:
 
@@ -37,11 +37,26 @@ da transição ficam indisponíveis e a limitação é mostrada.
 Compra só é exibida quando há venda confirmada reconciliada por uma chave de
 tracking ligada à campanha. Checkout nunca é interpretado como compra.
 
+### Coerência dos eventos
+
+| Evento | Origem na LP | Repetição | Uso analítico |
+| --- | --- | --- | --- |
+| `offer_view` | Seção `offer`, ao atingir cerca de 35% de visibilidade | Uma vez por sessão/página (`once`) | Etapa da Jornada; representa exposição à oferta |
+| `cta_view` | Cinco CTAs: cabeçalho, hero, público, oferta e final | Uma vez por CTA e sessão; até cinco por sessão | Comportamento auxiliar; pode ocorrer antes ou depois da oferta |
+| `cta_click` | Os mesmos CTAs, incluindo âncoras internas e checkout | Pode repetir e ocorrer em elementos diferentes | Comportamento auxiliar; não é uma etapa única do funil |
+| `checkout_click` | CTA `offer_primary`, depois da tentativa do bridge e antes da navegação | Pode repetir; a Jornada deduplica por sessão | Intenção de checkout; não comprova carregamento nem compra |
+
+A área Comportamento preserva duas medidas: sessões únicas e disparos brutos.
+Todas as medidas usam a mesma coorte de `session_id` iniciada ou visualizada no
+período. Assim, uma interação de sessão iniciada antes do recorte não pode gerar
+"73 de 71 sessões". Eventos ausentes ou fora de ordem não fabricam etapas da
+Jornada.
+
 ## Critérios iniciais
 
 - Queda relevante entre etapas: perda mínima de 40%, 100 sessões, 7 dias.
 - Baixa exposição ao CTA: CTA visto por sessão abaixo de 45%, 100 sessões, 7 dias.
-- Baixo avanço do clique ao checkout: checkout por CTA clicado abaixo de 50%, 30 cliques, 7 dias.
+- Baixo avanço da oferta ao checkout: checkout por oferta vista abaixo de 50%, 30 sessões na oferta, 7 dias.
 - Pouca amostra: menos de 100 sessões, 7 dias.
 
 Cada critério é configurável por LP em
@@ -56,6 +71,25 @@ data, valor anterior e valor novo em `landing_page_events` com o tipo
 - Alta: patamar alto atingido e a mesma regra acionada na janela anterior.
 
 A confiança é determinística. Não há classificação subjetiva por IA.
+
+## Maturidade dos Insights
+
+Os níveis ficam em `landing_page_definitions.metadata.insight_maturity`, sem
+tabela paralela:
+
+- **Prévia**: padrão inicial de 20 sessões. Permite acompanhar ou verificar, sem recomendar alteração na LP.
+- **Em observação**: padrão inicial de 50 sessões. Permite investigar e comparar, ainda sem recomendação forte.
+- **Insight**: padrão inicial de 100 sessões. Permite hipótese, confiança e sugestão de próximo teste.
+
+ADMIN e ESPECIALISTA podem editar os três limiares. A API exige ordem crescente
+e registra a mudança em `landing_page_events` como
+`insight_maturity_updated`. A maturidade usa a base relevante de cada leitura:
+sessões da página para exposição ao CTA e sessões que viram a oferta para avanço
+ao checkout.
+
+Maturidade e confiança são separadas. Antes de `Insight`, a confiança não é
+exibida. A partir de `Insight`, ela continua objetiva: tamanho da amostra e
+repetição no período anterior.
 
 ## Limitações atuais
 

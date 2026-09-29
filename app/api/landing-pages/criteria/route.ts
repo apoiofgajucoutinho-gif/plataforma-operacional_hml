@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { functionalRoleFor } from "@/lib/auth/roles";
-import { mergeLandingCriteria } from "@/modules/landing-pages/analytics/landing-insights";
+import { mergeLandingCriteria, mergeLandingMaturity } from "@/modules/landing-pages/analytics/landing-insights";
 import { getLandingAccess } from "@/modules/landing-pages/services/landing-pages-server";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +18,35 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const landingKey = String(body?.landingKey ?? "");
   const criterionKey = String(body?.criterionKey ?? "");
-  if (!landingKey || !criterionKey) return NextResponse.json({ error: "Landing Page e critério são obrigatórios." }, { status: 400 });
+  const configType = body?.configType === "maturity" ? "maturity" : "criterion";
+  if (!landingKey || (configType === "criterion" && !criterionKey)) return NextResponse.json({ error: "Landing Page e critério são obrigatórios." }, { status: 400 });
 
   const { data: definition, error: readError } = await access.client.from("landing_page_definitions")
     .select("id,active_version_id,metadata").eq("tenant_id", access.tenantId).eq("landing_key", landingKey).maybeSingle();
   if (readError || !definition) return NextResponse.json({ error: "Landing Page não encontrada." }, { status: 404 });
+  if (configType === "maturity") {
+    const previewMinSessions = bounded(body?.previewMinSessions, 0, 1000000);
+    const observationMinSessions = bounded(body?.observationMinSessions, 1, 1000000);
+    const insightMinSessions = bounded(body?.insightMinSessions, 1, 1000000);
+    if ([previewMinSessions, observationMinSessions, insightMinSessions].some((value) => value === null)) return NextResponse.json({ error: "Revise os limiares de maturidade." }, { status: 400 });
+    if (!((previewMinSessions as number) < (observationMinSessions as number) && (observationMinSessions as number) < (insightMinSessions as number))) return NextResponse.json({ error: "Use limiares crescentes: Prévia, Em observação e Insight." }, { status: 400 });
+    const previous = mergeLandingMaturity(definition.metadata?.insight_maturity);
+    const updatedAt = new Date().toISOString();
+    const next = { previewMinSessions, observationMinSessions, insightMinSessions, updatedAt, updatedBy: access.userName };
+    const metadata = { ...(definition.metadata ?? {}), insight_maturity: next };
+    const { error: updateError } = await access.client.from("landing_page_definitions").update({ metadata, updated_at: updatedAt }).eq("id", definition.id).eq("tenant_id", access.tenantId);
+    if (updateError) return NextResponse.json({ error: "Não foi possível salvar a maturidade." }, { status: 500 });
+    const { error: auditError } = await access.client.from("landing_page_events").insert({
+      tenant_id: access.tenantId, landing_id: definition.id, version_id: definition.active_version_id,
+      event_type: "insight_maturity_updated", actor_id: access.userId,
+      summary: `${access.userName} atualizou os níveis de maturidade dos Insights.`, metadata: { previous, next },
+    });
+    if (auditError) {
+      await access.client.from("landing_page_definitions").update({ metadata: definition.metadata ?? {}, updated_at: new Date().toISOString() }).eq("id", definition.id).eq("tenant_id", access.tenantId);
+      return NextResponse.json({ error: "Não foi possível registrar a auditoria; nenhuma alteração foi mantida." }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, maturity: next }, { headers: { "Cache-Control": "no-store" } });
+  }
   const current = mergeLandingCriteria(definition.metadata?.insight_criteria);
   const previous = current.find((item) => item.key === criterionKey);
   if (!previous) return NextResponse.json({ error: "Critério inválido." }, { status: 400 });
