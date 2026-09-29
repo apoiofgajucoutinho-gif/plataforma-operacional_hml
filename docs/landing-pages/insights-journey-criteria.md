@@ -21,7 +21,7 @@ excluídos por padrão. Apenas ADMIN pode incluí-los para diagnóstico.
 Todas as etapas contam sessões distintas, não volume bruto de eventos. A jornada
 principal usa somente eventos que representam avanço sequencial defensável:
 
-`Sessão -> 25% -> Oferta -> Checkout -> Compra confirmada`
+`Sessão -> Checkout -> Compra confirmada`
 
 Fórmulas:
 
@@ -41,7 +41,7 @@ tracking ligada à campanha. Checkout nunca é interpretado como compra.
 
 | Evento | Origem na LP | Repetição | Uso analítico |
 | --- | --- | --- | --- |
-| `offer_view` | Seção `offer`, ao atingir cerca de 35% de visibilidade | Uma vez por sessão/página (`once`) | Etapa da Jornada; representa exposição à oferta |
+| `offer_view` | Seção `offer`, ao atingir cerca de 35% de visibilidade | Uma vez por sessão/página (`once`) | Comportamento auxiliar; o observer pode não registrar a oferta antes do checkout |
 | `cta_view` | Cinco CTAs: cabeçalho, hero, público, oferta e final | Uma vez por CTA e sessão; até cinco por sessão | Comportamento auxiliar; pode ocorrer antes ou depois da oferta |
 | `cta_click` | Os mesmos CTAs, incluindo âncoras internas e checkout | Pode repetir e ocorrer em elementos diferentes | Comportamento auxiliar; não é uma etapa única do funil |
 | `checkout_click` | CTA `offer_primary`, depois da tentativa do bridge e antes da navegação | Pode repetir; a Jornada deduplica por sessão | Intenção de checkout; não comprova carregamento nem compra |
@@ -52,11 +52,17 @@ período. Assim, uma interação de sessão iniciada antes do recorte não pode 
 "73 de 71 sessões". Eventos ausentes ou fora de ordem não fabricam etapas da
 Jornada.
 
+Na auditoria real de 7 dias em 29/09/2026, 5 das 8 sessões com
+`checkout_click` não tinham `offer_view` registrado, 11 sessões viram algum CTA
+antes da oferta e 6 clicaram em CTA antes da oferta. Portanto, `offer_view`,
+`cta_view` e `cta_click` não são usados como predecessores obrigatórios do
+checkout.
+
 ## Critérios iniciais
 
 - Queda relevante entre etapas: perda mínima de 40%, 100 sessões, 7 dias.
 - Baixa exposição ao CTA: CTA visto por sessão abaixo de 45%, 100 sessões, 7 dias.
-- Baixo avanço da oferta ao checkout: checkout por oferta vista abaixo de 50%, 30 sessões na oferta, 7 dias.
+- Baixa intenção de checkout: checkout por sessão abaixo de 10%, 100 sessões, 7 dias.
 - Pouca amostra: menos de 100 sessões, 7 dias.
 
 Cada critério é configurável por LP em

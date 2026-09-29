@@ -85,7 +85,8 @@ assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_view").
 assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_view").events, 2, "behavior must preserve raw CTA view count");
 assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_click").sessions, 1, "journey behavior must deduplicate repeated CTA clicks by session");
 assert.equal(repeatedJourney.behavioral.find((item) => item.key === "cta_click").events, 2, "behavior must preserve raw CTA click count");
-assert.equal(repeatedJourney.detailed.find((step) => step.key === "offer_view").value, 0, "out-of-order CTA events must not fabricate an offer view");
+assert.equal(repeatedJourney.detailed.some((step) => step.key === "offer_view"), false, "offer views must not be forced into the sequential journey");
+assert.equal(repeatedJourney.behavioral.find((item) => item.key === "offer_view").sessions, 0, "out-of-order CTA events must not fabricate an offer view");
 const boundaryJourney = insightsModule.exports.buildJourney([
   { event_name: "session_start", session_id: "inside" },
   { event_name: "cta_view", session_id: "inside" },

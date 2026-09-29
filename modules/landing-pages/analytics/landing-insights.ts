@@ -41,15 +41,15 @@ export const defaultLandingCriteria: LandingInsightCriterion[] = [
   },
   {
     key: "low_checkout_progress",
-    name: "Baixo avanço da oferta ao checkout",
-    explanation: "Observa quando poucas sessões que visualizaram a oferta registram intenção de ir ao checkout.",
-    formula: "sessões com checkout / sessões com oferta vista",
-    whyItExists: "Compara duas etapas sequenciais da área de oferta sem misturar cliques de CTAs de navegação.",
-    thresholdPercent: 50,
+    name: "Baixa intenção de checkout",
+    explanation: "Observa qual parcela das sessões registrou clique para abrir o checkout.",
+    formula: "sessões com checkout / sessões da página",
+    whyItExists: "Usa a ação de checkout sem presumir que eventos de exposição anteriores sempre foram capturados.",
+    thresholdPercent: 10,
     windowDays: 7,
-    minSessions: 30,
-    mediumSample: 30,
-    highSample: 100,
+    minSessions: 100,
+    mediumSample: 100,
+    highSample: 300,
     active: true,
     updatedAt: null,
     updatedBy: null,
@@ -84,7 +84,15 @@ function pct(value: number, base: number) {
 export function mergeLandingCriteria(stored: unknown): LandingInsightCriterion[] {
   const values = Array.isArray(stored) ? stored : [];
   const byKey = new Map(values.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object")).map((item) => [String(item.key), item]));
-  return defaultLandingCriteria.map((criterion) => ({ ...criterion, ...(byKey.get(criterion.key) ?? {}), key: criterion.key }));
+  return defaultLandingCriteria.map((criterion) => ({
+    ...criterion,
+    ...(byKey.get(criterion.key) ?? {}),
+    key: criterion.key,
+    name: criterion.name,
+    explanation: criterion.explanation,
+    formula: criterion.formula,
+    whyItExists: criterion.whyItExists,
+  }));
 }
 
 export function mergeLandingMaturity(stored: unknown): LandingInsightMaturity {
@@ -106,8 +114,6 @@ export function buildJourney(events: EventRow[], purchases: number | null) {
   const sessions = baseSessionIds.size;
   const raw = [
     { key: "sessions", label: "Sessão", value: sessions, available: true, note: null },
-    { key: "scroll_25", label: "25% da página", value: uniqueSessions(scopedEvents, ["scroll_25"]), available: true, note: null },
-    { key: "offer_view", label: "Oferta vista", value: uniqueSessions(scopedEvents, ["offer_view"]), available: true, note: null },
     { key: "checkout", label: "Checkout", value: uniqueSessions(scopedEvents, ["checkout_click"]), available: true, note: null },
     { key: "purchase", label: "Compra confirmada", value: purchases, available: purchases !== null, note: purchases === null ? "Aguardando primeira reconciliação confiável via source_sck." : null },
   ];
@@ -122,7 +128,7 @@ export function buildJourney(events: EventRow[], purchases: number | null) {
       note: !ordered ? "Esta etapa teve mais sessões que a anterior. Os eventos podem ocorrer fora da sequência ou a sessão pode ter começado antes do período." : step.note,
     };
   });
-  const executiveKeys = new Set(["sessions", "offer_view", "checkout", "purchase"]);
+  const executiveKeys = new Set(["sessions", "checkout", "purchase"]);
   const executiveRaw = raw.filter((step) => executiveKeys.has(step.key));
   const executive: LandingJourneyStep[] = executiveRaw.map((step, index) => {
     const previous = index > 0 ? executiveRaw[index - 1].value : null;
@@ -141,6 +147,8 @@ export function buildJourney(events: EventRow[], purchases: number | null) {
     detailed,
     executive,
     behavioral: [
+      { key: "scroll_25", label: "Chegou a 25% da página", sessions: uniqueSessions(scopedEvents, ["scroll_25"]), events: scopedEvents.filter((row) => row.event_name === "scroll_25").length, note: "Mede profundidade de navegação, sem presumir que seja pré-requisito técnico para outras ações." },
+      { key: "offer_view", label: "Oferta vista", sessions: uniqueSessions(scopedEvents, ["offer_view"]), events: scopedEvents.filter((row) => row.event_name === "offer_view").length, note: "O observer pode não registrar a oferta em sessões que ainda clicam no checkout; por isso fica fora da sequência principal." },
       { key: "cta_view", label: "CTA visto", sessions: uniqueSessions(scopedEvents, ["cta_view"]), events: scopedEvents.filter((row) => row.event_name === "cta_view").length, note: "Pode ocorrer em até cinco CTAs diferentes e antes ou depois da oferta; por isso não é uma etapa sequencial." },
       { key: "cta_click", label: "CTA clicado", sessions: uniqueSessions(scopedEvents, ["cta_click"]), events: scopedEvents.filter((row) => row.event_name === "cta_click").length, note: "Inclui cliques de navegação interna e de checkout. É um sinal de interação, não uma etapa única do funil." },
     ],
@@ -197,14 +205,11 @@ export function buildInsights(args: {
   const ctaTriggered = ctaPercent !== null && ctaPercent < (cta?.thresholdPercent ?? 0);
   if (cta?.active && ctaStage && (ctaStage !== "Insight" || ctaTriggered)) insights.push({ id: "low_cta_exposure", title: ctaStage === "Insight" ? "Exposição aos CTAs" : ctaStage === "Em observação" ? "Exposição aos CTAs em observação" : "Prévia de exposição aos CTAs", whatHappened: `${ctaBehavior?.sessions.toLocaleString("pt-BR")} de ${sessions.toLocaleString("pt-BR")} sessões visualizaram pelo menos um CTA.`, whyAttention: ctaTriggered ? `A exposição de ${(ctaPercent ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% ficou abaixo do critério de ${cta.thresholdPercent.toLocaleString("pt-BR") }%.` : `A proporção está sendo acompanhada enquanto a amostra cresce; o limiar configurado é ${cta.thresholdPercent.toLocaleString("pt-BR") }%.`, evidence: [`Sessões com CTA visto: ${ctaBehavior?.sessions.toLocaleString("pt-BR")}`, `Visualizações registradas em todos os CTAs: ${ctaBehavior?.events.toLocaleString("pt-BR")}`], hypothesis: ctaStage === "Insight" ? "A exposição indica alcance de algum CTA, mas não identifica qual posição causou ou impediu o avanço." : "Ainda há poucos dados para considerar esse comportamento um padrão.", maturity: ctaStage, analyzedSessions: sessions, confidence: ctaStage === "Insight" ? confidence(sessions, cta, previousSessions >= cta.minSessions && pct(previousCta?.sessions ?? 0, previousSessions) !== null && (pct(previousCta?.sessions ?? 0, previousSessions) ?? 100) < cta.thresholdPercent) : null, allowedAction: ctaStage === "Insight" ? "Investigar" : ctaStage === "Em observação" ? "Comparar" : "Verificar", nextStep: ctaStage === "Insight" ? "Separar os CTAs por posição e origem antes de propor qualquer mudança." : "Verificar quais CTAs foram vistos e continuar acompanhando; não alterar a LP nesta fase.", criterionKey: cta.key });
   const checkout = byKey.get("low_checkout_progress");
-  const offerStep = journey.detailed.find((step) => step.key === "offer_view");
   const checkoutStep = journey.detailed.find((step) => step.key === "checkout");
-  const offerCount = offerStep?.value ?? 0;
-  const offerToCheckout = offerCount ? ((checkoutStep?.value ?? 0) / offerCount) * 100 : null;
-  const previousOffer = previousJourney.detailed.find((step) => step.key === "offer_view")?.value ?? 0;
+  const sessionToCheckout = sessions ? ((checkoutStep?.value ?? 0) / sessions) * 100 : null;
   const previousCheckout = previousJourney.detailed.find((step) => step.key === "checkout")?.value ?? 0;
-  const checkoutStage = maturityForSample(offerCount, maturity);
-  const checkoutTriggered = offerToCheckout !== null && offerToCheckout < (checkout?.thresholdPercent ?? 0);
-  if (checkout?.active && checkoutStage && offerToCheckout !== null && (checkoutStage !== "Insight" || checkoutTriggered)) insights.push({ id: "low_checkout_progress", title: checkoutStage === "Insight" ? "Avanço da oferta ao checkout" : checkoutStage === "Em observação" ? "Oferta até checkout em observação" : "Prévia da oferta até checkout", whatHappened: `${offerCount.toLocaleString("pt-BR")} sessões visualizaram a oferta e ${(checkoutStep?.value ?? 0).toLocaleString("pt-BR")} registraram intenção de checkout.`, whyAttention: checkoutTriggered ? `O avanço de ${offerToCheckout.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% ficou abaixo do critério de ${checkout.thresholdPercent.toLocaleString("pt-BR") }%.` : `A leitura ainda está amadurecendo; o limiar configurado é ${checkout.thresholdPercent.toLocaleString("pt-BR") }%.`, evidence: [`Oferta vista: ${offerCount.toLocaleString("pt-BR")} sessões`, `Checkout: ${(checkoutStep?.value ?? 0).toLocaleString("pt-BR")} sessões`], hypothesis: checkoutStage === "Insight" ? "Pode existir desistência entre a oferta e o checkout, mas os dados não determinam a causa." : "Ainda há poucos dados desta etapa para considerar o comportamento um padrão.", maturity: checkoutStage, analyzedSessions: offerCount, confidence: checkoutStage === "Insight" ? confidence(offerCount, checkout, previousOffer >= checkout.minSessions && previousOffer > 0 && (previousCheckout / previousOffer) * 100 < checkout.thresholdPercent) : null, allowedAction: checkoutStage === "Insight" ? "Investigar" : checkoutStage === "Em observação" ? "Comparar" : "Acompanhar", nextStep: checkoutStage === "Insight" ? "Comparar por origem e validar o caminho técnico antes de sugerir um teste." : "Acompanhar mais visualizações da oferta sem alterar a LP nesta fase.", criterionKey: checkout.key });
+  const checkoutStage = maturityForSample(sessions, maturity);
+  const checkoutTriggered = sessionToCheckout !== null && sessionToCheckout < (checkout?.thresholdPercent ?? 0);
+  if (checkout?.active && checkoutStage && sessionToCheckout !== null && (checkoutStage !== "Insight" || checkoutTriggered)) insights.push({ id: "low_checkout_progress", title: checkoutStage === "Insight" ? "Intenção de checkout" : checkoutStage === "Em observação" ? "Checkout em observação" : "Prévia de checkout", whatHappened: `${(checkoutStep?.value ?? 0).toLocaleString("pt-BR")} de ${sessions.toLocaleString("pt-BR")} sessões registraram intenção de checkout.`, whyAttention: checkoutTriggered ? `A proporção de ${sessionToCheckout.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% ficou abaixo do critério de ${checkout.thresholdPercent.toLocaleString("pt-BR") }%.` : `A leitura ainda está amadurecendo; o limiar configurado é ${checkout.thresholdPercent.toLocaleString("pt-BR") }%.`, evidence: [`Sessões analisadas: ${sessions.toLocaleString("pt-BR")}`, `Checkout: ${(checkoutStep?.value ?? 0).toLocaleString("pt-BR")} sessões`], hypothesis: checkoutStage === "Insight" ? "A proporção mostra intenção de checkout, mas não determina a causa nem comprova que o checkout carregou." : "Ainda há poucos dados para considerar esse comportamento um padrão.", maturity: checkoutStage, analyzedSessions: sessions, confidence: checkoutStage === "Insight" ? confidence(sessions, checkout, previousSessions >= checkout.minSessions && previousSessions > 0 && (previousCheckout / previousSessions) * 100 < checkout.thresholdPercent) : null, allowedAction: checkoutStage === "Insight" ? "Investigar" : checkoutStage === "Em observação" ? "Comparar" : "Acompanhar", nextStep: checkoutStage === "Insight" ? "Comparar por origem e validar o caminho técnico antes de sugerir um teste." : "Acompanhar novas sessões sem alterar a LP nesta fase.", criterionKey: checkout.key });
   return insights;
 }
