@@ -10,6 +10,7 @@ const criteriaEndpoint = fs.readFileSync("app/api/landing-pages/criteria/route.t
 const accessService = fs.readFileSync("modules/landing-pages/services/landing-pages-server.ts", "utf8");
 const trackingEndpoint = fs.readFileSync("app/api/norwyn/lp-events/route.ts", "utf8");
 const landingTracking = fs.readFileSync("apps/imersao-zumbido-hml/norwyn-tracking.js", "utf8");
+const attributionFunction = service.slice(service.indexOf("function attributionRows"), service.indexOf("function buildAcquisitionReading"));
 const moduleMigration = fs.readFileSync("supabase/migrations/20260927211000_add_landing_pages_module_key.sql", "utf8");
 const permissionMigration = fs.readFileSync("supabase/migrations/20260927211100_enable_specialist_landing_pages.sql", "utf8");
 const navigationSource = fs.readFileSync("components/layout/app-navigation.ts", "utf8");
@@ -43,11 +44,18 @@ assert.match(service, /Instagram · Stories/);
 for (const source of ["Instagram · Stories", "Instagram · Link da bio", "WhatsApp · Grupo", "Site Juliana", "Meta Ads", "Direto \/ sem identificação"]) {
   assert.match(service, new RegExp(source), `missing official attribution source: ${source}`);
 }
-assert.match(service, /sessionShare: totalSessions \?/);
+assert.match(insights, /sessionShare: totalSessions > 0/);
 assert.match(service, /eligibleSessionIds/);
 assert.match(service, /sessionOrigins/);
 assert.match(component, /% das sessões/);
+assert.match(component, /Taxa de checkout/);
+assert.match(component, /% dos checkouts/);
+assert.match(component, /Sessões em que a origem não pôde ser identificada/);
+assert.match(component, /Compras por origem: Não disponível/);
 assert.doesNotMatch(component, /context\.attribution\.slice\(/, "official attribution rows must not be truncated");
+assert.match(attributionFunction, /checkoutSessions\.add/);
+assert.match(attributionFunction, /const sessionOrigin = sessionOrigins\.get\(row\.session_id\)/);
+assert.doesNotMatch(attributionFunction, /checkoutClicks \+= 1/, "checkout acquisition must be deduplicated by session");
 assert.doesNotMatch(service, /Math\.random\(/, "dashboard must not invent metrics");
 assert.match(insights, /buildJourney/);
 assert.match(insights, /buildInsights/);
@@ -101,6 +109,11 @@ assert.equal(insightsModule.exports.maturityForSample(49, insightsModule.exports
 assert.equal(insightsModule.exports.maturityForSample(50, insightsModule.exports.defaultLandingMaturity), "Em observação");
 assert.equal(insightsModule.exports.maturityForSample(99, insightsModule.exports.defaultLandingMaturity), "Em observação");
 assert.equal(insightsModule.exports.maturityForSample(100, insightsModule.exports.defaultLandingMaturity), "Insight");
+const checkoutRates = insightsModule.exports.attributionRates(26, 4, 93, 9);
+assert.equal(Number(checkoutRates.checkoutRate.toFixed(1)), 15.4);
+assert.equal(Number(checkoutRates.checkoutShare.toFixed(1)), 44.4);
+assert.equal(insightsModule.exports.attributionRates(0, 0, 93, 9).checkoutRate, null, "zero sessions must not render a false 0% checkout rate");
+assert.equal(insightsModule.exports.attributionRates(14, 0, 93, 0).checkoutShare, null, "periods without checkouts must not render a false checkout share");
 const lowSampleInsights = insightsModule.exports.buildInsights({ journey: sampleJourney, previousJourney: emptyJourney, criteria: insightsModule.exports.defaultLandingCriteria, maturity: insightsModule.exports.defaultLandingMaturity });
 assert.equal(lowSampleInsights.some((item) => item.id === "minimum_sample"), true, "low sample must be explicit");
 assert.equal(lowSampleInsights.find((item) => item.id === "minimum_sample").confidence, null, "confidence must not be shown before Insight maturity");

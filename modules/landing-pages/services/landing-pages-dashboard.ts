@@ -3,7 +3,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { functionalRoleFor } from "@/lib/auth/roles";
 import { getLandingAccess } from "@/modules/landing-pages/services/landing-pages-server";
-import { buildInsights, buildJourney, mergeLandingCriteria, mergeLandingMaturity } from "@/modules/landing-pages/analytics/landing-insights";
+import { attributionRates, buildInsights, buildJourney, maturityForSample, mergeLandingCriteria, mergeLandingMaturity } from "@/modules/landing-pages/analytics/landing-insights";
 import type { LandingDashboardContext, LandingDashboardItem, LandingMetric } from "@/modules/landing-pages/types";
 
 type SupabaseAny = any;
@@ -155,10 +155,10 @@ const officialAttributionSourcesByLanding: Record<string, OfficialAttributionSou
   ],
 };
 
-function attributionRows(landingKey: string, rows: any[], totalSessions: number) {
+function attributionRows(landingKey: string, rows: any[], totalSessions: number, maturityConfig: LandingDashboardContext["insightMaturity"]) {
   const officialSources = (officialAttributionSourcesByLanding[landingKey] ?? []).filter((item) => item.active);
   const officialByName = new Map(officialSources.map((item) => [item.displayName, item]));
-  const attributionMap = new Map<string, { source: string; campaign: string; sessions: Set<string>; checkoutClicks: number; sortOrder: number }>();
+  const attributionMap = new Map<string, { source: string; campaign: string; sessions: Set<string>; checkoutSessions: Set<string>; sortOrder: number }>();
   const eligibleSessionIds = new Set(rows.filter((row) => ["session_start", "page_view", "landing_view"].includes(row.event_name)).map((row) => row.session_id).filter(Boolean));
   const sessionOrigins = new Map<string, { source: string; campaign: string; sortOrder: number; score: number }>();
 
@@ -167,7 +167,7 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number)
       source: item.displayName,
       campaign: item.campaign,
       sessions: new Set<string>(),
-      checkoutClicks: 0,
+      checkoutSessions: new Set<string>(),
       sortOrder: item.sortOrder,
     });
   }
@@ -186,7 +186,7 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number)
       source: origin.source,
       campaign: origin.campaign,
       sessions: new Set<string>(),
-      checkoutClicks: 0,
+      checkoutSessions: new Set<string>(),
       sortOrder: origin.sortOrder,
     };
     attributionMap.set(origin.key, item);
@@ -212,33 +212,66 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number)
   }
 
   for (const row of rows) {
-    if (row.event_name !== "checkout_click") continue;
-    let origin = originFor(row);
-    if (origin.source === "Direto / sem identificação" && row.session_id) {
-      const sessionOrigin = sessionOrigins.get(row.session_id);
-      if (sessionOrigin) {
-        const official = officialByName.get(sessionOrigin.source);
-        origin = {
-          source: sessionOrigin.source,
-          campaign: sessionOrigin.campaign,
-          key: official ? `official:${official.sortOrder}` : `extra:${sessionOrigin.source}::${sessionOrigin.campaign}`,
-          sortOrder: sessionOrigin.sortOrder,
-        };
-      }
-    }
+    if (row.event_name !== "checkout_click" || !row.session_id || !eligibleSessionIds.has(row.session_id)) continue;
+    const sessionOrigin = sessionOrigins.get(row.session_id);
+    const official = sessionOrigin ? officialByName.get(sessionOrigin.source) : null;
+    const origin = sessionOrigin ? {
+      source: sessionOrigin.source,
+      campaign: sessionOrigin.campaign,
+      key: official ? `official:${official.sortOrder}` : `extra:${sessionOrigin.source}::${sessionOrigin.campaign}`,
+      sortOrder: sessionOrigin.sortOrder,
+    } : originFor(row);
     const item = ensureAttributionItem(origin);
-    item.checkoutClicks += 1;
+    item.checkoutSessions.add(row.session_id);
   }
 
-  return [...attributionMap.values()]
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((item) => ({
+  const sorted = [...attributionMap.values()].sort((a, b) => a.sortOrder - b.sortOrder);
+  const totalCheckouts = sorted.reduce((sum, item) => sum + item.checkoutSessions.size, 0);
+  return sorted.map((item) => {
+    const checkoutClicks = item.checkoutSessions.size;
+    const rates = attributionRates(item.sessions.size, checkoutClicks, totalSessions, totalCheckouts);
+    return {
       source: item.source,
       campaign: item.campaign,
       sessions: item.sessions.size,
-      sessionShare: totalSessions ? (item.sessions.size / totalSessions) * 100 : 0,
-      checkoutClicks: item.checkoutClicks,
-    }));
+      ...rates,
+      checkoutClicks,
+      maturity: maturityForSample(item.sessions.size, maturityConfig),
+      purchases: null,
+      purchaseRate: null,
+      revenue: null,
+      revenuePerSession: null,
+    };
+  });
+}
+
+function buildAcquisitionReading(attribution: LandingDashboardContext["attribution"], totalSessions: number, maturityConfig: LandingDashboardContext["insightMaturity"]): LandingDashboardContext["acquisition"] {
+  const totalCheckouts = attribution.reduce((sum, item) => sum + item.checkoutClicks, 0);
+  const direct = attribution.find((item) => item.source === "Direto / sem identificação");
+  const identifiedWithCheckout = attribution.filter((item) => item.source !== "Direto / sem identificação" && item.checkoutClicks > 0);
+  const withoutCheckout = attribution.filter((item) => item.sessions > 0 && item.checkoutClicks === 0);
+  const reading: string[] = [];
+  if (totalCheckouts > 0) {
+    const identifiedCheckouts = identifiedWithCheckout.reduce((sum, item) => sum + item.checkoutClicks, 0);
+    const names = identifiedWithCheckout.length <= 3
+      ? new Intl.ListFormat("pt-BR", { style: "long", type: "conjunction" }).format(identifiedWithCheckout.map((item) => item.source))
+      : "As origens identificadas";
+    if (identifiedCheckouts > 0) reading.push(`${names} somaram ${identifiedCheckouts.toLocaleString("pt-BR")} dos ${totalCheckouts.toLocaleString("pt-BR")} checkouts do período.`);
+    if (direct?.sessions) reading.push(`Direto / sem identificação representou ${direct.sessionShare.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% das sessões e ${(direct.checkoutShare ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% dos checkouts.`);
+  } else {
+    reading.push("Nenhuma sessão do período registrou intenção de checkout.");
+  }
+  if (withoutCheckout.length) {
+    const labels = new Intl.ListFormat("pt-BR", { style: "long", type: "conjunction" }).format(withoutCheckout.map((item) => `${item.source} (${item.sessions.toLocaleString("pt-BR")} ${item.sessions === 1 ? "sessão" : "sessões"})`));
+    reading.push(`${labels} não registraram checkout no período.`);
+  }
+  const maturity = maturityForSample(totalSessions, maturityConfig);
+  reading.push(maturity === "Insight"
+    ? "A amostra mínima de Insight foi atingida; esta leitura continua descritiva e não classifica canais como melhores ou piores."
+    : maturity === "Em observação"
+      ? "O comportamento começa a se repetir, mas ainda não atingiu a amostra oficial de Insight."
+      : "Ainda há poucos dados para considerar esse comportamento um padrão.");
+  return { totalSessions, totalCheckouts, maturity, reading, purchasesAvailable: false };
 }
 
 function buildJourneyBreakdowns(
@@ -412,7 +445,8 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const sectionCounts = countBy(sectionRows, (row) => row.block_id);
   const sections = [...sectionCounts.entries()].map(([id, views]) => ({ id, label: sectionLabels[id] ?? id, views, share: sessionCount ? (views / sessionCount) * 100 : null })).sort((a, b) => b.views - a.views);
   const publicSessionCount = eventSessions(publicEvents, ["session_start", ...pageNames]);
-  const attribution = attributionRows(selected.landingKey, publicEvents, publicSessionCount);
+  const attribution = attributionRows(selected.landingKey, publicEvents, publicSessionCount, insightMaturity);
+  const acquisition = buildAcquisitionReading(attribution, publicSessionCount, insightMaturity);
 
   const trackingKeysResult = await client.from("growth_tracking_keys").select("id")
     .eq("tenant_id", tenantId)
@@ -519,6 +553,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     topEvents: [...eventCounts.entries()].map(([name, total]) => ({ name, total, sessions: eventSessions(events.filter((row) => row.event_name === name), [name]) })).sort((a, b) => b.total - a.total).slice(0, 10),
     sections,
     attribution,
+    acquisition,
     recentEvents: events.slice(0, 50).map((row) => ({ id: row.id, name: row.event_name, label: eventLabels[row.event_name] ?? row.event_name, occurredAt: row.occurred_at, section: row.block_id ? sectionLabels[row.block_id] ?? row.block_id : null, source: humanOrigin(row.utm_source, row.utm_medium, row.utm_content) })),
     content: {
       title: selected.name,
@@ -657,7 +692,7 @@ function emptyContext(role: string | null, allowedModules: string[], diagnostic:
       availableDimensions: { origin: false, campaign: false, landingKey: false, version: false, device: false, trafficType: false },
       purchaseLimitation: null,
     },
-    insights: [], insightMaturity: mergeLandingMaturity(null), criteria: [], topEvents: [], sections: [], attribution: [], recentEvents: [],
+    insights: [], insightMaturity: mergeLandingMaturity(null), criteria: [], topEvents: [], sections: [], attribution: [], acquisition: { totalSessions: 0, totalCheckouts: 0, maturity: null, reading: [], purchasesAvailable: false }, recentEvents: [],
     content: { title: "Landing Pages", summary: "Aguardando dados", checkoutUrl: null, hotmartProductId: null, hotmartOfferId: null, previewUrl: null },
     health: { overallStatus: "unknown", overallLabel: "Aguardando dados", guidance: null, availability: "Aguardando dados", httpStatus: null, lastCheckedAt: null, domain: "Não disponível", checkout: "Aguardando dados", checkoutCheckedAt: null, links: "Aguardando dados", images: "Aguardando dados", tracking: "Aguardando dados", recentEventAt: null, errors: null, seo: "Não disponível", technicalPerformance: "Não disponível", publishedIntegrity: "Aguardando dados", components: [], diagnostics: [], divergences: [], alerts: [] },
     versions: [], qa: [], approvals: [],

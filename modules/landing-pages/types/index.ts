@@ -223,7 +223,27 @@ export type LandingDashboardContext = {
   criteria: LandingInsightCriterion[];
   topEvents: Array<{ name: string; total: number; sessions: number }>;
   sections: Array<{ id: string; label: string; views: number; share: number | null }>;
-  attribution: Array<{ source: string; campaign: string; sessions: number; sessionShare: number; checkoutClicks: number }>;
+  attribution: Array<{
+    source: string;
+    campaign: string;
+    sessions: number;
+    sessionShare: number;
+    checkoutClicks: number;
+    checkoutRate: number | null;
+    checkoutShare: number | null;
+    maturity: LandingInsight["maturity"];
+    purchases: number | null;
+    purchaseRate: number | null;
+    revenue: number | null;
+    revenuePerSession: number | null;
+  }>;
+  acquisition: {
+    totalSessions: number;
+    totalCheckouts: number;
+    maturity: LandingInsight["maturity"];
+    reading: string[];
+    purchasesAvailable: boolean;
+  };
   recentEvents: Array<{ id: string; name: string; label: string; occurredAt: string; section: string | null; source: string }>;
   content: {
     title: string;

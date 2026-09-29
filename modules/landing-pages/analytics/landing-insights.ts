@@ -107,6 +107,14 @@ export function maturityForSample(sample: number, config: LandingInsightMaturity
   return "Insight";
 }
 
+export function attributionRates(sessions: number, checkouts: number, totalSessions: number, totalCheckouts: number) {
+  return {
+    sessionShare: totalSessions > 0 ? (sessions / totalSessions) * 100 : 0,
+    checkoutRate: sessions > 0 ? (checkouts / sessions) * 100 : null,
+    checkoutShare: totalCheckouts > 0 ? (checkouts / totalCheckouts) * 100 : null,
+  };
+}
+
 export function buildJourney(events: EventRow[], purchases: number | null) {
   const baseNames = ["session_start", "page_view", "landing_view"];
   const baseSessionIds = new Set(events.filter((row) => baseNames.includes(row.event_name) && row.session_id).map((row) => row.session_id as string));
