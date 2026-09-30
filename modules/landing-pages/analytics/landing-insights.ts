@@ -115,6 +115,15 @@ export function attributionRates(sessions: number, checkouts: number, totalSessi
   };
 }
 
+export function journeyExecutiveRates(sessions: number, checkouts: number, confirmedPurchases: number, attributedPurchases: number) {
+  return {
+    checkoutRate: sessions > 0 ? (checkouts / sessions) * 100 : null,
+    checkoutToPurchaseRate: checkouts > 0 ? (confirmedPurchases / checkouts) * 100 : null,
+    landingConversionRate: sessions > 0 ? (confirmedPurchases / sessions) * 100 : null,
+    attributionCoverage: confirmedPurchases > 0 ? (attributedPurchases / confirmedPurchases) * 100 : null,
+  };
+}
+
 export function buildJourney(events: EventRow[], purchases: number | null) {
   const baseNames = ["session_start", "page_view", "landing_view"];
   const baseSessionIds = new Set(events.filter((row) => baseNames.includes(row.event_name) && row.session_id).map((row) => row.session_id as string));

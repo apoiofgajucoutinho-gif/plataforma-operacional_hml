@@ -200,6 +200,17 @@ export type LandingDashboardContext = {
   journey: {
     detailed: LandingJourneyStep[];
     executive: LandingJourneyStep[];
+    executiveRates: {
+      checkoutRate: number | null;
+      checkoutToPurchaseRate: number | null;
+      landingConversionRate: number | null;
+      attributionCoverage: number | null;
+    };
+    purchases: {
+      confirmed: number;
+      attributed: number;
+      unattributed: number;
+    };
     behavioral: Array<{ key: string; label: string; sessions: number; events: number; note: string }>;
     highlights: {
       biggestAbsoluteLoss: string | null;

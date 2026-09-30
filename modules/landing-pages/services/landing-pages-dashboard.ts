@@ -3,8 +3,9 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { functionalRoleFor } from "@/lib/auth/roles";
 import { getLandingAccess } from "@/modules/landing-pages/services/landing-pages-server";
-import { attributionRates, buildInsights, buildJourney, maturityForSample, mergeLandingCriteria, mergeLandingMaturity } from "@/modules/landing-pages/analytics/landing-insights";
+import { attributionRates, buildInsights, buildJourney, journeyExecutiveRates, maturityForSample, mergeLandingCriteria, mergeLandingMaturity } from "@/modules/landing-pages/analytics/landing-insights";
 import type { LandingDashboardContext, LandingDashboardItem, LandingMetric } from "@/modules/landing-pages/types";
+import { normalizeProductIdentity } from "@/modules/norwyn/services/product-identity";
 
 type SupabaseAny = any;
 type Params = Record<string, string | string[] | undefined>;
@@ -279,13 +280,15 @@ function buildJourneyBreakdowns(
   landingKey: string,
   rows: any[],
   attribution: LandingDashboardContext["attribution"],
+  attributedPurchasesByOrigin: Map<string, number>,
+  attributedPurchaseTotal: number,
 ): LandingDashboardContext["journey"]["breakdowns"] {
   if (dimension === "origin") return attribution.map((item) => ({
     label: item.source,
     sessions: item.sessions,
     offerViews: eventSessions(rows.filter((row) => humanOrigin(row.utm_source, row.utm_medium, row.utm_content) === item.source), ["offer_view"]),
     checkoutClicks: item.checkoutClicks,
-    purchases: null,
+    purchases: attributedPurchasesByOrigin.get(item.source) ?? 0,
     checkoutRate: item.sessions ? (item.checkoutClicks / item.sessions) * 100 : null,
   }));
   const labelFor = (row: any) => {
@@ -304,7 +307,7 @@ function buildJourneyBreakdowns(
       sessions,
       offerViews: eventSessions(scoped, ["offer_view"]),
       checkoutClicks,
-      purchases: null,
+      purchases: dimension === "landing" ? attributedPurchaseTotal : null,
       checkoutRate: sessions ? (checkoutClicks / sessions) * 100 : null,
     };
   }).sort((a, b) => b.sessions - a.sessions);
@@ -448,19 +451,48 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const attribution = attributionRows(selected.landingKey, publicEvents, publicSessionCount, insightMaturity);
   const acquisition = buildAcquisitionReading(attribution, publicSessionCount, insightMaturity);
 
-  const trackingKeysResult = await client.from("growth_tracking_keys").select("id")
-    .eq("tenant_id", tenantId)
-    .or(`campaign_key.eq.${selected.landingKey},utm_campaign.eq.${selected.landingKey}`);
+  const [trackingKeysResult, commercialProductsResult, periodSales] = await Promise.all([
+    client.from("growth_tracking_keys").select("id")
+      .eq("tenant_id", tenantId)
+      .or(`campaign_key.eq.${selected.landingKey},utm_campaign.eq.${selected.landingKey}`),
+    client.from("comercial_produtos").select("id,hotmart_product_id,nome,ativo").eq("tenant_id", tenantId),
+    readAll((from, to) => client.from("comercial_vendas")
+      .select("id,transaction_id,produto_id,hotmart_product_id,produto_nome,status_normalizado,sale_confirmed,data_compra,source_sck")
+      .eq("tenant_id", tenantId).eq("sale_confirmed", true)
+      .gte("data_compra", period.start.toISOString()).lte("data_compra", period.end.toISOString())
+      .order("data_compra", { ascending: false }).range(from, to)),
+  ]);
+  if (trackingKeysResult.error) throw new Error(trackingKeysResult.error.message);
+  if (commercialProductsResult.error) throw new Error(commercialProductsResult.error.message);
   const trackingKeyIds = (trackingKeysResult.data ?? []).map((item: any) => item.id);
-  const bridgeResult = trackingKeyIds.length
-    ? await client.from("hotmart_attribution_bridge_v").select("sale_id,sale_confirmed,data_compra,norwyn_source,tracking_key_id")
-      .eq("tenant_id", tenantId).in("tracking_key_id", trackingKeyIds)
+  const selectedNames = new Set([selected.productName, selected.name].map(normalizeProductIdentity).filter(Boolean));
+  const matchingProducts = (commercialProductsResult.data ?? []).filter((product: any) => product.ativo !== false && selectedNames.has(normalizeProductIdentity(product.nome)));
+  const productIds = new Set(matchingProducts.map((product: any) => String(product.id)));
+  const hotmartProductIds = new Set(matchingProducts.map((product: any) => String(product.hotmart_product_id ?? "")).filter(Boolean));
+  const confirmedSales = periodSales.filter((sale: any) =>
+    (sale.produto_id && productIds.has(String(sale.produto_id)))
+    || (sale.hotmart_product_id && hotmartProductIds.has(String(sale.hotmart_product_id)))
+    || selectedNames.has(normalizeProductIdentity(sale.produto_nome))
+  );
+  const confirmedSaleIds = confirmedSales.map((sale: any) => sale.id);
+  const bridgeResult = confirmedSaleIds.length
+    ? await client.from("hotmart_attribution_bridge_v").select("sale_id,sale_confirmed,data_compra,norwyn_source,norwyn_channel,norwyn_campaign,norwyn_entry,tracking_key_id")
+      .eq("tenant_id", tenantId).in("sale_id", confirmedSaleIds)
     : { data: [], error: null };
+  if (bridgeResult.error) throw new Error(bridgeResult.error.message);
   const reconciledSales = bridgeResult.data ?? [];
-  const purchases = reconciledSales.length
-    ? new Set(reconciledSales.filter((item: any) => item.sale_confirmed && new Date(item.data_compra) >= period.start && new Date(item.data_compra) <= period.end).map((item: any) => item.sale_id)).size
-    : null;
-  const journeyBase = buildJourney(events, purchases);
+  const trackingKeyIdSet = new Set(trackingKeyIds.map(String));
+  const attributedSales = reconciledSales.filter((item: any) => item.sale_confirmed && item.tracking_key_id && trackingKeyIdSet.has(String(item.tracking_key_id)));
+  const confirmedPurchases = new Set(confirmedSales.map((sale: any) => sale.id)).size;
+  const attributedPurchases = new Set(attributedSales.map((sale: any) => sale.sale_id)).size;
+  const unattributedPurchases = Math.max(0, confirmedPurchases - attributedPurchases);
+  const attributedPurchasesByOrigin = new Map<string, number>();
+  for (const sale of attributedSales) {
+    const origin = humanOrigin(sale.norwyn_source, sale.norwyn_channel, sale.norwyn_entry);
+    attributedPurchasesByOrigin.set(origin, (attributedPurchasesByOrigin.get(origin) ?? 0) + 1);
+  }
+  const journeyBase = buildJourney(events, confirmedPurchases);
+  const executiveRates = journeyExecutiveRates(sessionCount, checkoutSessions, confirmedPurchases, attributedPurchases);
   const insightPool = includeTest ? rawAnalysisEvents : rawAnalysisEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
   const insights = criteria.flatMap((criterion) => {
     if (!criterion.active) return [];
@@ -470,7 +502,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     const previousRows = insightPool.filter((row) => new Date(row.occurred_at) >= criterionPreviousStart && new Date(row.occurred_at) < criterionStart);
     return buildInsights({ journey: buildJourney(currentRows, null), previousJourney: buildJourney(previousRows, null), criteria: [criterion], maturity: insightMaturity });
   });
-  const breakdowns = buildJourneyBreakdowns(journeyDimension, selected.landingKey, events, attribution);
+  const breakdowns = buildJourneyBreakdowns(journeyDimension, selected.landingKey, events, attribution, attributedPurchasesByOrigin, attributedPurchases);
 
   const registryId = registryRow?.id ?? null;
   const catalogProductId = definition?.metadata?.catalog_product_id ?? selected.productId;
@@ -536,6 +568,12 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     ],
     journey: {
       ...journeyBase,
+      executiveRates,
+      purchases: {
+        confirmed: confirmedPurchases,
+        attributed: attributedPurchases,
+        unattributed: unattributedPurchases,
+      },
       breakdowns,
       availableDimensions: {
         origin: true,
@@ -545,7 +583,9 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
         device: events.some((row) => Boolean(row.payload?.device_type || row.payload?.event_data?.device_type)),
         trafficType: role === "ADMIN",
       },
-      purchaseLimitation: purchases === null ? "Ainda não existe compra da LP reconciliada de forma confiável via source_sck. Checkout e compra permanecem separados." : null,
+      purchaseLimitation: unattributedPurchases > 0
+        ? `${unattributedPurchases.toLocaleString("pt-BR")} ${unattributedPurchases === 1 ? "compra confirmada ainda não possui" : "compras confirmadas ainda não possuem"} vínculo determinístico com uma origem. ${unattributedPurchases === 1 ? "Ela entra" : "Elas entram"} na conversão total do período, mas não ${unattributedPurchases === 1 ? "é atribuída" : "são atribuídas"} a nenhum canal.`
+        : null,
     },
     insights,
     insightMaturity,
@@ -687,6 +727,8 @@ function emptyContext(role: string | null, allowedModules: string[], diagnostic:
     daily: [], funnel: [],
     journey: {
       detailed: [], executive: [], behavioral: [],
+      executiveRates: { checkoutRate: null, checkoutToPurchaseRate: null, landingConversionRate: null, attributionCoverage: null },
+      purchases: { confirmed: 0, attributed: 0, unattributed: 0 },
       highlights: { biggestAbsoluteLoss: null, biggestPercentageLoss: null, bestProgress: null, lowestProgress: null },
       breakdowns: [],
       availableDimensions: { origin: false, campaign: false, landingKey: false, version: false, device: false, trafficType: false },
