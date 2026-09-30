@@ -45,8 +45,8 @@ return items.map(item => {
   const impressions = Number(d.impressions || 0);
   const reach = Number(d.reach || 0);
   const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];
-  const tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();
-  if (!tenantId) throw new Error('Configure PLATAFORMA_TENANT_ID no ambiente do n8n.');
+  const tenantId = String($items('Configuracao V9')[0]?.json?.tenant_id || '').trim();
+  if (!tenantId) throw new Error('Preencha tenant_id no node Configuracao V9.');
 
   const campaignName = String(d.campaign_name || '').trim();
   const adsetName = String(d.adset_name || '').trim();

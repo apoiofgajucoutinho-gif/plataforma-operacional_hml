@@ -7,22 +7,22 @@
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -4240,
-        560
+        -4300,
+        600
       ],
       "parameters": {}
     },
     {
-      "id": "calc-backfill",
-      "name": "Calcular Periodo 2026",
+      "id": "mode-backfill",
+      "name": "Modo Backfill",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -4000,
-        560
+        -4080,
+        600
       ],
       "parameters": {
-        "jsCode": "const start = new Date('2026-01-01T00:00:00');\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst ranges = [];\n\nlet cursor = new Date(start);\nwhile (cursor <= today) {\n  const since = new Date(cursor);\n  const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);\n  const until = monthEnd > today ? today : monthEnd;\n\n  ranges.push({\n    json: {\n      since: fmt(since),\n      until: fmt(until),\n      mode: 'backfill_2026',\n      periodo: String(cursor.getMonth() + 1).padStart(2, '0') + '/' + cursor.getFullYear()\n    }\n  });\n\n  cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);\n}\n\nconsole.log(`[FGA Ads 2026] Backfill em ${ranges.length} lote(s) mensais.`);\nreturn ranges;"
+        "jsCode": "return [{ json: { mode: 'backfill_2026' } }];"
       }
     },
     {
@@ -31,8 +31,8 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -4240,
-        160
+        -4300,
+        300
       ],
       "parameters": {
         "rule": {
@@ -48,53 +48,192 @@
       }
     },
     {
+      "id": "mode-incremental",
+      "name": "Modo Incremental",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4080,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { mode: 'incremental' } }];"
+      }
+    },
+    {
       "id": "manual-smoke",
       "name": "Executar Smoke Manual",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -4240,
-        -160
+        -4300,
+        0
       ],
       "parameters": {}
     },
     {
-      "id": "calc-smoke",
-      "name": "Calcular Smoke 1-2 dias",
+      "id": "mode-smoke",
+      "name": "Modo Smoke Dry Run",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -4000,
-        -160
+        -4080,
+        0
       ],
       "parameters": {
-        "jsCode": "const SMOKE_DAYS = Math.min(2, Math.max(1, Number($env.META_ADS_SMOKE_DAYS || 1)));\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst since = new Date(today.getTime() - (SMOKE_DAYS - 1) * 24 * 60 * 60 * 1000);\nconst fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nreturn [{ json: { since: fmt(since), until: fmt(today), mode: 'smoke_manual', smoke: true } }];"
+        "jsCode": "return [{ json: { mode: 'smoke_manual' } }];"
       }
     },
     {
-      "id": "calc-incremental",
-      "name": "Calcular Incremental",
+      "id": "config",
+      "name": "Configuracao V9",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -4000,
-        160
+        -3820,
+        300
       ],
       "parameters": {
-        "jsCode": "const LOOKBACK_DAYS = Number($env.META_ADS_LOOKBACK_DAYS || 7);\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst since = new Date(today.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);\nconst fmt = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');\nconst sinceStr = fmt(since);\nconst untilStr = fmt(today);\nconsole.log(`[FGA Ads incremental] Buscando de ${sinceStr} ate ${untilStr}`);\nreturn [{ json: { since: sinceStr, until: untilStr, mode: 'incremental' } }];"
-      }
+        "jsCode": "const input = items[0]?.json || {};\nconst config = {\n  ad_account_id: 'CONFIGURE_AD_ACCOUNT_ID',\n  tenant_id: 'CONFIGURE_TENANT_ID',\n  supabase_url: 'https://CONFIGURE_PROJECT_REF.supabase.co',\n  graph_version: 'v23.0',\n  lookback_days: 7,\n  smoke_days: 1,\n  smoke_persist: false,\n  max_pages: 100,\n  upsert_batch_size: 50,\n  config_ttl_hours: 24,\n  creative_ttl_hours: 168,\n};\nfor (const key of ['ad_account_id', 'tenant_id', 'supabase_url']) {\n  if (!config[key] || String(config[key]).includes('CONFIGURE_')) throw new Error('Preencha ' + key + ' no node Configuracao V9 antes de executar o smoke.');\n}\nreturn [{ json: { ...input, ...config } }];"
+      },
+      "notes": "Somente parametros nao secretos. Tokens e chaves ficam em Credentials do n8n Cloud."
     },
     {
-      "id": "meta-backfill",
-      "name": "Meta Ads API - Backfill 2026",
+      "id": "load-registry",
+      "name": "Carregar Registry Supabase",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -3760,
-        560
+        -3560,
+        300
       ],
       "parameters": {
-        "url": "={{ 'https://graph.facebook.com/v23.0/' + ($env.META_AD_ACCOUNT_ID.startsWith('act_') ? $env.META_AD_ACCOUNT_ID : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "url": "={{ $('Configuracao V9').first().json.supabase_url.replace(//$/, '') + '/rest/v1/norwyn_landing_registry' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "landing_key,campaign_key,url,product_id,metadata"
+            },
+            {
+              "name": "tenant_id",
+              "value": "={{ 'eq.' + $('Configuracao V9').first().json.tenant_id }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "registry-ready",
+      "name": "Registry carregado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3380,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $items('Configuracao V9')[0].json }];"
+      }
+    },
+    {
+      "id": "load-cache",
+      "name": "Carregar Cache Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3160,
+        300
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "url": "={{ $('Configuracao V9').first().json.supabase_url.replace(//$/, '') + '/rest/v1/instagram_ads_config_snapshots' }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "entity_type,entity_id,config_json,config_hash,last_seen_at"
+            },
+            {
+              "name": "tenant_id",
+              "value": "={{ 'eq.' + $('Configuracao V9').first().json.tenant_id }}"
+            },
+            {
+              "name": "order",
+              "value": "last_seen_at.desc"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "cache-ready",
+      "name": "Cache carregado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2960,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $items('Configuracao V9')[0].json }];"
+      }
+    },
+    {
+      "id": "window",
+      "name": "Calcular Janela",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2760,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const config = $items('Configuracao V9')[0]?.json || {};\nconst mode = String(config.mode || 'incremental');\nconst today = new Date();\ntoday.setHours(0, 0, 0, 0);\nconst fmt = date => date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');\nif (mode === 'backfill_2026') {\n  const ranges = [];\n  let cursor = new Date('2026-01-01T00:00:00');\n  while (cursor <= today) {\n    const since = new Date(cursor);\n    const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);\n    const until = monthEnd > today ? today : monthEnd;\n    ranges.push({ json: { since: fmt(since), until: fmt(until), mode, periodo: String(cursor.getMonth() + 1).padStart(2, '0') + '/' + cursor.getFullYear() } });\n    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);\n  }\n  return ranges;\n}\nconst days = mode === 'smoke_manual' ? Math.min(2, Math.max(1, Number(config.smoke_days || 1))) : Math.max(1, Number(config.lookback_days || 7));\nconst since = new Date(today.getTime() - (days - (mode === 'smoke_manual' ? 1 : 0)) * 24 * 60 * 60 * 1000);\nreturn [{ json: { since: fmt(since), until: fmt(today), mode, smoke: mode === 'smoke_manual', smoke_persist: mode === 'smoke_manual' && config.smoke_persist === true } }];"
+      }
+    },
+    {
+      "id": "meta-insights",
+      "name": "Meta Ads API - Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2500,
+        300
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "url": "={{ 'https://graph.facebook.com/' + $('Configuracao V9').first().json.graph_version + '/' + ($('Configuracao V9').first().json.ad_account_id.startsWith('act_') ? $('Configuracao V9').first().json.ad_account_id : 'act_' + $('Configuracao V9').first().json.ad_account_id) + '/insights' }}",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
@@ -117,185 +256,271 @@
             {
               "name": "limit",
               "value": "500"
-            },
-            {
-              "name": "access_token",
-              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
             }
           ]
         },
-        "options": {}
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.paging?.next }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging?.next }}",
+              "limitPagesFetched": true,
+              "maxRequests": "={{ $('Configuracao V9').first().json.max_pages }}",
+              "requestInterval": 300
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
       },
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 1500
     },
     {
-      "id": "meta-incremental",
-      "name": "Meta Ads API - Incremental",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -3760,
-        160
-      ],
-      "parameters": {
-        "url": "={{ 'https://graph.facebook.com/v23.0/' + ($env.META_AD_ACCOUNT_ID.startsWith('act_') ? $env.META_AD_ACCOUNT_ID : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "fields",
-              "value": "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,reach,clicks,unique_clicks,unique_ctr,cost_per_unique_click,inline_link_clicks,unique_inline_link_clicks,unique_inline_link_click_ctr,cost_per_unique_inline_link_click,outbound_clicks,unique_outbound_clicks,ctr,cpc,cpm,frequency,spend,objective,date_start,date_stop,actions,action_values,cost_per_action_type,purchase_roas,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
-            },
-            {
-              "name": "level",
-              "value": "ad"
-            },
-            {
-              "name": "time_range",
-              "value": "={{ JSON.stringify({ since: $json.since, until: $json.until }) }}"
-            },
-            {
-              "name": "time_increment",
-              "value": "1"
-            },
-            {
-              "name": "limit",
-              "value": "500"
-            },
-            {
-              "name": "access_token",
-              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 1500
-    },
-    {
-      "id": "meta-smoke",
-      "name": "Meta Ads API - Smoke",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -3760,
-        -160
-      ],
-      "parameters": {
-        "url": "={{ 'https://graph.facebook.com/v23.0/' + ($env.META_AD_ACCOUNT_ID.startsWith('act_') ? $env.META_AD_ACCOUNT_ID : 'act_' + $env.META_AD_ACCOUNT_ID) + '/insights' }}",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "fields",
-              "value": "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,reach,clicks,unique_clicks,unique_ctr,cost_per_unique_click,inline_link_clicks,unique_inline_link_clicks,unique_inline_link_click_ctr,cost_per_unique_inline_link_click,outbound_clicks,unique_outbound_clicks,ctr,cpc,cpm,frequency,spend,objective,date_start,date_stop,actions,action_values,cost_per_action_type,purchase_roas,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,video_play_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions"
-            },
-            {
-              "name": "level",
-              "value": "ad"
-            },
-            {
-              "name": "time_range",
-              "value": "={{ JSON.stringify({ since: $json.since, until: $json.until }) }}"
-            },
-            {
-              "name": "time_increment",
-              "value": "1"
-            },
-            {
-              "name": "limit",
-              "value": "500"
-            },
-            {
-              "name": "access_token",
-              "value": "={{ $env.META_ADS_ACCESS_TOKEN }}"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 1500
-    },
-    {
-      "id": "tag-smoke",
-      "name": "Marcar Smoke Dry Run",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -3600,
-        -160
-      ],
-      "parameters": {
-        "jsCode": "const persist = String($env.META_ADS_SMOKE_PERSIST || 'false').toLowerCase() === 'true';\nreturn items.map(item => ({ json: { ...item.json, _norwyn_mode: 'smoke_manual', _norwyn_smoke_persist: persist } }));"
-      }
-    },
-    {
-      "id": "pagination",
+      "id": "flatten",
       "name": "Tratar Paginacao",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3480,
-        360
+        -2240,
+        300
       ],
       "parameters": {
-        "jsCode": "let allData = [];\nconst maxPages = Number($env.META_ADS_MAX_PAGES || 100);\n\nfor (const item of items) {\n  const response = item.json;\n  const executionContext = {\n    _norwyn_mode: response._norwyn_mode || null,\n    _norwyn_smoke_persist: response._norwyn_smoke_persist === true,\n  };\n  let batchData = Array.isArray(response.data) ? response.data.map(row => ({ ...row, ...executionContext })) : [];\n  let nextUrl = response.paging?.next || null;\n  let pageCount = 1;\n\n  while (nextUrl && pageCount < maxPages) {\n    pageCount++;\n    console.log(`[FGA Ads] Pagina ${pageCount}...`);\n\n    let pageResp;\n    try {\n      pageResp = await $http.request({ method: 'GET', url: nextUrl });\n    } catch (error) {\n      throw new Error(`Falha ao buscar pagina ${pageCount} da Meta Ads API: ${error.message}`);\n    }\n\n    const pageData = pageResp.data ?? pageResp;\n    batchData = batchData.concat(Array.isArray(pageData.data) ? pageData.data.map(row => ({ ...row, ...executionContext })) : []);\n    nextUrl = pageData.paging?.next || null;\n    await new Promise(resolve => setTimeout(resolve, 300));\n  }\n\n  allData = allData.concat(batchData);\n  console.log(`[FGA Ads] Lote coletado: ${batchData.length} registros em ${pageCount} pagina(s).`);\n}\n\nconsole.log(`[FGA Ads] Total coletado: ${allData.length} registros.`);\nreturn allData.map(row => ({ json: row }));"
+        "jsCode": "const config = $items('Configuracao V9')[0]?.json || {};\nconst rows = [];\nfor (const item of items) {\n  const response = item.json?.body ?? item.json;\n  for (const row of Array.isArray(response?.data) ? response.data : []) rows.push({ json: { ...row, _norwyn_mode: config.mode, _norwyn_smoke_persist: config.mode === 'smoke_manual' && config.smoke_persist === true } });\n}\nreturn rows;"
       }
     },
     {
-      "id": "enrichment",
-      "name": "Enriquecer Configuracao, Publico e Criativo",
+      "id": "prepare-config",
+      "name": "Preparar Configuracao Meta",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3340,
-        360
+        -2000,
+        300
       ],
       "parameters": {
-        "jsCode": "const token = String($env.META_ADS_ACCESS_TOKEN || '').trim();\nconst supabaseUrl = String($env.SUPABASE_URL || '').replace(/\\/$/, '');\nconst serviceKey = String($env.SUPABASE_SERVICE_ROLE_KEY || '').trim();\nconst tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();\nconst configTtlHours = Math.max(1, Number($env.META_ADS_CONFIG_TTL_HOURS || 24));\nconst creativeTtlHours = Math.max(configTtlHours, Number($env.META_ADS_CREATIVE_TTL_HOURS || 168));\nconst memoryCache = new Map();\nconst pendingSnapshots = new Map();\n\nfunction stableValue(value) {\n  if (Array.isArray(value)) return value.map(stableValue);\n  if (!value || typeof value !== 'object') return value;\n  return Object.keys(value).sort().reduce((result, key) => {\n    result[key] = stableValue(value[key]);\n    return result;\n  }, {});\n}\n\nfunction configHash(value) {\n  const input = JSON.stringify(stableValue(value));\n  let hash = 2166136261;\n  for (let index = 0; index < input.length; index++) {\n    hash ^= input.charCodeAt(index);\n    hash = Math.imul(hash, 16777619);\n  }\n  return 'fnv1a-' + (hash >>> 0).toString(16).padStart(8, '0');\n}\n\nfunction isFresh(timestamp, ttlHours) {\n  const parsed = Date.parse(timestamp || '');\n  return Number.isFinite(parsed) && Date.now() - parsed < ttlHours * 60 * 60 * 1000;\n}\n\nasync function readSnapshot(entityType, entityId, ttlHours) {\n  if (!supabaseUrl || !serviceKey || !tenantId) return null;\n  try {\n    const query = [\n      'select=config_json,config_hash,last_seen_at',\n      'tenant_id=eq.' + encodeURIComponent(tenantId),\n      'entity_type=eq.' + encodeURIComponent(entityType),\n      'entity_id=eq.' + encodeURIComponent(entityId),\n      'order=last_seen_at.desc',\n      'limit=1',\n    ].join('&');\n    const response = await $http.request({\n      method: 'GET',\n      url: supabaseUrl + '/rest/v1/instagram_ads_config_snapshots?' + query,\n      headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey },\n    });\n    const rows = response.data ?? response ?? [];\n    const snapshot = Array.isArray(rows) ? rows[0] : null;\n    return snapshot && isFresh(snapshot.last_seen_at, ttlHours) ? snapshot : null;\n  } catch (error) {\n    console.log('[FGA Ads] Cache de configuracao indisponivel; consultando Meta.');\n    return null;\n  }\n}\n\nasync function graphGet(entityId, fields, fallbackFields) {\n  try {\n    const response = await $http.request({\n      method: 'GET',\n      url: 'https://graph.facebook.com/v23.0/' + encodeURIComponent(entityId),\n      qs: { fields, access_token: token },\n    });\n    return { payload: response.data ?? response ?? {}, fieldSet: 'complete', error: null };\n  } catch (completeError) {\n    if (!fallbackFields || fallbackFields === fields) throw completeError;\n    try {\n      const response = await $http.request({\n        method: 'GET',\n        url: 'https://graph.facebook.com/v23.0/' + encodeURIComponent(entityId),\n        qs: { fields: fallbackFields, access_token: token },\n      });\n      return {\n        payload: response.data ?? response ?? {},\n        fieldSet: 'fallback',\n        error: String(completeError.message || completeError).slice(0, 300),\n      };\n    } catch (fallbackError) {\n      throw new Error(String(fallbackError.message || fallbackError).slice(0, 300));\n    }\n  }\n}\n\nasync function getEntity(entityType, entityId, fields, fallbackFields, ttlHours, parentIds) {\n  const id = String(entityId || '').trim();\n  if (!id || !token) return { payload: {}, hash: null, source: 'unavailable', error: id ? 'missing_token' : 'missing_id' };\n  const cacheKey = entityType + ':' + id;\n  if (memoryCache.has(cacheKey)) return memoryCache.get(cacheKey);\n\n  const stored = await readSnapshot(entityType, id, ttlHours);\n  if (stored) {\n    const result = { payload: stored.config_json || {}, hash: stored.config_hash, source: 'snapshot_cache', error: null };\n    memoryCache.set(cacheKey, result);\n    return result;\n  }\n\n  try {\n    const graph = await graphGet(id, fields, fallbackFields);\n    const hash = configHash(graph.payload);\n    const snapshot = {\n      tenant_id: tenantId,\n      entity_type: entityType,\n      entity_id: id,\n      entity_name: graph.payload.name || null,\n      parent_ids: parentIds || {},\n      config_hash: hash,\n      config_json: graph.payload,\n      source: 'meta_graph_api',\n      graph_version: 'v23.0',\n      collector_version: 'v9',\n      last_seen_at: new Date().toISOString(),\n    };\n    pendingSnapshots.set(cacheKey + ':' + hash, snapshot);\n    const result = { payload: graph.payload, hash, source: 'meta_graph_api', error: graph.error, fieldSet: graph.fieldSet };\n    memoryCache.set(cacheKey, result);\n    await new Promise(resolve => setTimeout(resolve, 80));\n    return result;\n  } catch (error) {\n    const result = { payload: {}, hash: null, source: 'meta_graph_api', error: String(error.message || error).slice(0, 300) };\n    memoryCache.set(cacheKey, result);\n    return result;\n  }\n}\n\nlet landings = [];\nif (supabaseUrl && serviceKey && tenantId) {\n  try {\n    const response = await $http.request({\n      method: 'GET',\n      url: supabaseUrl + '/rest/v1/norwyn_landing_registry?select=landing_key,campaign_key,url,product_id,metadata&tenant_id=eq.' + encodeURIComponent(tenantId),\n      headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey },\n    });\n    landings = response.data ?? response ?? [];\n  } catch (error) {\n    console.log('[FGA Ads] Registry de LP indisponivel; coleta continua sem resolver landing_key.');\n  }\n}\n\nfunction firstText(values) {\n  if (!Array.isArray(values)) return null;\n  const item = values.find(entry => typeof entry?.text === 'string' && entry.text.trim());\n  return item?.text?.trim() || null;\n}\n\nfunction firstUrl(creative) {\n  const spec = creative?.object_story_spec || {};\n  const candidates = [\n    spec.link_data?.link,\n    spec.video_data?.call_to_action?.value?.link,\n    creative?.link_url,\n    creative?.object_url,\n  ];\n  for (const entry of creative?.asset_feed_spec?.link_urls || []) {\n    candidates.push(entry?.website_url, entry?.deeplink_url);\n  }\n  return candidates.find(value => typeof value === 'string' && /^https?:\\/\\//i.test(value)) || null;\n}\n\nfunction creativeDetails(creative, video) {\n  const spec = creative?.object_story_spec || {};\n  const link = spec.link_data || {};\n  const videoData = spec.video_data || {};\n  const feed = creative?.asset_feed_spec || {};\n  const children = Array.isArray(link.child_attachments) ? link.child_attachments : [];\n  const videoId = videoData.video_id || feed.videos?.[0]?.video_id || null;\n  const imageUrl = creative?.image_url || videoData.image_url || link.picture || feed.images?.[0]?.url || null;\n  let format = 'outro';\n  if (children.length > 1 || (feed.images?.length || 0) + (feed.videos?.length || 0) > 1) format = 'carrossel';\n  else if (videoId) format = 'video';\n  else if (imageUrl || creative?.image_hash || link.image_hash) format = 'imagem';\n  return {\n    format,\n    body: videoData.message || link.message || creative?.body || firstText(feed.bodies) || null,\n    headline: videoData.title || link.name || creative?.title || firstText(feed.titles) || null,\n    description: videoData.link_description || link.description || firstText(feed.descriptions) || null,\n    cta: videoData.call_to_action?.type || link.call_to_action?.type || feed.call_to_action_types?.[0] || null,\n    image_url: imageUrl,\n    video_id: videoId,\n    video_duration_seconds: Number.isFinite(Number(video?.length)) ? Number(video.length) : null,\n    object_story_id: creative?.object_story_id || creative?.effective_object_story_id || null,\n    instagram_permalink_url: creative?.instagram_permalink_url || video?.permalink_url || null,\n    asset_ids: {\n      image_hashes: [creative?.image_hash, link.image_hash, ...(feed.images || []).map(entry => entry?.hash)].filter(Boolean),\n      video_ids: [videoId, ...(feed.videos || []).map(entry => entry?.video_id)].filter(Boolean),\n      child_attachment_ids: children.map(entry => entry?.image_hash || entry?.video_id).filter(Boolean),\n    },\n  };\n}\n\nfunction resolveLanding(destinationUrl, urlTags) {\n  let destinationHost = null;\n  try { destinationHost = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch {}\n  for (const landing of landings) {\n    let landingHost = null;\n    try { landingHost = new URL(landing.url).hostname.toLowerCase(); } catch {}\n    if (destinationHost && landingHost === destinationHost) {\n      return { landing_key: landing.landing_key, confidence: 'high', reason: 'destination_domain_exact' };\n    }\n    if (urlTags && (urlTags.includes('landing_key=' + landing.landing_key) || urlTags.includes('utm_campaign=' + landing.campaign_key))) {\n      return { landing_key: landing.landing_key, confidence: 'high', reason: 'url_tags_exact' };\n    }\n  }\n  return { landing_key: null, confidence: 'unresolved', reason: 'no_explicit_destination_match' };\n}\n\nfunction targetingSignals(targeting, audienceDetails) {\n  const categories = new Set();\n  const evidence = [];\n  const audienceNames = [];\n\n  for (const audience of audienceDetails) {\n    const raw = JSON.stringify({\n      subtype: audience?.subtype,\n      customer_file_source: audience?.customer_file_source,\n      lookalike_spec: audience?.lookalike_spec,\n      retention_days: audience?.retention_days,\n      rule: audience?.rule,\n    }).toLowerCase();\n    const name = String(audience?.name || '').trim();\n    if (name) audienceNames.push(name);\n    if (audience?.lookalike_spec || String(audience?.subtype || '').toUpperCase().includes('LOOKALIKE')) {\n      categories.add('Lookalike');\n      evidence.push('custom_audience.lookalike_spec/subtype');\n    } else if ((raw.includes('instagram') || raw.includes('ig_business')) && raw.includes('engag')) {\n      categories.add('Engajamento Instagram');\n      evidence.push('custom_audience.rule:instagram_engagement');\n    } else if (raw.includes('url') || raw.includes('website')) {\n      categories.add('Visitantes do site');\n      evidence.push('custom_audience.rule:website');\n    } else if (raw.includes('pixel') || raw.includes('offsite')) {\n      categories.add('Pixel / site');\n      evidence.push('custom_audience.rule:pixel');\n    } else if (raw.includes('engagement') || raw.includes('remarket')) {\n      categories.add('Remarketing');\n      evidence.push('custom_audience.subtype/rule:engagement');\n    } else if (audience?.subtype || audience?.customer_file_source) {\n      categories.add('Lista / custom audience');\n      evidence.push('custom_audience.subtype/customer_file_source');\n    }\n  }\n\n  const interests = [\n    ...(targeting?.interests || []),\n    ...((targeting?.flexible_spec || []).flatMap(group => group?.interests || [])),\n  ];\n  const behaviors = [\n    ...(targeting?.behaviors || []),\n    ...((targeting?.flexible_spec || []).flatMap(group => group?.behaviors || [])),\n  ];\n  if (interests.length || behaviors.length) {\n    categories.add('P\\u00fablico por interesse');\n    evidence.push('targeting.interests/behaviors');\n  }\n\n  const advantage = Boolean(\n    targeting?.targeting_automation?.advantage_audience === 1 ||\n    targeting?.targeting_automation?.advantage_audience === true ||\n    targeting?.targeting_relaxation_types ||\n    targeting?.advantage_audience,\n  );\n  const hasCustom = audienceDetails.length > 0 || (targeting?.custom_audiences || []).length > 0;\n  if (advantage || (!hasCustom && !interests.length && !behaviors.length && targeting?.geo_locations)) {\n    categories.add('P\\u00fablico amplo / Advantage');\n    evidence.push(advantage ? 'targeting.advantage_or_expansion' : 'targeting.only_demographic_geo');\n  }\n\n  let audienceType = 'N\\u00e3o identificado';\n  let confidence = 'unresolved';\n  if (categories.size === 1) {\n    audienceType = Array.from(categories)[0];\n    confidence = audienceDetails.length || interests.length || advantage ? 'high' : 'medium';\n  } else if (categories.size > 1) {\n    audienceType = 'Misto';\n    confidence = 'high';\n  }\n\n  const summaryParts = [];\n  if (targeting?.age_min || targeting?.age_max) summaryParts.push('idade ' + (targeting.age_min || '?') + '-' + (targeting.age_max || '?'));\n  if (targeting?.genders?.length) summaryParts.push('generos ' + targeting.genders.join(','));\n  if (targeting?.geo_locations?.countries?.length) summaryParts.push('paises ' + targeting.geo_locations.countries.join(','));\n  if (targeting?.publisher_platforms?.length) summaryParts.push('plataformas ' + targeting.publisher_platforms.join(','));\n  if (targeting?.device_platforms?.length) summaryParts.push('dispositivos ' + targeting.device_platforms.join(','));\n  if (audienceNames.length) summaryParts.push('audiencias ' + audienceNames.join(', '));\n\n  return {\n    audience_type: audienceType,\n    audience_label: audienceNames.length ? audienceType + ': ' + audienceNames.join(', ') : audienceType,\n    targeting_summary: summaryParts.join(' | ') || null,\n    audience_confidence: confidence,\n    audience_evidence: Array.from(new Set(evidence)),\n  };\n}\n\nconst campaignFields = 'id,name,objective,buying_type,status,effective_status,daily_budget,lifetime_budget,spend_cap,start_time,stop_time,bid_strategy,pacing_type';\nconst adsetFields = 'id,name,campaign_id,status,effective_status,optimization_goal,billing_event,bid_strategy,bid_amount,daily_budget,lifetime_budget,budget_remaining,start_time,end_time,attribution_spec,targeting,promoted_object,destination_type,pacing_type';\nconst adFields = 'id,name,adset_id,campaign_id,status,effective_status,creative{id}';\nconst creativeFields = 'id,name,body,title,thumbnail_url,image_url,image_hash,object_url,link_url,url_tags,object_story_id,effective_object_story_id,instagram_permalink_url,source_instagram_media_id,object_story_spec,asset_feed_spec';\nconst audienceFields = 'id,name,subtype,customer_file_source,lookalike_spec,retention_days,rule';\n\nfor (const item of items) {\n  const row = item.json;\n  const campaign = await getEntity('campaign', row.campaign_id, campaignFields, 'id,name,objective,status,effective_status', configTtlHours, {});\n  const adset = await getEntity('adset', row.adset_id, adsetFields, 'id,name,campaign_id,status,effective_status,optimization_goal,billing_event,targeting', configTtlHours, { campaign_id: row.campaign_id || null });\n  const ad = await getEntity('ad', row.ad_id, adFields, 'id,name,status,effective_status,creative{id}', configTtlHours, { campaign_id: row.campaign_id || null, adset_id: row.adset_id || null });\n  const creativeId = ad.payload?.creative?.id || null;\n  const creative = await getEntity('creative', creativeId, creativeFields, 'id,name,thumbnail_url,image_url,object_url,url_tags,object_story_spec,asset_feed_spec', creativeTtlHours, { ad_id: row.ad_id || null });\n  const customAudienceRefs = [\n    ...(adset.payload?.targeting?.custom_audiences || []),\n    ...(adset.payload?.targeting?.excluded_custom_audiences || []),\n  ];\n  const audienceDetails = [];\n  for (const reference of customAudienceRefs) {\n    const detail = await getEntity('audience', reference?.id, audienceFields, 'id,name,subtype,lookalike_spec,retention_days', creativeTtlHours, { adset_id: row.adset_id || null });\n    if (detail.payload?.id) audienceDetails.push(detail.payload);\n  }\n  const videoId = creativeDetails(creative.payload, null).video_id;\n  const video = videoId\n    ? await getEntity('video', videoId, 'id,title,length,picture,permalink_url', 'id,title,length,picture', creativeTtlHours, { creative_id: creativeId })\n    : { payload: {}, hash: null };\n  const details = creativeDetails(creative.payload, video.payload);\n  const audience = targetingSignals(adset.payload?.targeting || {}, audienceDetails);\n\n  const creativeSnapshotKey = 'creative:' + creativeId + ':' + creative.hash;\n  const creativeSnapshot = pendingSnapshots.get(creativeSnapshotKey);\n  if (creativeSnapshot) creativeSnapshot.config_json = { ...creativeSnapshot.config_json, _norwyn_details: details };\n\n  const adsetSnapshotKey = 'adset:' + row.adset_id + ':' + adset.hash;\n  const adsetSnapshot = pendingSnapshots.get(adsetSnapshotKey);\n  if (adsetSnapshot) Object.assign(adsetSnapshot, audience);\n\n  row.effective_status = ad.payload?.effective_status || row.effective_status || null;\n  row.creative_id = creativeId;\n  row.creative_name = creative.payload?.name || null;\n  row.thumbnail_url = creative.payload?.thumbnail_url || creative.payload?.image_url || video.payload?.picture || null;\n  row.preview_url = details.instagram_permalink_url;\n  row.destination_url = firstUrl(creative.payload);\n  try { row.destination_domain = row.destination_url ? new URL(row.destination_url).hostname.toLowerCase() : null; } catch { row.destination_domain = null; }\n  row.url_tags = creative.payload?.url_tags || null;\n  row._landing_resolution = resolveLanding(row.destination_url, row.url_tags);\n  row.landing_key = row._landing_resolution.landing_key;\n  row._creative_details = details;\n  row._audience = audience;\n  row._campaign_config = campaign.payload;\n  row._adset_config = adset.payload;\n  row._config_sources = {\n    campaign: campaign.source,\n    adset: adset.source,\n    ad: ad.source,\n    creative: creative.source,\n    video: video.source || null,\n  };\n  row._config_snapshot_hash = configHash({\n    campaign: campaign.hash,\n    adset: adset.hash,\n    ad: ad.hash,\n    creative: creative.hash,\n    video: video.hash,\n  });\n  row._creative_enrichment = creativeId\n    ? { confidence: 'high', source: creative.source, field_set: creative.fieldSet || 'cache' }\n    : { confidence: 'unresolved', source: ad.source, error: ad.error || null };\n}\n\nif (items.length) items[0].json._config_snapshots = Array.from(pendingSnapshots.values());\nreturn items;\n"
-      },
-      "notes": "Cache por entidade. Targeting/config: META_ADS_CONFIG_TTL_HOURS (24h). Creative/video/audience: META_ADS_CREATIVE_TTL_HOURS (168h)."
+        "jsCode": "const config = $items('Configuracao V9')[0]?.json || {};\nconst ttlMs = Math.max(1, Number(config.config_ttl_hours || 24)) * 60 * 60 * 1000;\n\nfunction rowsFrom(nodeName) {\n  try {\n    return $items(nodeName).flatMap(item => {\n      const value = item.json?.body ?? item.json;\n      return Array.isArray(value) ? value : [value];\n    }).filter(Boolean);\n  } catch {\n    return [];\n  }\n}\n\nconst latest = new Map();\nfor (const row of rowsFrom('Carregar Cache Supabase')) {\n  const key = `${row.entity_type}:${row.entity_id}`;\n  if (!latest.has(key) || Date.parse(row.last_seen_at || '') > Date.parse(latest.get(key).last_seen_at || '')) {\n    latest.set(key, row);\n  }\n}\n\nconst adIds = [...new Set(items.map(item => String(item.json.ad_id || '').trim()).filter(Boolean))];\nconst fields = [\n  'id', 'name', 'status', 'effective_status',\n  'campaign{id,name,objective,buying_type,status,effective_status,daily_budget,lifetime_budget,spend_cap,start_time,stop_time,bid_strategy,pacing_type}',\n  'adset{id,name,campaign_id,status,effective_status,optimization_goal,billing_event,bid_strategy,bid_amount,daily_budget,lifetime_budget,budget_remaining,start_time,end_time,attribution_spec,targeting,promoted_object,destination_type,pacing_type}',\n  'creative{id,name,body,title,thumbnail_url,image_url,image_hash,object_url,link_url,url_tags,object_story_id,effective_object_story_id,instagram_permalink_url,source_instagram_media_id,object_story_spec,asset_feed_spec}',\n].join(',');\nconst requests = [];\n\nfor (const adId of adIds) {\n  const snapshot = latest.get(`ad:${adId}`);\n  const stored = snapshot?.config_json;\n  const seenAt = Date.parse(snapshot?.last_seen_at || '');\n  const fresh = stored?._norwyn_bundle_v9_cloud === true && Number.isFinite(seenAt) && Date.now() - seenAt < ttlMs;\n  if (!fresh) requests.push({ json: { fetch: true, entity_type: 'ad_bundle', entity_id: adId, fields } });\n}\n\nreturn requests.length ? requests : [{ json: { fetch: false, reason: 'configuration_cache_fresh' } }];\n"
+      }
     },
     {
-      "id": "transform",
+      "id": "has-config",
+      "name": "Buscar configuracao Meta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1760,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fetch_config",
+              "leftValue": "={{ $json.fetch === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "meta-config",
+      "name": "Meta Graph - Configuracao de Anuncios",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1520,
+        180
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "url": "={{ 'https://graph.facebook.com/' + $('Configuracao V9').first().json.graph_version + '/' + $json.entity_id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "={{ $json.fields }}"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 200
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "prepare-assets",
+      "name": "Preparar Assets Meta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1280,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const config = $items('Configuracao V9')[0]?.json || {};\nconst ttlMs = Math.max(Number(config.config_ttl_hours || 24), Number(config.creative_ttl_hours || 168)) * 60 * 60 * 1000;\n\nfunction rowsFrom(nodeName) {\n  try {\n    return $items(nodeName).flatMap(item => {\n      const value = item.json?.body ?? item.json;\n      return Array.isArray(value) ? value : [value];\n    }).filter(Boolean);\n  } catch {\n    return [];\n  }\n}\n\nconst cacheRows = rowsFrom('Carregar Cache Supabase');\nconst latest = new Map();\nfor (const row of cacheRows) {\n  const key = `${row.entity_type}:${row.entity_id}`;\n  if (!latest.has(key) || Date.parse(row.last_seen_at || '') > Date.parse(latest.get(key).last_seen_at || '')) latest.set(key, row);\n}\n\nconst bundles = new Map();\nfor (const row of cacheRows) {\n  if (row.entity_type === 'ad' && row.config_json?._norwyn_bundle_v9_cloud === true) bundles.set(String(row.entity_id), row.config_json);\n}\nconst requestDefs = rowsFrom('Preparar Configuracao Meta').filter(row => row.fetch === true);\nconst responses = rowsFrom('Meta Graph - Configuracao de Anuncios');\nrequestDefs.forEach((request, index) => {\n  const response = responses[index];\n  if (response && !response.error) bundles.set(String(request.entity_id), response);\n});\n\nconst requests = [];\nconst seen = new Set();\nfunction queue(entityType, entityId, fields, parentIds) {\n  const id = String(entityId || '').trim();\n  if (!id || seen.has(`${entityType}:${id}`)) return;\n  seen.add(`${entityType}:${id}`);\n  const snapshot = latest.get(`${entityType}:${id}`);\n  const seenAt = Date.parse(snapshot?.last_seen_at || '');\n  const fresh = snapshot && Number.isFinite(seenAt) && Date.now() - seenAt < ttlMs;\n  if (!fresh) requests.push({ json: { fetch: true, entity_type: entityType, entity_id: id, fields, parent_ids: parentIds || {} } });\n}\n\nfor (const [adId, bundle] of bundles) {\n  const targeting = bundle.adset?.targeting || {};\n  for (const ref of [...(targeting.custom_audiences || []), ...(targeting.excluded_custom_audiences || [])]) {\n    queue('audience', ref?.id, 'id,name,subtype,customer_file_source,lookalike_spec,retention_days,rule', { adset_id: bundle.adset?.id || null });\n  }\n  const creative = bundle.creative || {};\n  const videoId = creative.object_story_spec?.video_data?.video_id || creative.asset_feed_spec?.videos?.[0]?.video_id || null;\n  queue('video', videoId, 'id,title,length,picture,permalink_url', { ad_id: adId, creative_id: creative.id || null });\n}\n\nreturn requests.length ? requests : [{ json: { fetch: false, reason: 'asset_cache_fresh_or_no_assets' } }];\n"
+      }
+    },
+    {
+      "id": "has-assets",
+      "name": "Buscar assets Meta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1040,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fetch_assets",
+              "leftValue": "={{ $json.fetch === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "meta-assets",
+      "name": "Meta Graph - Assets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        180
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "url": "={{ 'https://graph.facebook.com/' + $('Configuracao V9').first().json.graph_version + '/' + $json.entity_id }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "={{ $json.fields }}"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 200
+            }
+          },
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "consolidate",
+      "name": "Consolidar Enriquecimento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const config = $items('Configuracao V9')[0]?.json || {};\nconst tenantId = String(config.tenant_id || '').trim();\nif (!tenantId || tenantId.startsWith('CONFIGURE_')) throw new Error('Preencha tenant_id no node Configuracao V9.');\n\nfunction rowsFrom(nodeName) {\n  try {\n    return $items(nodeName).flatMap(item => {\n      const value = item.json?.body ?? item.json;\n      return Array.isArray(value) ? value : [value];\n    }).filter(Boolean);\n  } catch {\n    return [];\n  }\n}\n\nfunction stable(value) {\n  if (Array.isArray(value)) return value.map(stable);\n  if (!value || typeof value !== 'object') return value;\n  return Object.keys(value).sort().reduce((out, key) => { out[key] = stable(value[key]); return out; }, {});\n}\n\nfunction configHash(value) {\n  const input = JSON.stringify(stable(value));\n  let result = 2166136261;\n  for (let index = 0; index < input.length; index++) { result ^= input.charCodeAt(index); result = Math.imul(result, 16777619); }\n  return `fnv1a-${(result >>> 0).toString(16).padStart(8, '0')}`;\n}\n\nfunction firstText(values) {\n  const entry = Array.isArray(values) ? values.find(value => typeof value?.text === 'string' && value.text.trim()) : null;\n  return entry?.text?.trim() || null;\n}\n\nfunction firstUrl(creative) {\n  const spec = creative?.object_story_spec || {};\n  const candidates = [spec.link_data?.link, spec.video_data?.call_to_action?.value?.link, creative?.link_url, creative?.object_url];\n  for (const entry of creative?.asset_feed_spec?.link_urls || []) candidates.push(entry?.website_url, entry?.deeplink_url);\n  return candidates.find(value => typeof value === 'string' && /^https?:\\/\\//i.test(value)) || null;\n}\n\nfunction creativeDetails(creative, video) {\n  const spec = creative?.object_story_spec || {};\n  const link = spec.link_data || {};\n  const videoData = spec.video_data || {};\n  const feed = creative?.asset_feed_spec || {};\n  const children = Array.isArray(link.child_attachments) ? link.child_attachments : [];\n  const videoId = videoData.video_id || feed.videos?.[0]?.video_id || null;\n  const imageUrl = creative?.image_url || videoData.image_url || link.picture || feed.images?.[0]?.url || null;\n  let format = 'outro';\n  if (children.length > 1 || (feed.images?.length || 0) + (feed.videos?.length || 0) > 1) format = 'carrossel';\n  else if (videoId) format = 'video';\n  else if (imageUrl || creative?.image_hash || link.image_hash) format = 'imagem';\n  return {\n    format,\n    body: videoData.message || link.message || creative?.body || firstText(feed.bodies) || null,\n    headline: videoData.title || link.name || creative?.title || firstText(feed.titles) || null,\n    description: videoData.link_description || link.description || firstText(feed.descriptions) || null,\n    cta: videoData.call_to_action?.type || link.call_to_action?.type || feed.call_to_action_types?.[0] || null,\n    image_url: imageUrl,\n    video_id: videoId,\n    video_duration_seconds: Number.isFinite(Number(video?.length)) ? Number(video.length) : null,\n    object_story_id: creative?.object_story_id || creative?.effective_object_story_id || null,\n    instagram_permalink_url: creative?.instagram_permalink_url || video?.permalink_url || null,\n    asset_ids: {\n      image_hashes: [creative?.image_hash, link.image_hash, ...(feed.images || []).map(entry => entry?.hash)].filter(Boolean),\n      video_ids: [videoId, ...(feed.videos || []).map(entry => entry?.video_id)].filter(Boolean),\n      child_attachment_ids: children.map(entry => entry?.image_hash || entry?.video_id).filter(Boolean),\n    },\n  };\n}\n\nfunction targetingSignals(targeting, audienceDetails) {\n  const categories = new Set();\n  const evidence = [];\n  const names = [];\n  for (const audience of audienceDetails) {\n    const raw = JSON.stringify({ subtype: audience?.subtype, customer_file_source: audience?.customer_file_source, lookalike_spec: audience?.lookalike_spec, rule: audience?.rule }).toLowerCase();\n    if (audience?.name) names.push(String(audience.name));\n    if (audience?.lookalike_spec || String(audience?.subtype || '').toUpperCase().includes('LOOKALIKE')) { categories.add('Lookalike'); evidence.push('custom_audience.lookalike_spec/subtype'); }\n    else if ((raw.includes('instagram') || raw.includes('ig_business')) && raw.includes('engag')) { categories.add('Engajamento Instagram'); evidence.push('custom_audience.rule:instagram_engagement'); }\n    else if (raw.includes('url') || raw.includes('website')) { categories.add('Visitantes do site'); evidence.push('custom_audience.rule:website'); }\n    else if (raw.includes('pixel') || raw.includes('offsite')) { categories.add('Pixel / site'); evidence.push('custom_audience.rule:pixel'); }\n    else if (raw.includes('engagement') || raw.includes('remarket')) { categories.add('Remarketing'); evidence.push('custom_audience.subtype/rule:engagement'); }\n    else if (audience?.subtype || audience?.customer_file_source) { categories.add('Lista / custom audience'); evidence.push('custom_audience.subtype/customer_file_source'); }\n  }\n  const interests = [...(targeting?.interests || []), ...((targeting?.flexible_spec || []).flatMap(group => group?.interests || []))];\n  const behaviors = [...(targeting?.behaviors || []), ...((targeting?.flexible_spec || []).flatMap(group => group?.behaviors || []))];\n  if (interests.length || behaviors.length) { categories.add('Publico por interesse'); evidence.push('targeting.interests/behaviors'); }\n  const advantage = Boolean(targeting?.targeting_automation?.advantage_audience === 1 || targeting?.targeting_automation?.advantage_audience === true || targeting?.targeting_relaxation_types || targeting?.advantage_audience);\n  const hasCustom = audienceDetails.length > 0 || (targeting?.custom_audiences || []).length > 0;\n  if (advantage || (!hasCustom && !interests.length && !behaviors.length && targeting?.geo_locations)) { categories.add('Publico amplo / Advantage'); evidence.push(advantage ? 'targeting.advantage_or_expansion' : 'targeting.only_demographic_geo'); }\n  const type = categories.size > 1 ? 'Misto' : categories.size === 1 ? [...categories][0] : 'Nao identificado';\n  const summary = [];\n  if (targeting?.age_min || targeting?.age_max) summary.push(`idade ${targeting.age_min || '?'}-${targeting.age_max || '?'}`);\n  if (targeting?.geo_locations?.countries?.length) summary.push(`paises ${targeting.geo_locations.countries.join(',')}`);\n  if (names.length) summary.push(`audiencias ${names.join(', ')}`);\n  return { audience_type: type, audience_label: names.length ? `${type}: ${names.join(', ')}` : type, targeting_summary: summary.join(' | ') || null, audience_confidence: categories.size ? (audienceDetails.length || interests.length || advantage ? 'high' : 'medium') : 'unresolved', audience_evidence: [...new Set(evidence)] };\n}\n\nconst cacheRows = rowsFrom('Carregar Cache Supabase');\nconst latest = new Map();\nfor (const row of cacheRows) {\n  const key = `${row.entity_type}:${row.entity_id}`;\n  if (!latest.has(key) || Date.parse(row.last_seen_at || '') > Date.parse(latest.get(key).last_seen_at || '')) latest.set(key, row);\n}\n\nconst bundles = new Map();\nfor (const row of cacheRows) if (row.entity_type === 'ad' && row.config_json?._norwyn_bundle_v9_cloud === true) bundles.set(String(row.entity_id), { payload: row.config_json, source: 'snapshot_cache' });\nconst baseDefs = rowsFrom('Preparar Configuracao Meta').filter(row => row.fetch === true);\nconst baseResponses = rowsFrom('Meta Graph - Configuracao de Anuncios');\nbaseDefs.forEach((request, index) => {\n  const response = baseResponses[index];\n  if (response && !response.error) bundles.set(String(request.entity_id), { payload: { ...response, _norwyn_bundle_v9_cloud: true }, source: 'meta_graph_api' });\n});\n\nconst assets = new Map();\nfor (const row of cacheRows) if (row.entity_type === 'audience' || row.entity_type === 'video') assets.set(`${row.entity_type}:${row.entity_id}`, { payload: row.config_json || {}, source: 'snapshot_cache' });\nconst assetDefs = rowsFrom('Preparar Assets Meta').filter(row => row.fetch === true);\nconst assetResponses = rowsFrom('Meta Graph - Assets');\nassetDefs.forEach((request, index) => {\n  const response = assetResponses[index];\n  if (response && !response.error) assets.set(`${request.entity_type}:${request.entity_id}`, { payload: response, source: 'meta_graph_api' });\n});\n\nconst landings = rowsFrom('Carregar Registry Supabase');\nfunction resolveLanding(destinationUrl, urlTags) {\n  let host = null;\n  try { host = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch {}\n  for (const landing of landings) {\n    let landingHost = null;\n    try { landingHost = new URL(landing.url).hostname.toLowerCase(); } catch {}\n    if (host && host === landingHost) return { landing_key: landing.landing_key, confidence: 'high', reason: 'destination_domain_exact' };\n    if (urlTags && (urlTags.includes(`landing_key=${landing.landing_key}`) || urlTags.includes(`utm_campaign=${landing.campaign_key}`))) return { landing_key: landing.landing_key, confidence: 'high', reason: 'url_tags_exact' };\n  }\n  return { landing_key: null, confidence: 'unresolved', reason: 'no_explicit_destination_match' };\n}\n\nconst snapshots = new Map();\nfunction addSnapshot(entityType, payload, parentIds, extra = {}) {\n  if (!payload?.id) return null;\n  const hash = configHash(payload);\n  snapshots.set(`${entityType}:${payload.id}:${hash}`, { tenant_id: tenantId, entity_type: entityType, entity_id: String(payload.id), entity_name: payload.name || payload.title || null, parent_ids: parentIds || {}, config_hash: hash, config_json: payload, source: 'meta_graph_api', graph_version: config.graph_version || 'v23.0', collector_version: 'v9-cloud-credentials', last_seen_at: new Date().toISOString(), ...extra });\n  return hash;\n}\n\nconst output = rowsFrom('Tratar Paginacao').map(source => {\n  const row = { ...source };\n  const bundleResult = bundles.get(String(row.ad_id || '')) || { payload: {}, source: 'unavailable' };\n  const bundle = bundleResult.payload || {};\n  const campaign = bundle.campaign || {};\n  const adset = bundle.adset || {};\n  const creative = bundle.creative || {};\n  const targeting = adset.targeting || {};\n  const audienceDetails = [...(targeting.custom_audiences || []), ...(targeting.excluded_custom_audiences || [])].map(ref => assets.get(`audience:${ref?.id}`)?.payload).filter(Boolean);\n  const initialDetails = creativeDetails(creative, null);\n  const videoResult = initialDetails.video_id ? assets.get(`video:${initialDetails.video_id}`) : null;\n  const details = creativeDetails(creative, videoResult?.payload || null);\n  const audience = targetingSignals(targeting, audienceDetails);\n  const destinationUrl = firstUrl(creative);\n  const landing = resolveLanding(destinationUrl, creative.url_tags || null);\n  const hashes = {};\n\n  if (bundleResult.source === 'meta_graph_api') {\n    hashes.campaign = addSnapshot('campaign', campaign, {});\n    hashes.adset = addSnapshot('adset', adset, { campaign_id: row.campaign_id || campaign.id || null }, audience);\n    hashes.creative = addSnapshot('creative', { ...creative, _norwyn_details: details }, { ad_id: row.ad_id || null });\n    hashes.ad = addSnapshot('ad', { ...bundle, _norwyn_bundle_v9_cloud: true }, { campaign_id: row.campaign_id || null, adset_id: row.adset_id || null });\n  }\n  for (const request of assetDefs) {\n    const result = assets.get(`${request.entity_type}:${request.entity_id}`);\n    if (result?.source === 'meta_graph_api') addSnapshot(request.entity_type, result.payload, request.parent_ids || {});\n  }\n\n  row.effective_status = bundle.effective_status || row.effective_status || null;\n  row.creative_id = creative.id || null;\n  row.creative_name = creative.name || null;\n  row.thumbnail_url = creative.thumbnail_url || creative.image_url || videoResult?.payload?.picture || null;\n  row.preview_url = details.instagram_permalink_url;\n  row.destination_url = destinationUrl;\n  try { row.destination_domain = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch { row.destination_domain = null; }\n  row.url_tags = creative.url_tags || null;\n  row._landing_resolution = landing;\n  row.landing_key = landing.landing_key;\n  row._creative_details = details;\n  row._audience = audience;\n  row._campaign_config = campaign;\n  row._adset_config = adset;\n  row._config_sources = { campaign: bundleResult.source, adset: bundleResult.source, ad: bundleResult.source, creative: bundleResult.source, video: videoResult?.source || null };\n  row._config_snapshot_hash = configHash({ campaign: hashes.campaign || latest.get(`campaign:${row.campaign_id}`)?.config_hash || null, adset: hashes.adset || latest.get(`adset:${row.adset_id}`)?.config_hash || null, ad: hashes.ad || latest.get(`ad:${row.ad_id}`)?.config_hash || null, creative: hashes.creative || latest.get(`creative:${creative.id}`)?.config_hash || null, video: latest.get(`video:${initialDetails.video_id}`)?.config_hash || null });\n  row._creative_enrichment = creative.id ? { confidence: 'high', source: bundleResult.source } : { confidence: 'unresolved', source: bundleResult.source };\n  return { json: row };\n});\n\nif (output.length) output[0].json._config_snapshots = [...snapshots.values()];\nreturn output;\n"
+      }
+    },
+    {
+      "id": "normalize",
       "name": "Normalizar para Supabase",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3200,
-        360
+        -320,
+        300
       ],
       "parameters": {
-        "jsCode": "function actionValue(actions, types) {\n  if (!Array.isArray(actions)) return 0;\n  return actions\n    .filter(action => types.has(String(action.action_type || '').toLowerCase()))\n    .reduce((sum, action) => sum + Number(action.value || 0), 0);\n}\n\nfunction canonicalAction(actions, priority) {\n  if (!Array.isArray(actions)) return { value: 0, action_type: null };\n  for (const actionType of priority) {\n    const found = actions.find(action => String(action.action_type || '').toLowerCase() === actionType);\n    if (found) return { value: Number(found.value || 0), action_type: actionType };\n  }\n  return { value: 0, action_type: null };\n}\n\nfunction nullableNumber(value) {\n  if (value === null || value === undefined || value === '') return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction divideOrNull(numerator, denominator) {\n  return denominator > 0 ? Math.round((numerator / denominator) * 10000) / 10000 : null;\n}\n\nfunction actionOrNull(actions, types) {\n  if (!Array.isArray(actions)) return null;\n  const matching = actions.filter(action => types.has(String(action.action_type || '').toLowerCase()));\n  if (!matching.length) return null;\n  return Math.round(matching.reduce((sum, action) => sum + Number(action.value || 0), 0));\n}\n\nconst videoViewTypes = new Set(['video_view']);\nconst thruplayTypes = new Set(['video_view', 'thruplay']);\n\nreturn items.map(item => {\n  const d = item.json;\n  const ctr = Number(d.ctr || 0);\n  const cpc = Number(d.cpc || 0);\n  const cpm = Number(d.cpm || 0);\n  const frequency = Number(d.frequency || 0);\n  const spend = Number(d.spend || 0);\n  const clicks = Number(d.clicks || 0);\n  const impressions = Number(d.impressions || 0);\n  const reach = Number(d.reach || 0);\n  const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];\n  const tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();\n  if (!tenantId) throw new Error('Configure PLATAFORMA_TENANT_ID no ambiente do n8n.');\n\n  const campaignName = String(d.campaign_name || '').trim();\n  const adsetName = String(d.adset_name || '').trim();\n  const adName = String(d.ad_name || '').trim();\n  const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();\n  const leadsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_lead', 'lead', 'omni_lead', 'onsite_conversion.lead_grouped']);\n  const linkClicksMetric = canonicalAction(d.actions, ['link_click']);\n  const landingPageViewsMetric = canonicalAction(d.actions, ['landing_page_view', 'omni_landing_page_view']);\n  const checkoutMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);\n  const purchasesMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const purchaseValueMetric = canonicalAction(d.action_values, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const outboundMetric = canonicalAction(d.outbound_clicks, ['outbound_click']);\n  const uniqueOutboundMetric = canonicalAction(d.unique_outbound_clicks, ['outbound_click']);\n  const purchaseRoasMetric = canonicalAction(d.purchase_roas, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase']);\n  const uniqueClicks = nullableNumber(d.unique_clicks);\n  const landingPageViews = landingPageViewsMetric.value;\n  const checkouts = checkoutMetric.value;\n  const details = d._creative_details || {};\n  const audience = d._audience || {};\n  const campaignConfig = d._campaign_config || {};\n  const adsetConfig = d._adset_config || {};\n  const {\n    _config_snapshots,\n    _campaign_config,\n    _adset_config,\n    ...rawInsight\n  } = d;\n\n  const rowKey = [dataRef, campaignName, adsetName, adName].join('|');\n  return {\n    json: {\n      tenant_id: tenantId,\n      data_referencia: dataRef,\n      campanha: campaignName,\n      conjunto: adsetName || null,\n      anuncio: adName,\n      status,\n      objetivo: campaignConfig.objective || d.objective || null,\n      alcance: Math.round(reach),\n      impressoes: Math.round(impressions),\n      cliques: Math.round(clicks),\n      ctr,\n      cpc,\n      cpm,\n      frequencia: frequency,\n      valor_gasto: spend,\n      conversoes: Math.round(purchasesMetric.value),\n      leads: Math.round(leadsMetric.value),\n      campaign_id: d.campaign_id || null,\n      adset_id: d.adset_id || null,\n      ad_id: d.ad_id || null,\n      creative_id: d.creative_id || null,\n      creative_name: d.creative_name || null,\n      placement: d.placement || null,\n      publisher_platform: d.publisher_platform || null,\n      device_platform: d.device_platform || null,\n      link_clicks: Math.round(linkClicksMetric.value),\n      unique_link_clicks: nullableNumber(d.unique_inline_link_clicks) === null ? null : Math.round(Number(d.unique_inline_link_clicks)),\n      unique_link_ctr: nullableNumber(d.unique_inline_link_click_ctr),\n      cost_per_unique_link_click: nullableNumber(d.cost_per_unique_inline_link_click),\n      unique_clicks: uniqueClicks === null ? null : Math.round(uniqueClicks),\n      outbound_clicks: outboundMetric.action_type ? Math.round(outboundMetric.value) : null,\n      unique_outbound_clicks: uniqueOutboundMetric.action_type ? Math.round(uniqueOutboundMetric.value) : null,\n      unique_ctr: nullableNumber(d.unique_ctr),\n      cost_per_unique_click: nullableNumber(d.cost_per_unique_click),\n      landing_page_views: Math.round(landingPageViews),\n      cost_per_landing_page_view: landingPageViewsMetric.action_type ? divideOrNull(spend, landingPageViews) : null,\n      initiate_checkouts: Math.round(checkouts),\n      cost_per_checkout: checkoutMetric.action_type ? divideOrNull(spend, checkouts) : null,\n      meta_purchases: Math.round(purchasesMetric.value),\n      meta_purchase_value: purchaseValueMetric.action_type ? purchaseValueMetric.value : null,\n      meta_purchase_roas: purchaseRoasMetric.action_type ? purchaseRoasMetric.value : null,\n      quality_ranking: d.quality_ranking || null,\n      engagement_rate_ranking: d.engagement_rate_ranking || null,\n      conversion_rate_ranking: d.conversion_rate_ranking || null,\n      video_views: actionOrNull(d.actions, videoViewTypes),\n      video_plays_3s: actionOrNull(d.video_play_actions, videoViewTypes),\n      video_p25: actionOrNull(d.video_p25_watched_actions, videoViewTypes),\n      video_p50: actionOrNull(d.video_p50_watched_actions, videoViewTypes),\n      video_p75: actionOrNull(d.video_p75_watched_actions, videoViewTypes),\n      video_p95: actionOrNull(d.video_p95_watched_actions, videoViewTypes),\n      video_p100: actionOrNull(d.video_p100_watched_actions, videoViewTypes),\n      thruplays: actionOrNull(d.video_thruplay_watched_actions, thruplayTypes),\n      preview_url: d.preview_url || null,\n      thumbnail_url: d.thumbnail_url || null,\n      destination_url: d.destination_url || null,\n      destination_domain: d.destination_domain || null,\n      url_tags: d.url_tags || null,\n      landing_key: d.landing_key || null,\n      audience_type: audience.audience_type || 'N\\u00e3o identificado',\n      audience_label: audience.audience_label || 'N\\u00e3o identificado',\n      targeting_summary: audience.targeting_summary || null,\n      audience_confidence: audience.audience_confidence || 'unresolved',\n      audience_evidence: audience.audience_evidence || [],\n      creative_format: details.format || null,\n      creative_body: details.body || null,\n      creative_headline: details.headline || null,\n      creative_description: details.description || null,\n      creative_cta: details.cta || null,\n      creative_image_url: details.image_url || null,\n      creative_video_id: details.video_id || null,\n      creative_video_duration_seconds: details.video_duration_seconds,\n      object_story_id: details.object_story_id || null,\n      instagram_permalink_url: details.instagram_permalink_url || null,\n      config_snapshot_hash: d._config_snapshot_hash || null,\n      performance_status: 'SEM_CLASSIFICACAO_AUTOMATICA',\n      performance_score: 0,\n      origem: 'n8n_meta_ads_v9',\n      row_key: rowKey,\n      raw_payload: {\n        ...rawInsight,\n        _norwyn_foundation: {\n          collector_version: 'v9',\n          graph_version: 'v23.0',\n          collected_at: new Date().toISOString(),\n          origin: 'meta_graph_api',\n          action_semantics: 'canonical_alias_priority',\n          action_sources: {\n            leads: leadsMetric.action_type,\n            link_clicks: linkClicksMetric.action_type,\n            outbound_clicks: outboundMetric.action_type,\n            unique_outbound_clicks: uniqueOutboundMetric.action_type,\n            landing_page_views: landingPageViewsMetric.action_type,\n            initiate_checkouts: checkoutMetric.action_type,\n            meta_purchases: purchasesMetric.action_type,\n            meta_purchase_value: purchaseValueMetric.action_type,\n            meta_purchase_roas: purchaseRoasMetric.action_type,\n          },\n          idempotency: {\n            persisted_row_key: 'date|campaign_name|adset_name|ad_name',\n            candidate_id_key: [dataRef, d.campaign_id, d.adset_id, d.ad_id].join('|'),\n            migration_status: 'deferred_to_avoid_legacy_duplicates',\n          },\n          config: {\n            snapshot_hash: d._config_snapshot_hash || null,\n            sources: d._config_sources || null,\n            campaign: {\n              objective: campaignConfig.objective || null,\n              buying_type: campaignConfig.buying_type || null,\n              status: campaignConfig.status || null,\n              effective_status: campaignConfig.effective_status || null,\n              daily_budget: campaignConfig.daily_budget || null,\n              lifetime_budget: campaignConfig.lifetime_budget || null,\n              spend_cap: campaignConfig.spend_cap || null,\n              bid_strategy: campaignConfig.bid_strategy || null,\n              start_time: campaignConfig.start_time || null,\n              stop_time: campaignConfig.stop_time || null,\n            },\n            adset: {\n              optimization_goal: adsetConfig.optimization_goal || null,\n              billing_event: adsetConfig.billing_event || null,\n              bid_strategy: adsetConfig.bid_strategy || null,\n              bid_amount: adsetConfig.bid_amount || null,\n              daily_budget: adsetConfig.daily_budget || null,\n              lifetime_budget: adsetConfig.lifetime_budget || null,\n              start_time: adsetConfig.start_time || null,\n              end_time: adsetConfig.end_time || null,\n              attribution_spec: adsetConfig.attribution_spec || null,\n              status: adsetConfig.status || null,\n              effective_status: adsetConfig.effective_status || null,\n            },\n          },\n          audience,\n          creative: d._creative_enrichment || null,\n          creative_details: details,\n          landing: d._landing_resolution || null,\n          confirmed_sales_semantics: 'not_collected_by_meta_workflow',\n        },\n      },\n      imported_at: new Date().toISOString(),\n    },\n  };\n});\n"
+        "jsCode": "function actionValue(actions, types) {\n  if (!Array.isArray(actions)) return 0;\n  return actions\n    .filter(action => types.has(String(action.action_type || '').toLowerCase()))\n    .reduce((sum, action) => sum + Number(action.value || 0), 0);\n}\n\nfunction canonicalAction(actions, priority) {\n  if (!Array.isArray(actions)) return { value: 0, action_type: null };\n  for (const actionType of priority) {\n    const found = actions.find(action => String(action.action_type || '').toLowerCase() === actionType);\n    if (found) return { value: Number(found.value || 0), action_type: actionType };\n  }\n  return { value: 0, action_type: null };\n}\n\nfunction nullableNumber(value) {\n  if (value === null || value === undefined || value === '') return null;\n  const parsed = Number(value);\n  return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction divideOrNull(numerator, denominator) {\n  return denominator > 0 ? Math.round((numerator / denominator) * 10000) / 10000 : null;\n}\n\nfunction actionOrNull(actions, types) {\n  if (!Array.isArray(actions)) return null;\n  const matching = actions.filter(action => types.has(String(action.action_type || '').toLowerCase()));\n  if (!matching.length) return null;\n  return Math.round(matching.reduce((sum, action) => sum + Number(action.value || 0), 0));\n}\n\nconst videoViewTypes = new Set(['video_view']);\nconst thruplayTypes = new Set(['video_view', 'thruplay']);\n\nreturn items.map(item => {\n  const d = item.json;\n  const ctr = Number(d.ctr || 0);\n  const cpc = Number(d.cpc || 0);\n  const cpm = Number(d.cpm || 0);\n  const frequency = Number(d.frequency || 0);\n  const spend = Number(d.spend || 0);\n  const clicks = Number(d.clicks || 0);\n  const impressions = Number(d.impressions || 0);\n  const reach = Number(d.reach || 0);\n  const dataRef = d.date_start ? d.date_start : new Date().toISOString().split('T')[0];\n  const tenantId = String($items('Configuracao V9')[0]?.json?.tenant_id || '').trim();\n  if (!tenantId) throw new Error('Preencha tenant_id no node Configuracao V9.');\n\n  const campaignName = String(d.campaign_name || '').trim();\n  const adsetName = String(d.adset_name || '').trim();\n  const adName = String(d.ad_name || '').trim();\n  const status = String(d.effective_status || 'UNKNOWN').trim().toUpperCase();\n  const leadsMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_lead', 'lead', 'omni_lead', 'onsite_conversion.lead_grouped']);\n  const linkClicksMetric = canonicalAction(d.actions, ['link_click']);\n  const landingPageViewsMetric = canonicalAction(d.actions, ['landing_page_view', 'omni_landing_page_view']);\n  const checkoutMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout', 'omni_initiated_checkout', 'onsite_web_initiate_checkout']);\n  const purchasesMetric = canonicalAction(d.actions, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const purchaseValueMetric = canonicalAction(d.action_values, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase', 'onsite_web_purchase', 'onsite_conversion.purchase']);\n  const outboundMetric = canonicalAction(d.outbound_clicks, ['outbound_click']);\n  const uniqueOutboundMetric = canonicalAction(d.unique_outbound_clicks, ['outbound_click']);\n  const purchaseRoasMetric = canonicalAction(d.purchase_roas, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase']);\n  const uniqueClicks = nullableNumber(d.unique_clicks);\n  const landingPageViews = landingPageViewsMetric.value;\n  const checkouts = checkoutMetric.value;\n  const details = d._creative_details || {};\n  const audience = d._audience || {};\n  const campaignConfig = d._campaign_config || {};\n  const adsetConfig = d._adset_config || {};\n  const {\n    _config_snapshots,\n    _campaign_config,\n    _adset_config,\n    ...rawInsight\n  } = d;\n\n  const rowKey = [dataRef, campaignName, adsetName, adName].join('|');\n  return {\n    json: {\n      tenant_id: tenantId,\n      data_referencia: dataRef,\n      campanha: campaignName,\n      conjunto: adsetName || null,\n      anuncio: adName,\n      status,\n      objetivo: campaignConfig.objective || d.objective || null,\n      alcance: Math.round(reach),\n      impressoes: Math.round(impressions),\n      cliques: Math.round(clicks),\n      ctr,\n      cpc,\n      cpm,\n      frequencia: frequency,\n      valor_gasto: spend,\n      conversoes: Math.round(purchasesMetric.value),\n      leads: Math.round(leadsMetric.value),\n      campaign_id: d.campaign_id || null,\n      adset_id: d.adset_id || null,\n      ad_id: d.ad_id || null,\n      creative_id: d.creative_id || null,\n      creative_name: d.creative_name || null,\n      placement: d.placement || null,\n      publisher_platform: d.publisher_platform || null,\n      device_platform: d.device_platform || null,\n      link_clicks: Math.round(linkClicksMetric.value),\n      unique_link_clicks: nullableNumber(d.unique_inline_link_clicks) === null ? null : Math.round(Number(d.unique_inline_link_clicks)),\n      unique_link_ctr: nullableNumber(d.unique_inline_link_click_ctr),\n      cost_per_unique_link_click: nullableNumber(d.cost_per_unique_inline_link_click),\n      unique_clicks: uniqueClicks === null ? null : Math.round(uniqueClicks),\n      outbound_clicks: outboundMetric.action_type ? Math.round(outboundMetric.value) : null,\n      unique_outbound_clicks: uniqueOutboundMetric.action_type ? Math.round(uniqueOutboundMetric.value) : null,\n      unique_ctr: nullableNumber(d.unique_ctr),\n      cost_per_unique_click: nullableNumber(d.cost_per_unique_click),\n      landing_page_views: Math.round(landingPageViews),\n      cost_per_landing_page_view: landingPageViewsMetric.action_type ? divideOrNull(spend, landingPageViews) : null,\n      initiate_checkouts: Math.round(checkouts),\n      cost_per_checkout: checkoutMetric.action_type ? divideOrNull(spend, checkouts) : null,\n      meta_purchases: Math.round(purchasesMetric.value),\n      meta_purchase_value: purchaseValueMetric.action_type ? purchaseValueMetric.value : null,\n      meta_purchase_roas: purchaseRoasMetric.action_type ? purchaseRoasMetric.value : null,\n      quality_ranking: d.quality_ranking || null,\n      engagement_rate_ranking: d.engagement_rate_ranking || null,\n      conversion_rate_ranking: d.conversion_rate_ranking || null,\n      video_views: actionOrNull(d.actions, videoViewTypes),\n      video_plays_3s: actionOrNull(d.video_play_actions, videoViewTypes),\n      video_p25: actionOrNull(d.video_p25_watched_actions, videoViewTypes),\n      video_p50: actionOrNull(d.video_p50_watched_actions, videoViewTypes),\n      video_p75: actionOrNull(d.video_p75_watched_actions, videoViewTypes),\n      video_p95: actionOrNull(d.video_p95_watched_actions, videoViewTypes),\n      video_p100: actionOrNull(d.video_p100_watched_actions, videoViewTypes),\n      thruplays: actionOrNull(d.video_thruplay_watched_actions, thruplayTypes),\n      preview_url: d.preview_url || null,\n      thumbnail_url: d.thumbnail_url || null,\n      destination_url: d.destination_url || null,\n      destination_domain: d.destination_domain || null,\n      url_tags: d.url_tags || null,\n      landing_key: d.landing_key || null,\n      audience_type: audience.audience_type || 'N\\u00e3o identificado',\n      audience_label: audience.audience_label || 'N\\u00e3o identificado',\n      targeting_summary: audience.targeting_summary || null,\n      audience_confidence: audience.audience_confidence || 'unresolved',\n      audience_evidence: audience.audience_evidence || [],\n      creative_format: details.format || null,\n      creative_body: details.body || null,\n      creative_headline: details.headline || null,\n      creative_description: details.description || null,\n      creative_cta: details.cta || null,\n      creative_image_url: details.image_url || null,\n      creative_video_id: details.video_id || null,\n      creative_video_duration_seconds: details.video_duration_seconds,\n      object_story_id: details.object_story_id || null,\n      instagram_permalink_url: details.instagram_permalink_url || null,\n      config_snapshot_hash: d._config_snapshot_hash || null,\n      performance_status: 'SEM_CLASSIFICACAO_AUTOMATICA',\n      performance_score: 0,\n      origem: 'n8n_meta_ads_v9',\n      row_key: rowKey,\n      raw_payload: {\n        ...rawInsight,\n        _norwyn_foundation: {\n          collector_version: 'v9',\n          graph_version: 'v23.0',\n          collected_at: new Date().toISOString(),\n          origin: 'meta_graph_api',\n          action_semantics: 'canonical_alias_priority',\n          action_sources: {\n            leads: leadsMetric.action_type,\n            link_clicks: linkClicksMetric.action_type,\n            outbound_clicks: outboundMetric.action_type,\n            unique_outbound_clicks: uniqueOutboundMetric.action_type,\n            landing_page_views: landingPageViewsMetric.action_type,\n            initiate_checkouts: checkoutMetric.action_type,\n            meta_purchases: purchasesMetric.action_type,\n            meta_purchase_value: purchaseValueMetric.action_type,\n            meta_purchase_roas: purchaseRoasMetric.action_type,\n          },\n          idempotency: {\n            persisted_row_key: 'date|campaign_name|adset_name|ad_name',\n            candidate_id_key: [dataRef, d.campaign_id, d.adset_id, d.ad_id].join('|'),\n            migration_status: 'deferred_to_avoid_legacy_duplicates',\n          },\n          config: {\n            snapshot_hash: d._config_snapshot_hash || null,\n            sources: d._config_sources || null,\n            campaign: {\n              objective: campaignConfig.objective || null,\n              buying_type: campaignConfig.buying_type || null,\n              status: campaignConfig.status || null,\n              effective_status: campaignConfig.effective_status || null,\n              daily_budget: campaignConfig.daily_budget || null,\n              lifetime_budget: campaignConfig.lifetime_budget || null,\n              spend_cap: campaignConfig.spend_cap || null,\n              bid_strategy: campaignConfig.bid_strategy || null,\n              start_time: campaignConfig.start_time || null,\n              stop_time: campaignConfig.stop_time || null,\n            },\n            adset: {\n              optimization_goal: adsetConfig.optimization_goal || null,\n              billing_event: adsetConfig.billing_event || null,\n              bid_strategy: adsetConfig.bid_strategy || null,\n              bid_amount: adsetConfig.bid_amount || null,\n              daily_budget: adsetConfig.daily_budget || null,\n              lifetime_budget: adsetConfig.lifetime_budget || null,\n              start_time: adsetConfig.start_time || null,\n              end_time: adsetConfig.end_time || null,\n              attribution_spec: adsetConfig.attribution_spec || null,\n              status: adsetConfig.status || null,\n              effective_status: adsetConfig.effective_status || null,\n            },\n          },\n          audience,\n          creative: d._creative_enrichment || null,\n          creative_details: details,\n          landing: d._landing_resolution || null,\n          confirmed_sales_semantics: 'not_collected_by_meta_workflow',\n        },\n      },\n      imported_at: new Date().toISOString(),\n    },\n  };\n});\n"
       }
     },
     {
-      "id": "prepare-snapshots",
+      "id": "snapshots",
       "name": "Preparar Snapshots de Configuracao",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3200,
-        680
+        -320,
+        600
       ],
       "parameters": {
         "jsCode": "const snapshots = [];\nfor (const item of items) {\n  for (const snapshot of item.json._config_snapshots || []) snapshots.push(snapshot);\n}\nconst unique = new Map();\nfor (const snapshot of snapshots) {\n  const key = [snapshot.entity_type, snapshot.entity_id, snapshot.config_hash].join('|');\n  unique.set(key, snapshot);\n}\nconst rows = Array.from(unique.values());\nif (!rows.length) return [];\nconst first = items[0]?.json || {};\nreturn rows.map(row => ({\n  json: {\n    ...row,\n    _norwyn_mode: first._norwyn_mode || null,\n    _norwyn_smoke_persist: first._norwyn_smoke_persist === true,\n  },\n}));\n"
       }
     },
     {
-      "id": "persist-snapshots-check",
+      "id": "persist-snapshots",
       "name": "Persistir snapshots?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -3000,
-        680
+        -80,
+        600
       ],
       "parameters": {
         "conditions": {
@@ -328,40 +553,30 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2800,
-        680
+        160,
+        600
       ],
       "parameters": {
-        "jsCode": "const batchSize = Number($env.SUPABASE_UPSERT_BATCH_SIZE || 50);\nconst rows = items.map(item => {\n  const { _norwyn_mode, _norwyn_smoke_persist, ...snapshot } = item.json;\n  return snapshot;\n});\nconst batches = [];\nfor (let index = 0; index < rows.length; index += batchSize) {\n  batches.push({\n    json: {\n      rows: rows.slice(index, index + batchSize),\n      batch_size: Math.min(batchSize, rows.length - index),\n      total_items: rows.length,\n    },\n  });\n}\nreturn batches;\n"
+        "jsCode": "const batchSize = Number($items('Configuracao V9')[0]?.json?.upsert_batch_size || 50);\nconst rows = items.map(item => {\n  const { _norwyn_mode, _norwyn_smoke_persist, ...snapshot } = item.json;\n  return snapshot;\n});\nconst batches = [];\nfor (let index = 0; index < rows.length; index += batchSize) {\n  batches.push({\n    json: {\n      rows: rows.slice(index, index + batchSize),\n      batch_size: Math.min(batchSize, rows.length - index),\n      total_items: rows.length,\n    },\n  });\n}\nreturn batches;\n"
       }
     },
     {
-      "id": "snapshot-upsert",
+      "id": "upsert-snapshots",
       "name": "Upsert Snapshots de Configuracao",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -2560,
-        680
+        420,
+        600
       ],
       "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
         "method": "POST",
-        "url": "={{ $env.SUPABASE_URL.replace(/\\/$/, '') + '/rest/v1/instagram_ads_config_snapshots?on_conflict=tenant_id,entity_type,entity_id,config_hash' }}",
+        "url": "={{ $('Configuracao V9').first().json.supabase_url.replace(//$/, '') + '/rest/v1/instagram_ads_config_snapshots?on_conflict=tenant_id,entity_type,entity_id,config_hash' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "apikey",
-              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
             {
               "name": "Prefer",
               "value": "resolution=merge-duplicates,return=minimal"
@@ -369,8 +584,9 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.rows) }}",
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.rows) }}",
         "options": {
           "timeout": 120000
         }
@@ -385,8 +601,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -2920,
-        360
+        -80,
+        300
       ],
       "parameters": {
         "conditions": {
@@ -398,7 +614,7 @@
           },
           "conditions": [
             {
-              "id": "valid_campaign",
+              "id": "campaign",
               "leftValue": "={{ $json.campanha }}",
               "rightValue": "",
               "operator": {
@@ -408,7 +624,7 @@
               }
             },
             {
-              "id": "valid_ad",
+              "id": "ad",
               "leftValue": "={{ $json.anuncio }}",
               "rightValue": "",
               "operator": {
@@ -418,7 +634,7 @@
               }
             },
             {
-              "id": "valid_spend",
+              "id": "spend",
               "leftValue": "={{ $json.valor_gasto }}",
               "rightValue": 0,
               "operator": {
@@ -433,13 +649,13 @@
       }
     },
     {
-      "id": "persist-check",
+      "id": "persist",
       "name": "Persistir coleta?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -2780,
-        280
+        160,
+        220
       ],
       "parameters": {
         "conditions": {
@@ -467,18 +683,17 @@
       }
     },
     {
-      "id": "batch",
+      "id": "batches",
       "name": "Montar Lotes Supabase",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2640,
-        280
+        420,
+        140
       ],
       "parameters": {
-        "jsCode": "const batchSize = Number($env.SUPABASE_UPSERT_BATCH_SIZE || 50);\nconst uniqueMap = new Map();\n\nfor (const item of items) {\n  const row = item.json;\n  if (!row.row_key) throw new Error('Registro sem row_key.');\n  uniqueMap.set(row.row_key, row);\n}\n\nconst uniqueRows = Array.from(uniqueMap.values());\nconst batches = [];\n\nfor (let index = 0; index < uniqueRows.length; index += batchSize) {\n  batches.push({\n    json: {\n      rows: uniqueRows.slice(index, index + batchSize),\n      batch_start: index + 1,\n      batch_end: Math.min(index + batchSize, uniqueRows.length),\n      batch_size: Math.min(batchSize, uniqueRows.length - index),\n      total_items: uniqueRows.length,\n      original_items: items.length,\n      removed_duplicates: items.length - uniqueRows.length,\n    }\n  });\n}\n\nconsole.log(`[FGA Ads] Preparados ${batches.length} lote(s). Original: ${items.length}. Unicos: ${uniqueRows.length}.`);\nreturn batches;"
-      },
-      "notes": "Agrupa registros para evitar timeout no Supabase/n8n. Ajuste SUPABASE_UPSERT_BATCH_SIZE se precisar; padrao 50."
+        "jsCode": "const batchSize = Number($items('Configuracao V9')[0]?.json?.upsert_batch_size || 50);\nconst uniqueMap = new Map();\nfor (const item of items) {\n  if (!item.json.row_key) throw new Error('Registro sem row_key.');\n  uniqueMap.set(item.json.row_key, item.json);\n}\nconst rows = [...uniqueMap.values()];\nconst output = [];\nfor (let index = 0; index < rows.length; index += batchSize) output.push({ json: { rows: rows.slice(index, index + batchSize), batch_size: Math.min(batchSize, rows.length - index), total_items: rows.length, original_items: items.length, removed_duplicates: items.length - rows.length } });\nreturn output;"
+      }
     },
     {
       "id": "upsert",
@@ -486,27 +701,17 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -2360,
-        280
+        680,
+        140
       ],
       "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
         "method": "POST",
-        "url": "={{ $env.SUPABASE_URL.replace(/\\/$/, '') + '/rest/v1/instagram_ads_daily?on_conflict=tenant_id,row_key' }}",
+        "url": "={{ $('Configuracao V9').first().json.supabase_url.replace(//$/, '') + '/rest/v1/instagram_ads_daily?on_conflict=tenant_id,row_key' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "apikey",
-              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
             {
               "name": "Prefer",
               "value": "resolution=merge-duplicates,return=minimal"
@@ -514,28 +719,28 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.rows) }}",
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.rows) }}",
         "options": {
           "timeout": 120000
         }
       },
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 1500,
-      "notes": "Usa REST upsert em lote para atualizar linhas existentes por tenant_id,row_key. Nao exponha SUPABASE_SERVICE_ROLE_KEY fora do n8n."
+      "waitBetweenTries": 1500
     },
     {
-      "id": "discarded",
+      "id": "discard",
       "name": "Log Descartados",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2640,
-        520
+        420,
+        380
       ],
       "parameters": {
-        "jsCode": "const count = items.length;\nconsole.log(`[FGA Ads] ${count} registro(s) descartado(s).`);\nreturn [{ json: { discarded_count: count, timestamp: new Date().toISOString() } }];"
+        "jsCode": "console.log('[FGA Ads V9] Registros descartados:', items.length); return items;"
       }
     },
     {
@@ -544,33 +749,31 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2500,
-        440
+        420,
+        280
       ],
       "parameters": {
-        "jsCode": "console.log(`[FGA Ads smoke] ${items.length} registro(s) normalizados; nenhum upsert executado.`); return items;",
-        "notes": "Dry-run por padrão. Defina META_ADS_SMOKE_PERSIST=true somente após validar a comparação."
+        "jsCode": "return [{ json: { mode: 'smoke_manual', persisted: false, rows_validated: items.length, message: 'Dry-run concluido sem escrita no Supabase.' } }];"
       }
     }
   ],
-  "pinData": {},
   "connections": {
     "Executar Backfill 2026": {
       "main": [
         [
           {
-            "node": "Calcular Periodo 2026",
+            "node": "Modo Backfill",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Calcular Periodo 2026": {
+    "Modo Backfill": {
       "main": [
         [
           {
-            "node": "Meta Ads API - Backfill 2026",
+            "node": "Configuracao V9",
             "type": "main",
             "index": 0
           }
@@ -581,7 +784,18 @@
       "main": [
         [
           {
-            "node": "Calcular Incremental",
+            "node": "Modo Incremental",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Modo Incremental": {
+      "main": [
+        [
+          {
+            "node": "Configuracao V9",
             "type": "main",
             "index": 0
           }
@@ -592,69 +806,91 @@
       "main": [
         [
           {
-            "node": "Calcular Smoke 1-2 dias",
+            "node": "Modo Smoke Dry Run",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Calcular Smoke 1-2 dias": {
+    "Modo Smoke Dry Run": {
       "main": [
         [
           {
-            "node": "Meta Ads API - Smoke",
+            "node": "Configuracao V9",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Calcular Incremental": {
+    "Configuracao V9": {
       "main": [
         [
           {
-            "node": "Meta Ads API - Incremental",
+            "node": "Carregar Registry Supabase",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Meta Ads API - Backfill 2026": {
+    "Carregar Registry Supabase": {
       "main": [
         [
           {
-            "node": "Tratar Paginacao",
+            "node": "Registry carregado",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Meta Ads API - Incremental": {
+    "Registry carregado": {
       "main": [
         [
           {
-            "node": "Tratar Paginacao",
+            "node": "Carregar Cache Supabase",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Meta Ads API - Smoke": {
+    "Carregar Cache Supabase": {
       "main": [
         [
           {
-            "node": "Marcar Smoke Dry Run",
+            "node": "Cache carregado",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Marcar Smoke Dry Run": {
+    "Cache carregado": {
+      "main": [
+        [
+          {
+            "node": "Calcular Janela",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular Janela": {
+      "main": [
+        [
+          {
+            "node": "Meta Ads API - Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Ads API - Insights": {
       "main": [
         [
           {
@@ -669,14 +905,94 @@
       "main": [
         [
           {
-            "node": "Enriquecer Configuracao, Publico e Criativo",
+            "node": "Preparar Configuracao Meta",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Enriquecer Configuracao, Publico e Criativo": {
+    "Preparar Configuracao Meta": {
+      "main": [
+        [
+          {
+            "node": "Buscar configuracao Meta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar configuracao Meta?": {
+      "main": [
+        [
+          {
+            "node": "Meta Graph - Configuracao de Anuncios",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar Assets Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Graph - Configuracao de Anuncios": {
+      "main": [
+        [
+          {
+            "node": "Preparar Assets Meta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Assets Meta": {
+      "main": [
+        [
+          {
+            "node": "Buscar assets Meta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar assets Meta?": {
+      "main": [
+        [
+          {
+            "node": "Meta Graph - Assets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Consolidar Enriquecimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta Graph - Assets": {
+      "main": [
+        [
+          {
+            "node": "Consolidar Enriquecimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consolidar Enriquecimento": {
       "main": [
         [
           {
@@ -785,13 +1101,16 @@
       ]
     }
   },
+  "pinData": {},
   "active": false,
   "settings": {
     "executionOrder": "v1",
     "timezone": "America/Sao_Paulo"
   },
+  "versionId": "cb84a111-4f84-4a9c-bcac-5f8f4ce793d9",
   "meta": {
-    "templateCredsSetupCompleted": false
+    "templateCredsSetupCompleted": false,
+    "norwynCollectorVersion": "v9-cloud-credentials"
   },
   "tags": []
 }

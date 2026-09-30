@@ -41,7 +41,7 @@ O arquivo V3 fornecido contém valores mascarados/embutidos para tenant, endpoin
 | Chave candidata | ausente | IDs no raw metadata | preparar migração futura controlada |
 | Batch | 50 configurável | 50 configurável | preservar estabilidade |
 | Retry | upsert | Meta e upserts, 3 tentativas | resiliência |
-| Segredos | valores embutidos/mascarados | somente env vars | segurança e portabilidade |
+| Segredos | valores embutidos/mascarados | Credentials nativas do n8n Cloud | segurança e portabilidade sem Variables pagas |
 
 ## Actions canônicas
 
@@ -76,25 +76,11 @@ O V3 duplica purchases nos exemplos com conversão porque soma `purchase` e `off
 
 Este replay não é um smoke ao vivo da Graph API. Um smoke real requer importar o V9 inativo no n8n com credenciais válidas e executar o trigger manual. Nenhum token foi usado e nenhum dado Meta foi alterado nesta entrega.
 
-## Variáveis e credenciais
+## Configuracao e credenciais
 
-- `META_AD_ACCOUNT_ID`
-- `META_ADS_ACCESS_TOKEN`
-- `META_ADS_LOOKBACK_DAYS` (opcional, padrão 7)
-- `META_ADS_SMOKE_DAYS` (opcional, limitado a 1–2)
-- `META_ADS_SMOKE_PERSIST` (opcional; padrão `false`)
-- `META_ADS_MAX_PAGES` (opcional, padrão 100)
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `PLATAFORMA_TENANT_ID`
-- `SUPABASE_UPSERT_BATCH_SIZE` (opcional, padrão 50)
+A V9 não depende de `$env` nem do recurso pago Variables. Meta e Supabase usam Credentials nativas selecionadas após a importação. Conta de anúncios, tenant, URL Supabase, janelas, limites, lotes e TTLs ficam no único node `Configuracao V9`, que não aceita secrets.
 
-Nenhuma variável sensível está no JSON final.
-
-Também são opcionais:
-
-- `META_ADS_CONFIG_TTL_HOURS` (padrão 24);
-- `META_ADS_CREATIVE_TTL_HOURS` (padrão 168).
+O procedimento completo está em `docs/traffic/n8n-cloud-v9-credentials.md`.
 
 ## Segurança do V3 fornecido
 
@@ -147,12 +133,12 @@ Ainda não cumprido: falta o smoke ao vivo no n8n. Antes do corte, confirmar tr�
 ## Ativação controlada
 
 1. Importar `Instagram Ads Daily Collector_V9_Traffic_Foundation.json`.
-2. Confirmar que está inativo e configurar credenciais/env vars.
+2. Confirmar que está inativo, preencher `Configuracao V9` e selecionar as Credentials nativas.
 3. Aplicar primeiro a migration `20260929143000_meta_ads_v9_configuration_foundation.sql` no HML.
 4. Executar somente `Executar Smoke Manual` com um dia; ele não persiste métricas nem snapshots por padrão.
 5. Comparar um Ad Set de engajamento, um de remarketing/site/pixel e um frio/amplo, quando existirem.
 6. Em cada caso comparar spend, delivery, clique, LPV, checkout, purchase Meta/value, creative, destino, targeting, classificação e configuração com V3 e payload Meta.
-7. Depois da comparação, se necessário, repetir conscientemente com `META_ADS_SMOKE_PERSIST=true` para validar os upserts de um período corrente.
+7. Depois da comparação e com autorização específica, alterar conscientemente `smoke_persist` no node central para validar os upserts de um período corrente.
 8. Desativar V3 somente em janela autorizada.
 9. Ativar V9 somente depois da validação.
 10. Acompanhar o primeiro ciclo das 20:30.

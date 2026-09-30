@@ -1,4 +1,4 @@
-const batchSize = Number($env.SUPABASE_UPSERT_BATCH_SIZE || 50);
+const batchSize = Number($items('Configuracao V9')[0]?.json?.upsert_batch_size || 50);
 const rows = items.map(item => {
   const { _norwyn_mode, _norwyn_smoke_persist, ...snapshot } = item.json;
   return snapshot;
