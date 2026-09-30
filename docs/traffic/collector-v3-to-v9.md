@@ -32,13 +32,15 @@ O arquivo V3 fornecido contém valores mascarados/embutidos para tenant, endpoin
 | Campos Insights | básicos + actions | básicos, status, action values e vídeo | fundação de funil |
 | Actions | soma aliases; `complete_registration` como compra | escolhe um alias por prioridade | eliminar dupla contagem |
 | IDs | presentes no raw, não persistidos | campaign/adset/ad/creative explícitos | resolução confiável |
-| Creative/destino | ausente | enriquecimento único por `ad_id` | preencher quando a Meta fornecer |
+| Creative/destino | ausente | enriquecimento por Ad/Creative/Video com cache | preencher quando a Meta fornecer |
+| Público | ausente | targeting e custom audiences do Ad Set, com evidência | responder quem recebeu a entrega sem inferir pelo nome |
+| Configuração | ausente | Campaign/Ad Set/Ad em snapshot por hash | relacionar mudança operacional com resultado posterior |
 | LP | ausente | registry + URL/host/UTM, com confiança | não forçar vínculo |
 | Deduplicação | `Map` por row key | preservada | compatibilidade operacional |
 | Row key | nomes | nomes, preservada | mudar durante lookback criaria duplicatas |
 | Chave candidata | ausente | IDs no raw metadata | preparar migração futura controlada |
 | Batch | 50 configurável | 50 configurável | preservar estabilidade |
-| Retry | upsert | Meta e upsert, 3 tentativas | resiliência |
+| Retry | upsert | Meta e upserts, 3 tentativas | resiliência |
 | Segredos | valores embutidos/mascarados | somente env vars | segurança e portabilidade |
 
 ## Actions canônicas
@@ -89,6 +91,55 @@ Este replay não é um smoke ao vivo da Graph API. Um smoke real requer importar
 
 Nenhuma variável sensível está no JSON final.
 
+Também são opcionais:
+
+- `META_ADS_CONFIG_TTL_HOURS` (padrão 24);
+- `META_ADS_CREATIVE_TTL_HOURS` (padrão 168).
+
+## Segurança do V3 fornecido
+
+A auditoria por estrutura, sem imprimir valores, encontrou no export ativo:
+
+- token Meta literal nos nós de Backfill e Incremental;
+- `tenant_id` literal no normalizador;
+- URL Supabase literal no upsert;
+- `apikey` literal no upsert.
+
+O token Meta e a chave Supabase presentes nesse artefato devem ser rotacionados manualmente depois de confirmar quais credenciais o V3 ativo usa. A URL e o tenant não são segredos, mas devem sair do workflow para evitar apontamento acidental. Nenhum valor foi copiado para a V9 e nenhuma rotação foi executada.
+
+## Snapshot e cache
+
+`instagram_ads_config_snapshots` usa `(tenant_id, entity_type, entity_id, config_hash)` como chave única. Payload inalterado não cria cópia diária; uma mudança em orçamento, targeting, status, estratégia, destino ou creative gera novo hash. O registro diário conserva o hash combinado para ligação futura.
+
+TTL padrão:
+
+| Entidade | TTL | Motivo |
+| --- | ---: | --- |
+| Campaign, Ad Set e Ad | 24h | configuração operacional pode mudar diariamente |
+| Creative, Audience e Video | 168h | ativos relativamente estáveis e caros de enriquecer |
+
+O cache é lido do Supabase e reforçado por `Map` durante a execução, evitando consultar o mesmo ID por linha diária.
+
+## Por que cada grupo foi priorizado
+
+| Dado | Pergunta operacional atendida |
+| --- | --- |
+| Targeting, inclusões, exclusões e Advantage | melhora decisão e reduz tempo de auditoria de público |
+| Objetivo, otimização, billing, lance e orçamento | melhora decisão e ajuda a localizar custo causado por configuração |
+| IDs, formato, texto, CTA, mídia e destino do creative | melhora decisão e liga criativo a LP/checkout/receita |
+| Unique/outbound clicks, LPV e custos derivados | ajuda a reduzir custo distinguindo clique interno de tráfego entregue |
+| Checkout, purchase/value/ROAS Meta | melhora decisão de mídia sem substituir receita confirmada |
+| Rankings da Meta | sinal contextual para investigação; nunca decisão automática |
+| Vídeo 3s, quartis e thruplay | ajuda a reduzir custo identificando perda de atenção |
+| Snapshot/hash | libera tempo e reduz chamadas, mantendo histórico de mudanças |
+| Raw payload, versão, origem e evidência | reduz tempo de diagnóstico e evita conclusões sem rastreabilidade |
+
+Campos da API sem vínculo com custo, receita, decisão ou economia de tempo não foram adicionados.
+
+## Breakdown
+
+Não foi adicionado ao fluxo principal. A arquitetura indicada é `instagram_ads_breakdown_daily`, com dimensão e valor explícitos e coleta separada. Isso evita explodir o grão atual e impede soma acidental de linhas incompatíveis.
+
 ## Critério de substituição
 
 Ainda não cumprido: falta o smoke ao vivo no n8n. Antes do corte, confirmar três anúncios, enriquecimento, ausência de duplicidade e upsert do período curto.
@@ -97,11 +148,13 @@ Ainda não cumprido: falta o smoke ao vivo no n8n. Antes do corte, confirmar tr�
 
 1. Importar `Instagram Ads Daily Collector_V9_Traffic_Foundation.json`.
 2. Confirmar que está inativo e configurar credenciais/env vars.
-3. Executar somente `Executar Smoke Manual` com um dia; ele não persiste por padrão.
-4. Comparar ao menos IMG, VID e um terceiro anúncio com a resposta bruta.
-5. Depois da comparação, se necessário, repetir conscientemente com `META_ADS_SMOKE_PERSIST=true` para validar o upsert de um período corrente.
-6. Desativar V3.
-7. Ativar V9.
-8. Acompanhar o primeiro ciclo das 20:30.
+3. Aplicar primeiro a migration `20260929143000_meta_ads_v9_configuration_foundation.sql` no HML.
+4. Executar somente `Executar Smoke Manual` com um dia; ele não persiste métricas nem snapshots por padrão.
+5. Comparar um Ad Set de engajamento, um de remarketing/site/pixel e um frio/amplo, quando existirem.
+6. Em cada caso comparar spend, delivery, clique, LPV, checkout, purchase Meta/value, creative, destino, targeting, classificação e configuração com V3 e payload Meta.
+7. Depois da comparação, se necessário, repetir conscientemente com `META_ADS_SMOKE_PERSIST=true` para validar os upserts de um período corrente.
+8. Desativar V3 somente em janela autorizada.
+9. Ativar V9 somente depois da validação.
+10. Acompanhar o primeiro ciclo das 20:30.
 
 Rollback: desativar V9 e reativar V3. Não executar ambos automaticamente.

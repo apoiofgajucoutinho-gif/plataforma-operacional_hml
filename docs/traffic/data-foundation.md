@@ -80,14 +80,35 @@ Exemplo auditado, `IMG_22.06_01`:
 
 O workflow versionado `Instagram Ads Daily Collector_V9_Traffic_Foundation`:
 
-1. coleta Insights no nível ad;
-2. consulta o objeto Ad/Creative uma vez por `ad_id`;
-3. preserva creative, thumbnail, destination e URL tags apenas quando retornados;
-4. resolve LP por evidência explícita;
-5. grava action canônica e sua fonte;
-6. mantém o workflow inativo no repositório até publicação controlada no n8n.
+1. coleta Insights no nível `ad`, com grão diário preservado;
+2. enriquece Campaign, Ad Set, Ad, Creative, custom audiences e vídeo por ID;
+3. classifica público somente por evidência de `targeting`, custom audience e regra retornada pela Meta;
+4. usa cache por entidade: 24h para Campaign/Ad Set/Ad e 168h para Creative/Audience/Video;
+5. registra configuração em `instagram_ads_config_snapshots` somente quando o hash muda;
+6. preserva raw Insights no registro diário e raw de configuração no snapshot;
+7. resolve LP por URL/domínio/UTM explícitos e grava a evidência;
+8. grava action canônica e sua fonte sem somar aliases equivalentes;
+9. mantém o workflow inativo até smoke e cutover autorizados.
 
-`preview_url` continua nulo se a Meta não fornecer URL explícita. Nenhum valor é fabricado.
+`preview_url`, campos de criativo, targeting e métricas opcionais ficam `null` quando a Meta não os fornece. Nenhum valor é fabricado. O collector não emite mais rótulos como “público ruim” ou “saturado”; `performance_status` passa a indicar apenas `SEM_CLASSIFICACAO_AUTOMATICA`.
+
+### Público e configuração
+
+As classificações possíveis são: Engajamento Instagram, Visitantes do site, Remarketing, Pixel/site, Lookalike, Público por interesse, Público amplo/Advantage, Lista/custom audience, Misto e Não identificado. Nome do Ad Set nunca é evidência. Cada classificação persiste confiança e lista de evidências.
+
+Os snapshots guardam orçamento, estratégia de lance, objetivo, otimização, billing, agenda, atribuição, targeting, status, destino e creative. O hash FNV-1a é apenas detector determinístico de mudança, não mecanismo criptográfico.
+
+### Métricas opcionais
+
+Além das métricas anteriores, a V9 solicita unique clicks/CTR/cost, outbound/unique outbound clicks, purchase ROAS e rankings de qualidade. Custo por LPV e custo por checkout são calculados apenas quando a action canônica existe e o denominador é maior que zero. Ausência continua `null`, não zero falso.
+
+### Breakdown
+
+Age, gender, region, publisher platform, placement e device platform não entram no fluxo diário principal. A Meta pode multiplicar linhas ao combinar breakdowns; a evolução recomendada é uma coleta e tabela próprias, mantendo `instagram_ads_daily` em `ad x dia`.
+
+### Idempotência
+
+O trigger HML recalcula `row_key` por `data|campaign_name|adset_name|ad_name`, e o índice único usa `(tenant_id,row_key)`. A troca imediata para IDs duplicaria dias já existentes após renomeações. A V9 preserva a chave legada, grava a chave candidata por IDs no raw e adia a migração até existir reconciliação histórica controlada.
 
 ## Consulta
 

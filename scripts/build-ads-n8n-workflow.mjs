@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const metaUrl =
@@ -14,6 +14,15 @@ const fields = [
   "impressions",
   "reach",
   "clicks",
+  "unique_clicks",
+  "unique_ctr",
+  "cost_per_unique_click",
+  "inline_link_clicks",
+  "unique_inline_link_clicks",
+  "unique_inline_link_click_ctr",
+  "cost_per_unique_inline_link_click",
+  "outbound_clicks",
+  "unique_outbound_clicks",
   "ctr",
   "cpc",
   "cpm",
@@ -25,6 +34,11 @@ const fields = [
   "actions",
   "action_values",
   "cost_per_action_type",
+  "purchase_roas",
+  "quality_ranking",
+  "engagement_rate_ranking",
+  "conversion_rate_ranking",
+  "video_play_actions",
   "video_p25_watched_actions",
   "video_p50_watched_actions",
   "video_p75_watched_actions",
@@ -121,7 +135,7 @@ for (const item of items) {
 console.log(\`[FGA Ads] Total coletado: \${allData.length} registros.\`);
 return allData.map(row => ({ json: row }));`;
 
-const enrichmentCode = `const token = String($env.META_ADS_ACCESS_TOKEN || '').trim();
+const legacyEnrichmentCode = `const token = String($env.META_ADS_ACCESS_TOKEN || '').trim();
 const supabaseUrl = String($env.SUPABASE_URL || '').replace(/\\/$/, '');
 const serviceKey = String($env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const tenantId = String($env.PLATAFORMA_TENANT_ID || '').trim();
@@ -197,7 +211,12 @@ for (const item of items) {
 
 return items;`;
 
-const transformCode = `function actionValue(actions, types) {
+const enrichmentCode = readFileSync(
+  join(process.cwd(), "scripts", "n8n", "meta-ads-v9-enrichment.js"),
+  "utf8",
+);
+
+const legacyTransformCode = `function actionValue(actions, types) {
   if (!Array.isArray(actions)) return 0;
   return actions
     .filter(action => types.has(String(action.action_type || '').toLowerCase()))
@@ -319,6 +338,21 @@ return items.map(item => {
   };
 });`;
 
+const transformCode = readFileSync(
+  join(process.cwd(), "scripts", "n8n", "meta-ads-v9-transform.js"),
+  "utf8",
+);
+
+const snapshotsCode = readFileSync(
+  join(process.cwd(), "scripts", "n8n", "meta-ads-v9-snapshots.js"),
+  "utf8",
+);
+
+const snapshotBatchesCode = readFileSync(
+  join(process.cwd(), "scripts", "n8n", "meta-ads-v9-snapshot-batches.js"),
+  "utf8",
+);
+
 const batchCode = `const batchSize = Number($env.SUPABASE_UPSERT_BATCH_SIZE || 50);
 const uniqueMap = new Map();
 
@@ -413,8 +447,40 @@ const workflow = {
     }, { retryOnFail: true, maxTries: 3, waitBetweenTries: 1500 }),
     node("tag-smoke", "Marcar Smoke Dry Run", "n8n-nodes-base.code", 2, [-3600, -160], { jsCode: tagSmokeCode }),
     node("pagination", "Tratar Paginacao", "n8n-nodes-base.code", 2, [-3480, 360], { jsCode: paginationCode }),
-    node("enrichment", "Enriquecer Criativos e Destinos", "n8n-nodes-base.code", 2, [-3340, 360], { jsCode: enrichmentCode }),
+    node("enrichment", "Enriquecer Configuracao, Publico e Criativo", "n8n-nodes-base.code", 2, [-3340, 360], { jsCode: enrichmentCode }, {
+      notes: "Cache por entidade. Targeting/config: META_ADS_CONFIG_TTL_HOURS (24h). Creative/video/audience: META_ADS_CREATIVE_TTL_HOURS (168h).",
+    }),
     node("transform", "Normalizar para Supabase", "n8n-nodes-base.code", 2, [-3200, 360], { jsCode: transformCode }),
+    node("prepare-snapshots", "Preparar Snapshots de Configuracao", "n8n-nodes-base.code", 2, [-3200, 680], { jsCode: snapshotsCode }),
+    node("persist-snapshots-check", "Persistir snapshots?", "n8n-nodes-base.if", 2.2, [-3000, 680], {
+      conditions: {
+        options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
+        conditions: [{
+          id: "persist_snapshots",
+          leftValue: "={{ $json._norwyn_mode !== 'smoke_manual' || $json._norwyn_smoke_persist === true }}",
+          rightValue: true,
+          operator: { type: "boolean", operation: "equals", singleValue: true },
+        }],
+        combinator: "and",
+      },
+      options: {},
+    }),
+    node("snapshot-batches", "Montar Lotes de Snapshots", "n8n-nodes-base.code", 2, [-2800, 680], { jsCode: snapshotBatchesCode }),
+    node("snapshot-upsert", "Upsert Snapshots de Configuracao", "n8n-nodes-base.httpRequest", 4.2, [-2560, 680], {
+      method: "POST",
+      url: "={{ $env.SUPABASE_URL.replace(/\\/$/, '') + '/rest/v1/instagram_ads_config_snapshots?on_conflict=tenant_id,entity_type,entity_id,config_hash' }}",
+      sendHeaders: true,
+      headerParameters: { parameters: [
+        { name: "apikey", value: "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+        { name: "Authorization", value: "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+        { name: "Content-Type", value: "application/json" },
+        { name: "Prefer", value: "resolution=merge-duplicates,return=minimal" },
+      ] },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify($json.rows) }}",
+      options: { timeout: 120000 },
+    }, { retryOnFail: true, maxTries: 3, waitBetweenTries: 1500 }),
     node("valid", "Registro valido?", "n8n-nodes-base.if", 2.2, [-2920, 360], {
       conditions: {
         options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 2 },
@@ -502,8 +568,14 @@ const workflow = {
     "Meta Ads API - Incremental": { main: [[{ node: "Tratar Paginacao", type: "main", index: 0 }]] },
     "Meta Ads API - Smoke": { main: [[{ node: "Marcar Smoke Dry Run", type: "main", index: 0 }]] },
     "Marcar Smoke Dry Run": { main: [[{ node: "Tratar Paginacao", type: "main", index: 0 }]] },
-    "Tratar Paginacao": { main: [[{ node: "Enriquecer Criativos e Destinos", type: "main", index: 0 }]] },
-    "Enriquecer Criativos e Destinos": { main: [[{ node: "Normalizar para Supabase", type: "main", index: 0 }]] },
+    "Tratar Paginacao": { main: [[{ node: "Enriquecer Configuracao, Publico e Criativo", type: "main", index: 0 }]] },
+    "Enriquecer Configuracao, Publico e Criativo": { main: [[
+      { node: "Normalizar para Supabase", type: "main", index: 0 },
+      { node: "Preparar Snapshots de Configuracao", type: "main", index: 0 },
+    ]] },
+    "Preparar Snapshots de Configuracao": { main: [[{ node: "Persistir snapshots?", type: "main", index: 0 }]] },
+    "Persistir snapshots?": { main: [[{ node: "Montar Lotes de Snapshots", type: "main", index: 0 }], []] },
+    "Montar Lotes de Snapshots": { main: [[{ node: "Upsert Snapshots de Configuracao", type: "main", index: 0 }]] },
     "Normalizar para Supabase": { main: [[{ node: "Registro valido?", type: "main", index: 0 }]] },
     "Registro valido?": {
       main: [
