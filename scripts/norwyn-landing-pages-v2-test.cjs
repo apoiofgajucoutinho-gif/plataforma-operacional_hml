@@ -9,6 +9,7 @@ const insights = fs.readFileSync("modules/landing-pages/analytics/landing-insigh
 const criteriaEndpoint = fs.readFileSync("app/api/landing-pages/criteria/route.ts", "utf8");
 const accessService = fs.readFileSync("modules/landing-pages/services/landing-pages-server.ts", "utf8");
 const trackingEndpoint = fs.readFileSync("app/api/norwyn/lp-events/route.ts", "utf8");
+const corsHelper = fs.readFileSync("lib/norwyn/lp-cors.ts", "utf8");
 const landingTracking = fs.readFileSync("apps/imersao-zumbido-hml/norwyn-tracking.js", "utf8");
 const attributionFunction = service.slice(service.indexOf("function attributionRows"), service.indexOf("function buildAcquisitionReading"));
 const moduleMigration = fs.readFileSync("supabase/migrations/20260927211000_add_landing_pages_module_key.sql", "utf8");
@@ -130,7 +131,8 @@ assert.doesNotMatch(service, /attributedPurchasesByOrigin\.set\("Direto \/ sem i
 const lowSampleInsights = insightsModule.exports.buildInsights({ journey: sampleJourney, previousJourney: emptyJourney, criteria: insightsModule.exports.defaultLandingCriteria, maturity: insightsModule.exports.defaultLandingMaturity });
 assert.equal(lowSampleInsights.some((item) => item.id === "minimum_sample"), true, "low sample must be explicit");
 assert.equal(lowSampleInsights.find((item) => item.id === "minimum_sample").confidence, null, "confidence must not be shown before Insight maturity");
-assert.match(trackingEndpoint, /imersaozumbido\.fgajulianacoutinho\.com\.br/);
+assert.match(corsHelper, /imersaozumbido\.fgajulianacoutinho\.com\.br/);
+assert.match(trackingEndpoint, /norwynLpCorsHeaders/);
 assert.match(trackingEndpoint, /trafficType === "public" \? "REAL" : "SIMULATED"/);
 assert.match(landingTracking, /traffic_type: trafficTypeFromLocation\(\)/);
 

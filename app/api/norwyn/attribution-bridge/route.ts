@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { hasDisallowedNorwynLpOrigin, isAllowedNorwynLpOrigin, norwynLpCorsHeaders } from "@/lib/norwyn/lp-cors";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -7,24 +8,13 @@ export const revalidate = 0;
 
 const CANONICAL_CHECKOUT = "https://pay.hotmart.com/B47092539B?off=lov69pen";
 const LANDING_KEY = "imersao_zumbido";
-const allowedOrigins = new Set([
-  "https://lp-ju.vercel.app",
-  "https://imersaozumbido.fgajulianacoutinho.com.br",
-  "https://plataf-op-hml.vercel.app",
-]);
 type LandingRegistry = { tenant_id: string; product_id: string | null; campaign_key: string | null; url: string | null };
 let registryCache: { value: LandingRegistry; expiresAt: number } | null = null;
 
 function headers(request: Request) {
-  const origin = request.headers.get("origin");
   return {
     "Cache-Control": "no-store",
-    ...(origin && allowedOrigins.has(origin) ? {
-      "Access-Control-Allow-Origin": origin,
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-      Vary: "Origin",
-    } : {}),
+    ...norwynLpCorsHeaders(request, ["GET", "POST", "OPTIONS"]),
   };
 }
 
@@ -79,10 +69,16 @@ async function landingRegistry(admin: NonNullable<ReturnType<typeof createAdminC
 }
 
 export async function OPTIONS(request: Request) {
+  if (!isAllowedNorwynLpOrigin(request.headers.get("origin"))) {
+    return new NextResponse(null, { status: 403, headers: { Vary: "Origin" } });
+  }
   return new NextResponse(null, { status: 204, headers: headers(request) });
 }
 
 export async function GET(request: Request) {
+  if (hasDisallowedNorwynLpOrigin(request)) {
+    return NextResponse.json({ enabled: false, mode: "forbidden" }, { status: 403, headers: { Vary: "Origin" } });
+  }
   const url = new URL(request.url);
   const smoke = url.searchParams.get("traffic_type") === "test" && url.searchParams.get("smoke") === "1";
   const enabled = globalEnabled() || smoke;
@@ -94,6 +90,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (hasDisallowedNorwynLpOrigin(request)) {
+    return NextResponse.json({ enabled: false, bridged: false, reason: "forbidden_origin" }, { status: 403, headers: { Vary: "Origin" } });
+  }
   const responseHeaders = headers(request);
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const fallback = canonicalizeCheckout(body?.checkout_url).toString();

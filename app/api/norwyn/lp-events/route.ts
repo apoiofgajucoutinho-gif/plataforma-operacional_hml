@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { hasDisallowedNorwynLpOrigin, isAllowedNorwynLpOrigin, norwynLpCorsHeaders } from "@/lib/norwyn/lp-cors";
 
 const allowedEvents = new Set([
   "landing_view", "page_view", "session_start", "cta_view", "cta_click", "scroll_depth",
@@ -11,13 +12,6 @@ const allowedEvents = new Set([
 
 const allowedEnvironments = new Set(["hml", "dev", "qa"]);
 const allowedTrafficTypes = new Set(["public", "internal", "test"]);
-const corsOrigins = new Set([
-  "https://v0-zumbidoju.vercel.app",
-  "https://lp-ju.vercel.app",
-  "https://imersaozumbido.fgajulianacoutinho.com.br",
-  "https://plataf-op-hml.vercel.app",
-]);
-
 function textValue(payload: Record<string, unknown>, key: string, maxLength = 2048) {
   const value = payload[key];
   return typeof value === "string" && value.trim() ? value.trim().slice(0, maxLength) : null;
@@ -37,17 +31,6 @@ function timestampValue(payload: Record<string, unknown>) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
-function corsHeaders(request: Request): Record<string, string> {
-  const origin = request.headers.get("origin");
-  if (!origin || !corsOrigins.has(origin)) return {};
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    Vary: "Origin",
-  };
-}
-
 function sanitizedRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const sanitized: Record<string, string | number | boolean | null> = {};
@@ -60,11 +43,17 @@ function sanitizedRecord(value: unknown) {
 }
 
 export async function OPTIONS(request: Request) {
-  return new NextResponse(null, { status: 204, headers: corsHeaders(request) });
+  if (!isAllowedNorwynLpOrigin(request.headers.get("origin"))) {
+    return new NextResponse(null, { status: 403, headers: { Vary: "Origin" } });
+  }
+  return new NextResponse(null, { status: 204, headers: norwynLpCorsHeaders(request, ["POST", "OPTIONS"]) });
 }
 
 export async function POST(request: Request) {
-  const headers = { "Cache-Control": "no-store", ...corsHeaders(request) };
+  if (hasDisallowedNorwynLpOrigin(request)) {
+    return NextResponse.json({ ok: false, error: "origem_nao_permitida" }, { status: 403, headers: { Vary: "Origin" } });
+  }
+  const headers = { "Cache-Control": "no-store", ...norwynLpCorsHeaders(request, ["POST", "OPTIONS"]) };
   const payload = await request.json().catch(() => null);
 
   if (!payload || typeof payload !== "object") {
