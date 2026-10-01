@@ -94,6 +94,7 @@ function emptyContext(overrides: Partial<AdsContext>, period: AdsPeriodContext):
     period,
     configSnapshots: [],
     reconciliation: {
+      campaignScope: { resolved: false, reason: "A leitura de Norwyn/Hotmart ainda está no escopo do tenant e não pode ser creditada à campanha Meta filtrada." },
       site: { available: false, visitors: null, sessions: null, engagedSessions: null, averageSessionSeconds: null, source: "Site / Analytics", limitation: "Fonte Site Kit/GA4 ainda não integrada ao contexto Ads." },
       norwyn: { sessions: null, offerViews: null, checkoutClicks: null, attributedSessions: null, paidSocialSessions: null, source: "landing_page_tracking_events" },
       hotmart: { confirmedSales: null, attributedSales: null, confirmedRevenue: null, unattributedSales: null, attributionStatus: "unavailable", source: "comercial_vendas" },
@@ -301,6 +302,10 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
       }];
     }),
     reconciliation: {
+      campaignScope: {
+        resolved: false,
+        reason: "Os dados Meta do anúncio não possuem landing_key/UTM com ad_id e a campanha Meta atual não está mapeada canonicamente à campanha Norwyn. Totais Norwyn/Hotmart são contexto do tenant, não resultado desta campanha.",
+      },
       site: {
         available: false,
         visitors: null,

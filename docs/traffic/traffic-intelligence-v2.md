@@ -19,6 +19,8 @@ Ela nao executa alteracoes na Meta. Todas as recomendacoes exibem periodo, amost
 
 As fontes nunca sao somadas nem usadas para preencher lacunas umas das outras.
 
+Enquanto a campanha Meta filtrada nao possuir mapeamento canonico para uma campanha/landing Norwyn, os totais de tracking e Hotmart aparecem somente como contexto do tenant. Eles nao entram nas etapas da jornada da campanha nem no CPA confirmado.
+
 ## Identidade do anuncio
 
 O agrupamento prioriza `ad_id`. Linhas historicas sem ID podem usar o nome como fallback somente quando existe uma correspondencia unica com um anuncio identificado no mesmo recorte. A interface preserva `creative_id`, thumbnail, preview, formato, headline, copy, CTA e destino retornados pela V9.

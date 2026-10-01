@@ -117,6 +117,10 @@ export type AdsConfigSnapshot = {
 };
 
 export type AdsReconciliationSummary = {
+  campaignScope: {
+    resolved: boolean;
+    reason: string;
+  };
   site: {
     available: boolean;
     visitors: number | null;

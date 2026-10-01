@@ -91,6 +91,9 @@ function recommendationsForAds(ads: AdPerformance[], context: AdsContext): Recom
 function purchaseAnswer(context: AdsContext, ads: AdPerformance[]) {
   const meta = ads.reduce((sum, ad) => sum + ad.metaPurchases, 0);
   const hotmart = context.reconciliation.hotmart;
+  if (!context.reconciliation.campaignScope.resolved) return meta > 0
+    ? { status: "Meta atribuiu, venda não localizada", text: "A Meta reportou compra, mas o mapeamento atual não permite localizar a venda Hotmart desta campanha nem determinar o anúncio.", tone: "bad" as const }
+    : { status: "Atribuição incompleta", text: context.reconciliation.campaignScope.reason, tone: "warn" as const };
   if (hotmart.confirmedSales == null) return { status: "Não disponível", text: "A fonte Hotmart não respondeu para este período.", tone: "neutral" as const };
   if (hotmart.attributedSales && hotmart.attributedSales > 0) return { status: "Parcialmente confirmado", text: `${n(hotmart.attributedSales)} venda(s) possuem vínculo Norwyn, mas o anúncio não foi determinado pelas UTMs atuais.`, tone: "warn" as const };
   if (meta > 0 && hotmart.confirmedSales > 0) return { status: "Meta atribuiu, Hotmart confirmou, anúncio não determinado", text: "As duas fontes registram resultado no período, porém ainda não existe chave comum que prove qual anúncio originou cada venda.", tone: "warn" as const };
@@ -105,16 +108,17 @@ export function TrafficIntelligenceV2({ rows, context }: { rows: AdsDailyRow[]; 
   const decisionMemory = context.decisionMemory.filter((item) => item.metaCampaignId && campaignIds.has(item.metaCampaignId));
   const total = ads.reduce((acc, ad) => ({ spend: acc.spend + ad.spend, impressions: acc.impressions + ad.impressions, link: acc.link + ad.linkClicks, lpv: acc.lpv + ad.lpv, checkout: acc.checkout + ad.metaCheckouts, purchase: acc.purchase + ad.metaPurchases }), { spend: 0, impressions: 0, link: 0, lpv: 0, checkout: 0, purchase: 0 });
   const answer = purchaseAnswer(context, ads);
+  const campaignScoped = context.reconciliation.campaignScope.resolved;
   const recommendations = recommendationsForAds(ads, context);
   const audience = rows.find((row) => row.targeting_summary);
   const strongestSignal = [...ads].sort((a, b) => (b.metaCheckouts * 20 + b.lpv * 2 + b.linkClicks) - (a.metaCheckouts * 20 + a.lpv * 2 + a.linkClicks))[0];
   const stages = [
     { label: "Anúncio exibido", value: total.impressions, source: "Meta Ads", confidence: "Alta", rate: null, divergence: "Impressões não são pessoas." },
     { label: "Clique no link", value: total.link, source: "Meta Ads", confidence: "Alta", rate: rate(total.link, total.impressions), divergence: "Clique não prova carregamento da página." },
-    { label: "Visita real", value: context.reconciliation.norwyn.sessions, source: "Norwyn · todas as origens", confidence: "Média", rate: null, divergence: "Sem ad_id na UTM; não comparar 1:1 com os cliques pagos." },
-    { label: "Oferta vista", value: context.reconciliation.norwyn.offerViews, source: "Norwyn · REAL", confidence: "Alta", rate: context.reconciliation.norwyn.sessions == null || context.reconciliation.norwyn.offerViews == null ? null : rate(context.reconciliation.norwyn.offerViews, context.reconciliation.norwyn.sessions), divergence: "Evento próprio, distinto de LPV Meta." },
-    { label: "Checkout", value: context.reconciliation.norwyn.checkoutClicks, source: "Norwyn · REAL", confidence: "Alta", rate: context.reconciliation.norwyn.offerViews == null || context.reconciliation.norwyn.checkoutClicks == null ? null : rate(context.reconciliation.norwyn.checkoutClicks, context.reconciliation.norwyn.offerViews), divergence: `${n(total.checkout)} InitiateCheckout na Meta; fontes não são somadas.` },
-    { label: "Venda confirmada", value: context.reconciliation.hotmart.confirmedSales, source: "Hotmart", confidence: "Alta", rate: null, divergence: `${n(context.reconciliation.hotmart.attributedSales)} com atribuição Norwyn; anúncio não determinado.` },
+    { label: "Visita real", value: campaignScoped ? context.reconciliation.norwyn.sessions : null, source: "Norwyn", confidence: campaignScoped ? "Média" : "Não determinada", rate: null, divergence: campaignScoped ? "Sem ad_id na UTM; não comparar 1:1 com os cliques pagos." : context.reconciliation.campaignScope.reason },
+    { label: "Oferta vista", value: campaignScoped ? context.reconciliation.norwyn.offerViews : null, source: "Norwyn", confidence: campaignScoped ? "Alta" : "Não determinada", rate: campaignScoped && context.reconciliation.norwyn.sessions != null && context.reconciliation.norwyn.offerViews != null ? rate(context.reconciliation.norwyn.offerViews, context.reconciliation.norwyn.sessions) : null, divergence: campaignScoped ? "Evento próprio, distinto de LPV Meta." : "Aguardando escopo canônico da campanha." },
+    { label: "Checkout", value: campaignScoped ? context.reconciliation.norwyn.checkoutClicks : null, source: "Norwyn", confidence: campaignScoped ? "Alta" : "Não determinada", rate: campaignScoped && context.reconciliation.norwyn.offerViews != null && context.reconciliation.norwyn.checkoutClicks != null ? rate(context.reconciliation.norwyn.checkoutClicks, context.reconciliation.norwyn.offerViews) : null, divergence: campaignScoped ? `${n(total.checkout)} InitiateCheckout na Meta; fontes não são somadas.` : "Aguardando escopo canônico da campanha." },
+    { label: "Venda confirmada", value: campaignScoped ? context.reconciliation.hotmart.confirmedSales : null, source: "Hotmart", confidence: campaignScoped ? "Alta" : "Não determinada", rate: null, divergence: campaignScoped ? `${n(context.reconciliation.hotmart.attributedSales)} com atribuição Norwyn; anúncio não determinado.` : "Vendas do tenant não são creditadas a esta campanha." },
   ];
 
   return (
@@ -144,8 +148,8 @@ export function TrafficIntelligenceV2({ rows, context }: { rows: AdsDailyRow[]; 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <SourceCard title="Meta Ads" source="Graph API · janela Meta" rows={[["Link clicks", n(total.link)], ["LPV", n(total.lpv)], ["InitiateCheckout", n(total.checkout)], ["Meta Purchase", n(total.purchase)]]} />
           <SourceCard title="Site / Analytics" source={context.reconciliation.site.source} rows={[["Sessões", n(context.reconciliation.site.sessions)], ["Engajadas", n(context.reconciliation.site.engagedSessions)], ["Duração", context.reconciliation.site.averageSessionSeconds == null ? "Não disponível" : `${n(context.reconciliation.site.averageSessionSeconds)}s`], ["Cobertura", context.reconciliation.site.available ? "Disponível" : "Aguardando fonte"]]} footer={context.reconciliation.site.limitation} />
-          <SourceCard title="Norwyn Tracking" source={context.reconciliation.norwyn.source} rows={[["Sessões reais", n(context.reconciliation.norwyn.sessions)], ["Paid social", n(context.reconciliation.norwyn.paidSocialSessions)], ["Oferta vista", n(context.reconciliation.norwyn.offerViews)], ["Checkout click", n(context.reconciliation.norwyn.checkoutClicks)]]} />
-          <SourceCard title="Hotmart" source={context.reconciliation.hotmart.source} rows={[["Vendas confirmadas", n(context.reconciliation.hotmart.confirmedSales)], ["Com bridge", n(context.reconciliation.hotmart.attributedSales)], ["Sem atribuição", n(context.reconciliation.hotmart.unattributedSales)], ["Receita confirmada", money(context.reconciliation.hotmart.confirmedRevenue)]]} footer="Venda confirmada não significa venda atribuída a um anúncio." />
+          <SourceCard title="Norwyn Tracking · contexto do tenant" source={context.reconciliation.norwyn.source} rows={[["Sessões reais", n(context.reconciliation.norwyn.sessions)], ["Paid social identificado", n(context.reconciliation.norwyn.paidSocialSessions)], ["Oferta vista", n(context.reconciliation.norwyn.offerViews)], ["Checkout click", n(context.reconciliation.norwyn.checkoutClicks)]]} footer={context.reconciliation.campaignScope.reason} />
+          <SourceCard title="Hotmart · contexto do tenant" source={context.reconciliation.hotmart.source} rows={[["Vendas confirmadas", n(context.reconciliation.hotmart.confirmedSales)], ["Com bridge", n(context.reconciliation.hotmart.attributedSales)], ["Sem atribuição", n(context.reconciliation.hotmart.unattributedSales)], ["Receita confirmada", money(context.reconciliation.hotmart.confirmedRevenue)]]} footer="Totais do tenant no período. Venda confirmada não significa venda atribuída a esta campanha ou anúncio." />
         </div>
       </section>
 
