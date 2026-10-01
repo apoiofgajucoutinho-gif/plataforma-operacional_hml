@@ -35,7 +35,39 @@ function firstUrl(creative) {
   const spec = creative?.object_story_spec || {};
   const candidates = [spec.link_data?.link, spec.video_data?.call_to_action?.value?.link, creative?.link_url, creative?.object_url];
   for (const entry of creative?.asset_feed_spec?.link_urls || []) candidates.push(entry?.website_url, entry?.deeplink_url);
-  return candidates.find(value => typeof value === 'string' && /^https?:\/\//i.test(value)) || null;
+  for (const value of candidates) {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    if (/^https?:\/\//i.test(normalized)) return normalized;
+  }
+  return null;
+}
+
+
+function normalizeAbsoluteUrl(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || !/^https?:\/\//i.test(raw)) return null;
+  try {
+    const parsed = new URL(raw);
+    const hostname = String(parsed.hostname || '').trim().toLowerCase();
+    if (!hostname) return null;
+    const pathname = (parsed.pathname || '/').replace(/\/{2,}/g, '/');
+    const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '') || '/';
+    return { raw, hostname, pathname: normalizedPath, host_path: hostname + normalizedPath };
+  } catch {}
+  const fallback = raw.match(/^https?:\/\/([^\s/?#]+)(\/[^\s?#]*)?(?:[?#].*)?$/i);
+  if (!fallback) return null;
+  const authority = fallback[1].split('@').pop() || '';
+  const hostname = authority.replace(/:\d+$/, '').toLowerCase();
+  if (!hostname || !/^[a-z0-9.-]+$/i.test(hostname)) return null;
+  const pathname = (fallback[2] || '/').replace(/\/{2,}/g, '/');
+  const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '') || '/';
+  return { raw, hostname, pathname: normalizedPath, host_path: hostname + normalizedPath };
+}
+
+function parseUrlTags(value) {
+  if (typeof value !== 'string' || !value.trim()) return new URLSearchParams();
+  const clean = value.trim().replace(/^[?#]/, '');
+  try { return new URLSearchParams(clean); } catch { return new URLSearchParams(); }
 }
 
 function creativeDetails(creative, video) {
@@ -73,7 +105,8 @@ function targetingSignals(targeting, audienceDetails) {
   const categories = new Set();
   const evidence = [];
   const names = [];
-  for (const audience of audienceDetails) {
+  const details = Array.isArray(audienceDetails) ? audienceDetails : [];
+  for (const audience of details) {
     const raw = JSON.stringify({ subtype: audience?.subtype, customer_file_source: audience?.customer_file_source, lookalike_spec: audience?.lookalike_spec, rule: audience?.rule }).toLowerCase();
     if (audience?.name) names.push(String(audience.name));
     if (audience?.lookalike_spec || String(audience?.subtype || '').toUpperCase().includes('LOOKALIKE')) { categories.add('Lookalike'); evidence.push('custom_audience.lookalike_spec/subtype'); }
@@ -83,18 +116,61 @@ function targetingSignals(targeting, audienceDetails) {
     else if (raw.includes('engagement') || raw.includes('remarket')) { categories.add('Remarketing'); evidence.push('custom_audience.subtype/rule:engagement'); }
     else if (audience?.subtype || audience?.customer_file_source) { categories.add('Lista / custom audience'); evidence.push('custom_audience.subtype/customer_file_source'); }
   }
-  const interests = [...(targeting?.interests || []), ...((targeting?.flexible_spec || []).flatMap(group => group?.interests || []))];
-  const behaviors = [...(targeting?.behaviors || []), ...((targeting?.flexible_spec || []).flatMap(group => group?.behaviors || []))];
+
+  const flexible = Array.isArray(targeting?.flexible_spec) ? targeting.flexible_spec : [];
+  const collect = (key) => [...(targeting?.[key] || []), ...flexible.flatMap(group => group?.[key] || [])].filter(Boolean);
+  const labels = (values) => [...new Set(values.map(value => String(value?.name || value?.id || '').trim()).filter(Boolean))];
+  const interests = collect('interests');
+  const behaviors = collect('behaviors');
+  const educationMajors = collect('education_majors');
+  const workPositions = collect('work_positions');
   if (interests.length || behaviors.length) { categories.add('Publico por interesse'); evidence.push('targeting.interests/behaviors'); }
+
   const advantage = Boolean(targeting?.targeting_automation?.advantage_audience === 1 || targeting?.targeting_automation?.advantage_audience === true || targeting?.targeting_relaxation_types || targeting?.advantage_audience);
-  const hasCustom = audienceDetails.length > 0 || (targeting?.custom_audiences || []).length > 0;
+  const hasCustom = details.length > 0 || (targeting?.custom_audiences || []).length > 0;
   if (advantage || (!hasCustom && !interests.length && !behaviors.length && targeting?.geo_locations)) { categories.add('Publico amplo / Advantage'); evidence.push(advantage ? 'targeting.advantage_or_expansion' : 'targeting.only_demographic_geo'); }
-  const type = categories.size > 1 ? 'Misto' : categories.size === 1 ? [...categories][0] : 'Nao identificado';
+
   const summary = [];
-  if (targeting?.age_min || targeting?.age_max) summary.push(`idade ${targeting.age_min || '?'}-${targeting.age_max || '?'}`);
-  if (targeting?.geo_locations?.countries?.length) summary.push(`paises ${targeting.geo_locations.countries.join(',')}`);
-  if (names.length) summary.push(`audiencias ${names.join(', ')}`);
-  return { audience_type: type, audience_label: names.length ? `${type}: ${names.join(', ')}` : type, targeting_summary: summary.join(' | ') || null, audience_confidence: categories.size ? (audienceDetails.length || interests.length || advantage ? 'high' : 'medium') : 'unresolved', audience_evidence: [...new Set(evidence)] };
+  const genders = Array.isArray(targeting?.genders) ? targeting.genders.map(Number).filter(Number.isFinite) : [];
+  if (genders.includes(1) && genders.includes(2)) summary.push('Todos os generos');
+  else if (genders.includes(2)) summary.push('Mulheres');
+  else if (genders.includes(1)) summary.push('Homens');
+  else summary.push('Genero nao identificado');
+  if (targeting?.age_min || targeting?.age_max) summary.push(String(targeting.age_min || '?') + '-' + String(targeting.age_max || '?'));
+  else summary.push('Faixa etaria nao identificada');
+  const countries = targeting?.geo_locations?.countries || [];
+  if (countries.length) summary.push(countries.map(country => country === 'BR' ? 'Brasil' : country).join(', '));
+  else summary.push('Localizacao nao identificada');
+
+  const appendValues = (label, values) => {
+    const visible = labels(values);
+    if (!visible.length) return;
+    summary.push(label + ': ' + visible.slice(0, 3).join(', ') + (visible.length > 3 ? ' +' + String(visible.length - 3) : ''));
+  };
+  appendValues('Interesse', interests);
+  appendValues('Comportamento', behaviors);
+  appendValues('Formacao', educationMajors);
+  appendValues('Cargo', workPositions);
+
+  const included = details.filter(entry => entry?._norwyn_relation !== 'excluded');
+  const excluded = details.filter(entry => entry?._norwyn_relation === 'excluded');
+  appendValues('Audiencia', included);
+  appendValues('Exclusao', excluded);
+  const lookalikes = details.filter(entry => entry?.lookalike_spec || String(entry?.subtype || '').toUpperCase().includes('LOOKALIKE'));
+  for (const lookalike of lookalikes.slice(0, 2)) {
+    const origin = lookalike?.lookalike_spec?.origin_event_name || lookalike?.lookalike_spec?.origin_id || lookalike?.lookalike_spec?.type || null;
+    summary.push('Lookalike: ' + (lookalike.name || lookalike.id || 'identificado') + (origin ? ' (origem: ' + origin + ')' : ''));
+  }
+  if (advantage) summary.push('Advantage ativo');
+
+  const type = categories.size > 1 ? 'Misto' : categories.size === 1 ? [...categories][0] : 'Nao identificado';
+  return {
+    audience_type: type,
+    audience_label: names.length ? type + ': ' + [...new Set(names)].join(', ') : type,
+    targeting_summary: summary.join(' | '),
+    audience_confidence: categories.size ? (details.length || interests.length || advantage ? 'high' : 'medium') : 'unresolved',
+    audience_evidence: [...new Set(evidence)],
+  };
 }
 
 const cacheRows = rowsFrom('Carregar Cache Supabase');
@@ -124,15 +200,37 @@ assetDefs.forEach((request, index) => {
 
 const landings = rowsFrom('Carregar Registry Supabase');
 function resolveLanding(destinationUrl, urlTags) {
-  let host = null;
-  try { host = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch {}
-  for (const landing of landings) {
-    let landingHost = null;
-    try { landingHost = new URL(landing.url).hostname.toLowerCase(); } catch {}
-    if (host && host === landingHost) return { landing_key: landing.landing_key, confidence: 'high', reason: 'destination_domain_exact' };
-    if (urlTags && (urlTags.includes(`landing_key=${landing.landing_key}`) || urlTags.includes(`utm_campaign=${landing.campaign_key}`))) return { landing_key: landing.landing_key, confidence: 'high', reason: 'url_tags_exact' };
+  const destination = normalizeAbsoluteUrl(destinationUrl);
+  const tags = parseUrlTags(urlTags);
+  const explicitLandingKey = tags.get('landing_key');
+  const explicitCampaignKey = tags.get('utm_campaign');
+
+  if (explicitLandingKey) {
+    const matched = landings.find(landing => String(landing?.landing_key || '') === explicitLandingKey);
+    if (matched) return { landing_key: matched.landing_key, confidence: 'high', reason: 'url_tags_landing_key_exact', evidence: 'landing_key=' + explicitLandingKey };
   }
-  return { landing_key: null, confidence: 'unresolved', reason: 'no_explicit_destination_match' };
+  if (explicitCampaignKey) {
+    const matches = landings.filter(landing => String(landing?.campaign_key || '') === explicitCampaignKey);
+    const keys = [...new Set(matches.map(landing => landing?.landing_key).filter(Boolean))];
+    if (keys.length === 1) return { landing_key: keys[0], confidence: 'high', reason: 'url_tags_campaign_key_exact', evidence: 'utm_campaign=' + explicitCampaignKey };
+  }
+
+  if (!destination) return { landing_key: null, confidence: 'unresolved', reason: destinationUrl ? 'invalid_destination' : 'missing_destination', evidence: null };
+  const sameHost = [];
+  for (const landing of landings) {
+    const registered = normalizeAbsoluteUrl(landing?.url);
+    if (!registered) continue;
+    if (registered.hostname === destination.hostname) sameHost.push(registered.pathname);
+    if (registered.host_path === destination.host_path) {
+      return { landing_key: landing.landing_key, confidence: 'high', reason: 'destination_host_path_exact', evidence: destination.host_path };
+    }
+  }
+  return {
+    landing_key: null,
+    confidence: 'unresolved',
+    reason: sameHost.length ? 'unregistered_destination_path' : 'unregistered_destination',
+    evidence: destination.host_path,
+  };
 }
 
 const snapshots = new Map();
@@ -151,7 +249,10 @@ const output = rowsFrom('Tratar Paginacao').map(source => {
   const adset = bundle.adset || {};
   const creative = bundle.creative || {};
   const targeting = adset.targeting || {};
-  const audienceDetails = [...(targeting.custom_audiences || []), ...(targeting.excluded_custom_audiences || [])].map(ref => assets.get(`audience:${ref?.id}`)?.payload).filter(Boolean);
+  const audienceDetails = [
+    ...(targeting.custom_audiences || []).map(ref => { const payload = assets.get(`audience:${ref?.id}`)?.payload; return payload ? { ...payload, _norwyn_relation: 'included' } : null; }),
+    ...(targeting.excluded_custom_audiences || []).map(ref => { const payload = assets.get(`audience:${ref?.id}`)?.payload; return payload ? { ...payload, _norwyn_relation: 'excluded' } : null; }),
+  ].filter(Boolean);
   const initialDetails = creativeDetails(creative, null);
   const videoResult = initialDetails.video_id ? assets.get(`video:${initialDetails.video_id}`) : null;
   const details = creativeDetails(creative, videoResult?.payload || null);
@@ -177,7 +278,7 @@ const output = rowsFrom('Tratar Paginacao').map(source => {
   row.thumbnail_url = creative.thumbnail_url || creative.image_url || videoResult?.payload?.picture || null;
   row.preview_url = details.instagram_permalink_url;
   row.destination_url = destinationUrl;
-  try { row.destination_domain = destinationUrl ? new URL(destinationUrl).hostname.toLowerCase() : null; } catch { row.destination_domain = null; }
+  row.destination_domain = normalizeAbsoluteUrl(destinationUrl)?.hostname || null;
   row.url_tags = creative.url_tags || null;
   row._landing_resolution = landing;
   row.landing_key = landing.landing_key;

@@ -110,6 +110,18 @@ Age, gender, region, publisher platform, placement e device platform não entram
 
 O trigger HML recalcula `row_key` por `data|campaign_name|adset_name|ad_name`, e o índice único usa `(tenant_id,row_key)`. A troca imediata para IDs duplicaria dias já existentes após renomeações. A V9 preserva a chave legada, grava a chave candidata por IDs no raw e adia a migração até existir reconciliação histórica controlada.
 
+- Chave persistida atual: `date|campaign_name|adset_name|ad_name`.
+- Chave candidata futura: `date|campaign_id|adset_id|ad_id`.
+- Risco da migração: trocar a regra de conflito sem reconciliar o histórico pode duplicar registros existentes, especialmente após renomeações. Esta etapa não muda a chave, o índice ou dados históricos.
+
+### Validação de respostas Meta
+
+Insights, configuração de anúncio e assets passam por validação explícita antes do próximo estágio. Respostas com `error`, `OAuthException`, token inválido/expirado, permissão negada ou estrutura mínima ausente encerram a execução com etapa, endpoint lógico, code e subcode. Tokens e credenciais são sanitizados da mensagem.
+
+### Destino e Landing Page
+
+`destination_domain` deriva somente de URL HTTP(S) absoluta válida. A resolução de `landing_key` aceita chave explícita em `url_tags`, campanha explícita quando identifica uma única entrada ou correspondência exata de host e path no `norwyn_landing_registry`. Querystring e trailing slash são normalizados; compartilhar apenas o domínio com outra página não cria vínculo automático. Destinos ausentes, inválidos ou não cadastrados permanecem `unresolved`.
+
 ## Consulta
 
 Endpoint autenticado, somente leitura:
