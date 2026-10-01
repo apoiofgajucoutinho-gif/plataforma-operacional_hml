@@ -8,6 +8,7 @@
     initialized: false,
     pageViewSent: false,
     viewContentSent: false,
+    offerViewPending: false,
     offerViewSent: false,
     initiateCheckoutSent: false,
   };
@@ -59,6 +60,7 @@
 
     root.fbq("init", PIXEL_ID);
     sendPageSignals();
+    if (state.offerViewPending) sendOfferView();
   }
 
   function sendPageSignals() {
@@ -78,7 +80,12 @@
   }
 
   function sendOfferView() {
-    if (!state.initialized || state.offerViewSent || typeof root.fbq !== "function") return;
+    if (state.offerViewSent) return;
+    if (!state.initialized || typeof root.fbq !== "function") {
+      state.offerViewPending = true;
+      return;
+    }
+    state.offerViewPending = false;
     state.offerViewSent = true;
     root.fbq("trackCustom", "ViewOffer", {
       content_ids: ["imersao_zumbido"],

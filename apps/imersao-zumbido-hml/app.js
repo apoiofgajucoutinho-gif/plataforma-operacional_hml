@@ -64,7 +64,7 @@
       if (sectionId === "offer") tracking.track("offer_view", {}, { once: true });
       sectionObserver.unobserve(entry.target);
     });
-  }, { threshold: [0.2] });
+  }, { threshold: [0.2, 0.35] });
   document.querySelectorAll("[data-norwyn-section]").forEach((node) => sectionObserver.observe(node));
 
   const ctaObserver = new IntersectionObserver((entries) => {
