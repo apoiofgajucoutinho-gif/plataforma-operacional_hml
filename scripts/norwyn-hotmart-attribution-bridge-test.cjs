@@ -13,11 +13,12 @@ assert.equal(bridge.isValid("https://pay.hotmart.com/B47092539B?off=changed"), f
 (async () => {
   bridge.state.enabled = false;
   bridge.state.ready = true;
-  const off = await bridge.prepare({ currentTouch: { utm_source: "whatsapp" }, sessionId: "s1", visitorId: "v1" });
+  const off = await bridge.prepare({ currentTouch: { utm_source: "whatsapp", sck: "nw_existing_abcdefghijkl" }, sessionId: "s1", visitorId: "v1" });
   assert.equal(off.bridged, false);
   assert.match(off.url, /B47092539B/);
   assert.match(off.url, /off=lov69pen/);
   assert.match(off.url, /utm_source=whatsapp/);
+  assert.match(off.url, /sck=nw_existing_abcdefghijkl/);
 
   bridge.state.enabled = true;
   const success = await bridge.prepare({ currentTouch: {}, sessionId: "s1", visitorId: "v1" }, {

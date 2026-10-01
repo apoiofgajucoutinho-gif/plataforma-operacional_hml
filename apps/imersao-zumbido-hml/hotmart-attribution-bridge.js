@@ -3,7 +3,7 @@
 
   const CHECKOUT = "https://pay.hotmart.com/B47092539B?off=lov69pen";
   const ENDPOINT = "https://plataf-op-hml.vercel.app/api/norwyn/attribution-bridge";
-  const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "src"];
+  const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "sck", "src"];
   const state = { enabled: false, mode: "disabled", ready: false };
 
   function canonicalUrl(currentTouch) {
