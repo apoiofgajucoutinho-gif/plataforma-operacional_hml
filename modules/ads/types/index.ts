@@ -117,20 +117,45 @@ export type AdsConfigSnapshot = {
 };
 
 export type AdsReconciliationSummary = {
+  site: {
+    available: boolean;
+    visitors: number | null;
+    sessions: number | null;
+    engagedSessions: number | null;
+    averageSessionSeconds: number | null;
+    source: string;
+    limitation: string;
+  };
   norwyn: {
     sessions: number | null;
     offerViews: number | null;
     checkoutClicks: number | null;
     attributedSessions: number | null;
+    paidSocialSessions: number | null;
     source: string;
   };
   hotmart: {
     confirmedSales: number | null;
     attributedSales: number | null;
     confirmedRevenue: number | null;
+    unattributedSales: number | null;
+    attributionStatus: "confirmed" | "partial" | "meta_only" | "unattributed" | "unavailable";
     source: string;
   };
   note: string;
+};
+
+export type AdsDecisionMemory = {
+  id: string;
+  campaignId: string | null;
+  metaCampaignId: string | null;
+  detected: string;
+  recommended: string;
+  actionTaken: string | null;
+  result: string | null;
+  evidence: Record<string, unknown>;
+  confidence: string;
+  updatedAt: string;
 };
 
 export type AdsContext = {
@@ -146,4 +171,5 @@ export type AdsContext = {
   period: AdsPeriodContext;
   configSnapshots: AdsConfigSnapshot[];
   reconciliation: AdsReconciliationSummary;
+  decisionMemory: AdsDecisionMemory[];
 };

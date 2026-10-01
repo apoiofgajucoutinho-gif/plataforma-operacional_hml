@@ -30,6 +30,8 @@ import { clsx } from "clsx";
 import { Card } from "@/components/ui/Card";
 import { ExportButtons } from "@/components/ui/ExportButtons";
 import type { ExportColumn } from "@/lib/client/table-export";
+import { AdsOperationalGlossary } from "@/modules/ads/components/AdsOperationalGlossary";
+import { TrafficIntelligenceV2 } from "@/modules/ads/components/TrafficIntelligenceV2";
 import type { AdsContext, AdsDailyRow, AdsGranularity, AdsPerformanceStatus } from "@/modules/ads/types";
 
 type TabKey = "overview" | "performance" | "details" | "intelligence" | "glossary" | "analysis";
@@ -85,26 +87,6 @@ const statusOptions: Array<{ value: "" | AdsPerformanceStatus; label: string }> 
 
 const palette = ["#5BA0E6", "#AA6BD1", "#55BF83", "#D5828D", "#A87452", "#78A9B8", "#D6A35D", "#8EA4D2"];
 const monthFormatter = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "2-digit" });
-
-const glossary = [
-  ["SPEND", "Valor gasto / investimento", "Quanto foi cobrado pela Meta no período. Compare sempre com a fatura do cartão; diferença acima de 5% pede explicação."],
-  ["CPM", "Custo por mil impressões", "Valor gasto dividido pelas impressões e multiplicado por 1.000. Referências dependem do período, objetivo e público."],
-  ["CPC", "Custo por clique", "Valor gasto dividido pelos cliques. Deve ser comparado no mesmo objetivo, período e estágio do funil."],
-  ["CTR", "Taxa de cliques", "Cliques divididos por impressões. É um sinal de interação, não uma prova isolada de qualidade ou venda."],
-  ["REACH", "Alcance diário", "Pessoas únicas reportadas pela Meta em cada dia. A soma entre dias pode repetir pessoas e não representa alcance único do período."],
-  ["IMP", "Impressões", "Total de exibições do anúncio, incluindo repetições para a mesma pessoa."],
-  ["FREQ", "Frequência diária ponderada", "Média das frequências diárias ponderada por impressões. É uma aproximação, não a frequência única do período."],
-  ["SCORE", "Score legado", "Heurística histórica baseada em CTR, CPC e frequência. Serve para ordenar sinais, não para declarar vencedor."],
-  ["SINAL", "Sinal de atenção", "Regra observacional que precisa mostrar período, amostra e evidência antes de orientar uma análise."],
-  ["CAMPANHA", "Campanha", "Nível mais alto do Gerenciador de Anúncios; define o objetivo de negócio."],
-  ["ADSET", "Conjunto de anúncios", "Nível que define público-alvo, posicionamentos e orçamento."],
-  ["AD", "Anúncio / criativo", "A peça vista pelo público, como imagem, vídeo ou carrossel."],
-  ["CAPI", "Conversions API", "Configuração de conversões pelo servidor, importante para medir retorno real."],
-  ["ROAS", "Retorno sobre investimento", "Receita gerada dividida pelo valor investido em mídia."],
-  ["RETARG.", "Remarketing", "Anúncios para pessoas que já interagiram com a marca."],
-  ["A/B", "Teste A/B", "Rodar criativos diferentes simultaneamente para comparar performance."],
-  ["CBO", "Campaign Budget Optimization", "Orçamento definido na campanha e distribuído automaticamente pela Meta."],
-];
 
 function parseDate(value: string) {
   return new Date(`${value}T00:00:00`);
@@ -664,6 +646,12 @@ function IntelligenceTab({ rows, context }: { rows: AdsDailyRow[]; context: AdsC
 
   return (
     <div className="space-y-6">
+      <TrafficIntelligenceV2 rows={rows} context={context} />
+
+      <div className="border-t border-brand-sand pt-7">
+        <p className="text-xs font-bold uppercase text-brand-clay">Visões preservadas</p>
+        <h2 className="mt-1 text-2xl font-bold text-brand-teal">Traffic Intelligence V1</h2>
+      </div>
       <SectionTitle icon={<Users className="h-4 w-4" />} title="Quem estamos impactando" />
       {audiences.length ? <div className="grid gap-3 lg:grid-cols-2">{audiences.map((row) => (
         <Card key={row.adset_id ?? row.conjunto ?? row.targeting_summary} className="p-5">
@@ -940,24 +928,7 @@ function DetailsTab({
 }
 
 function GlossaryTab() {
-  return (
-    <div className="space-y-4">
-      <Card className="border-[#E9CBD1] p-4 text-sm leading-relaxed text-brand-teal/70">
-        Este glossário explica as métricas do dashboard e ajuda a transformar o relatório de mídia em perguntas práticas para a agência.
-      </Card>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {glossary.map(([sigla, nome, def]) => (
-          <Card key={sigla} className="p-4">
-            <div className="flex items-center gap-2">
-              <span className="rounded-md bg-[#FFF0F2] px-2 py-1 text-xs font-black text-brand-clay">{sigla}</span>
-              <h3 className="font-bold text-brand-teal">{nome}</h3>
-            </div>
-            <p className="mt-3 text-sm leading-relaxed text-brand-teal/65">{def}</p>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
+  return <AdsOperationalGlossary />;
 }
 
 function AnalysisTab({ rows, allRows }: { rows: AdsDailyRow[]; allRows: AdsDailyRow[] }) {

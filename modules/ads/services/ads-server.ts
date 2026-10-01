@@ -4,7 +4,7 @@ import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-b
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
-import type { AdsConfigSnapshot, AdsContext, AdsDailyRow, AdsGranularity, AdsPeriodContext, AdsPeriodKey } from "@/modules/ads/types";
+import type { AdsConfigSnapshot, AdsContext, AdsDailyRow, AdsGranularity, AdsPeriodContext, AdsPeriodKey, AdsReconciliationSummary } from "@/modules/ads/types";
 
 type SearchLike = Record<string, string | string[] | undefined>;
 
@@ -94,10 +94,12 @@ function emptyContext(overrides: Partial<AdsContext>, period: AdsPeriodContext):
     period,
     configSnapshots: [],
     reconciliation: {
-      norwyn: { sessions: null, offerViews: null, checkoutClicks: null, attributedSessions: null, source: "landing_page_tracking_events" },
-      hotmart: { confirmedSales: null, attributedSales: null, confirmedRevenue: null, source: "comercial_vendas" },
+      site: { available: false, visitors: null, sessions: null, engagedSessions: null, averageSessionSeconds: null, source: "Site / Analytics", limitation: "Fonte Site Kit/GA4 ainda não integrada ao contexto Ads." },
+      norwyn: { sessions: null, offerViews: null, checkoutClicks: null, attributedSessions: null, paidSocialSessions: null, source: "landing_page_tracking_events" },
+      hotmart: { confirmedSales: null, attributedSales: null, confirmedRevenue: null, unattributedSales: null, attributionStatus: "unavailable", source: "comercial_vendas" },
       note: "Fontes independentes; os valores não formam necessariamente uma sequência monotônica.",
     },
+    decisionMemory: [],
     ...overrides,
   };
 }
@@ -206,12 +208,12 @@ async function fetchConfigSnapshots(dataClient: AdsDataClient, tenantId: string)
 }
 
 async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: string, period: AdsPeriodContext) {
-  const [snapshotsResult, trackingResult, salesResult] = await Promise.all([
+  const [snapshotsResult, trackingResult, salesResult, bridgeResult, learningsResult, campaignsResult] = await Promise.all([
     fetchConfigSnapshots(dataClient, tenantId),
     fetchPeriodRows(
       dataClient,
       "landing_page_tracking_events",
-      "event_name,session_id,sck,landing_key,source_type,occurred_at",
+      "event_name,session_id,sck,landing_key,utm_source,utm_medium,utm_campaign,utm_content,source_type,occurred_at",
       tenantId,
       "occurred_at",
       period,
@@ -225,6 +227,25 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
       "data_compra",
       period,
     ),
+    fetchPeriodRows(
+      dataClient,
+      "hotmart_attribution_bridge_v",
+      "sale_id,sale_confirmed,data_compra,valor_bruto,hotmart_source_sck,norwyn_source,norwyn_channel,norwyn_campaign,norwyn_entry,norwyn_confidence",
+      tenantId,
+      "data_compra",
+      period,
+    ),
+    dataClient
+      .from("norwyn_campaign_learnings")
+      .select("id,campaign_id,learning_type,title,detail,evidence,confidence,status,updated_at")
+      .eq("tenant_id", tenantId)
+      .eq("status", "active")
+      .order("updated_at", { ascending: false })
+      .limit(20),
+    dataClient
+      .from("campaigns")
+      .select("id,plan_json")
+      .eq("tenant_id", tenantId),
   ]);
 
   const trackingAvailable = !trackingResult.error;
@@ -234,27 +255,76 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
   const realSessions = new Set(tracking.map((row) => row.session_id).filter(Boolean));
   const sessionsFor = (eventName: string) => new Set(tracking.filter((row) => row.event_name === eventName).map((row) => row.session_id).filter(Boolean)).size;
   const attributedSessions = new Set(tracking.filter((row) => row.sck).map((row) => row.session_id).filter(Boolean));
+  const paidSocialSessions = new Set(tracking.filter((row) => {
+    const source = String(row.utm_source ?? "").toLowerCase();
+    const medium = String(row.utm_medium ?? "").toLowerCase();
+    return source.includes("meta_ads") || source.includes("facebook_ads") || medium.includes("paid") || medium === "cpc";
+  }).map((row) => row.session_id).filter(Boolean));
   const confirmed = sales.filter((row) => row.sale_confirmed === true || ["APPROVED", "COMPLETED"].includes(String(row.status_normalizado ?? "").toUpperCase()));
-  const attributed = confirmed.filter((row) => String(row.source_sck ?? "").startsWith("nw_"));
+  const bridgeAvailable = !bridgeResult.error;
+  const attributed = bridgeAvailable
+    ? bridgeResult.rows.filter((row) => row.sale_confirmed === true && row.hotmart_source_sck && row.norwyn_confidence)
+    : confirmed.filter((row) => String(row.source_sck ?? "").startsWith("nw_"));
   const revenue = confirmed
     .filter((row) => row.revenue_eligible !== false && String(row.moeda ?? "BRL").toUpperCase() === "BRL")
     .reduce((sum, row) => sum + Number(row.valor_bruto ?? 0), 0);
+  const attributionStatus: AdsReconciliationSummary["hotmart"]["attributionStatus"] = !salesAvailable
+    ? "unavailable"
+    : attributed.length && attributed.length === confirmed.length
+      ? "confirmed"
+      : attributed.length
+        ? "partial"
+        : confirmed.length
+          ? "unattributed"
+          : "meta_only";
 
   return {
     configSnapshots: snapshotsResult.error ? [] : snapshotsResult.rows,
+    decisionMemory: learningsResult.error || campaignsResult.error ? [] : (learningsResult.data ?? []).flatMap((row) => {
+      const campaign = (campaignsResult.data ?? []).find((item) => item.id === row.campaign_id);
+      const plan = campaign?.plan_json && typeof campaign.plan_json === "object" && !Array.isArray(campaign.plan_json) ? campaign.plan_json as Record<string, unknown> : {};
+      const foundation = plan.traffic_data_foundation && typeof plan.traffic_data_foundation === "object" && !Array.isArray(plan.traffic_data_foundation) ? plan.traffic_data_foundation as Record<string, unknown> : {};
+      const metaCampaignId = typeof foundation.meta_campaign_id === "string" ? foundation.meta_campaign_id : null;
+      if (!metaCampaignId) return [];
+      const evidence = row.evidence && typeof row.evidence === "object" && !Array.isArray(row.evidence) ? row.evidence as Record<string, unknown> : {};
+      return [{
+        id: row.id,
+        campaignId: row.campaign_id,
+        metaCampaignId,
+        detected: row.title,
+        recommended: row.detail ?? "Recomendação ainda não detalhada.",
+        actionTaken: typeof evidence.action_taken === "string" ? evidence.action_taken : null,
+        result: typeof evidence.result === "string" ? evidence.result : null,
+        evidence,
+        confidence: row.confidence,
+        updatedAt: row.updated_at,
+      }];
+    }),
     reconciliation: {
+      site: {
+        available: false,
+        visitors: null,
+        sessions: null,
+        engagedSessions: null,
+        averageSessionSeconds: null,
+        source: "Site Kit / GA4",
+        limitation: "Não existe uma fonte Site Kit/GA4 canônica conectada ao módulo Ads. Relatórios manuais não são copiados.",
+      },
       norwyn: {
         sessions: trackingAvailable ? realSessions.size : null,
         offerViews: trackingAvailable ? sessionsFor("offer_view") : null,
         checkoutClicks: trackingAvailable ? sessionsFor("checkout_click") : null,
         attributedSessions: trackingAvailable ? attributedSessions.size : null,
+        paidSocialSessions: trackingAvailable ? paidSocialSessions.size : null,
         source: "landing_page_tracking_events · REAL",
       },
       hotmart: {
         confirmedSales: salesAvailable ? confirmed.length : null,
         attributedSales: salesAvailable ? attributed.length : null,
         confirmedRevenue: salesAvailable ? revenue : null,
-        source: "comercial_vendas · sale_confirmed",
+        unattributedSales: salesAvailable ? Math.max(0, confirmed.length - attributed.length) : null,
+        attributionStatus,
+        source: bridgeAvailable ? "comercial_vendas + hotmart_attribution_bridge_v" : "comercial_vendas · sale_confirmed",
       },
       note: "Meta usa janelas de atribuição; Norwyn mede navegação própria; Hotmart confirma transações. Os números não são equivalentes.",
     },
@@ -328,5 +398,6 @@ export async function getAdsContext(searchParams?: SearchLike): Promise<AdsConte
     period,
     configSnapshots: intelligence.configSnapshots,
     reconciliation: intelligence.reconciliation,
+    decisionMemory: intelligence.decisionMemory,
   };
 }
