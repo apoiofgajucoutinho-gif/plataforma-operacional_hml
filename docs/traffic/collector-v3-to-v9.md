@@ -15,7 +15,7 @@
 - Lotes: padrão 50
 - Deduplicação: `Map` por `row_key`
 - Upsert: conflito em `tenant_id,row_key`, timeout 120 s, retry ativo
-- `row_key`: `data|nome da campanha|nome do conjunto|nome do anúncio`
+- `row_key`: MD5 de `data|campaign_id|adset_id|ad_id`; fallback compatível com V3 por `data|nome da campanha|nome do conjunto|nome do anúncio`
 
 O arquivo V3 fornecido contém valores mascarados/embutidos para tenant, endpoint Supabase, API key e token Meta. Ele é apenas referência de auditoria e não foi copiado para o repositório.
 

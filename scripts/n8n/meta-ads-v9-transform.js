@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 function actionValue(actions, types) {
   if (!Array.isArray(actions)) return 0;
   return actions
@@ -75,7 +77,13 @@ return items.map(item => {
     ...rawInsight
   } = d;
 
-  const rowKey = [dataRef, campaignName, adsetName, adName].join('|');
+  const canonicalIds = [d.campaign_id, d.adset_id, d.ad_id].map(value => String(value || '').trim());
+  const hasCanonicalIds = canonicalIds.every(Boolean);
+  const rowIdentity = hasCanonicalIds
+    ? [dataRef, ...canonicalIds].join('|')
+    : [dataRef, campaignName, adsetName, adName].join('|');
+  const rowKey = crypto.createHash('md5').update(rowIdentity).digest('hex');
+  const rowKeyStrategy = hasCanonicalIds ? 'date_meta_ids_v1' : 'date_legacy_names_v1';
   return {
     json: {
       tenant_id: tenantId,
@@ -176,9 +184,10 @@ return items.map(item => {
             meta_purchase_roas: purchaseRoasMetric.action_type,
           },
           idempotency: {
-            persisted_row_key: 'date|campaign_name|adset_name|ad_name',
-            candidate_id_key: [dataRef, d.campaign_id, d.adset_id, d.ad_id].join('|'),
-            migration_status: 'deferred_to_avoid_legacy_duplicates',
+            persisted_row_key: 'md5(date|campaign_id|adset_id|ad_id), fallback md5(date|campaign_name|adset_name|ad_name)',
+            row_key_strategy: rowKeyStrategy,
+            row_identity: rowIdentity,
+            legacy_fallback_compatible: !hasCanonicalIds,
           },
           config: {
             snapshot_hash: d._config_snapshot_hash || null,

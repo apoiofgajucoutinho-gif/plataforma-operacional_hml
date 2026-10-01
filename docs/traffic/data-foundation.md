@@ -108,7 +108,7 @@ Age, gender, region, publisher platform, placement e device platform não entram
 
 ### Idempotência
 
-O trigger HML recalcula `row_key` por `data|campaign_name|adset_name|ad_name`, e o índice único usa `(tenant_id,row_key)`. A troca imediata para IDs duplicaria dias já existentes após renomeações. A V9 preserva a chave legada, grava a chave candidata por IDs no raw e adia a migração até existir reconciliação histórica controlada.
+O trigger HML calcula `row_key` como MD5 de `data|campaign_id|adset_id|ad_id` quando os três IDs estão disponíveis. Sem IDs, usa o fallback legado MD5 de `data|campaign_name|adset_name|ad_name`. O índice único permanece em `(tenant_id,row_key)` e nenhuma linha histórica é reescrita.
 
 - Chave persistida atual: `date|campaign_name|adset_name|ad_name`.
 - Chave candidata futura: `date|campaign_id|adset_id|ad_id`.

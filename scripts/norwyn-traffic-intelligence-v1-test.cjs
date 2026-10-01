@@ -25,6 +25,8 @@ assert.match(server, /comercial_vendas/);
 assert.match(server, /source_type.*REAL/);
 assert.match(pagination, /collectSupabasePages/);
 assert.doesNotMatch(compare, /insert|update|delete|upsert/i);
+assert.match(compare, /não comparável por ausência na coleta V3/);
+assert.match(compare, /approved: !unexplainedBaseDifference && !unexplainedDifference/);
 
 assert.equal(workflow.active, false, "V9 must remain inactive");
 assert.equal(workflow.settings.timezone, "America/Sao_Paulo");

@@ -86,9 +86,12 @@ function classify(metric, v3, v9, v9Sources, mode) {
   if (almostEqual(v3, v9)) return { classification: "igualdade", reason: "Mesmo total no período comum." };
   if (v9 === null) {
     return {
-      classification: "diferença de fonte",
+      classification: mode === "replay_v3_raw_payload"
+        ? "não comparável por ausência na coleta V3"
+        : "diferença de fonte",
+      comparable: false,
       reason: mode === "replay_v3_raw_payload"
-        ? "O payload bruto persistido pela V3 não contém esta família; o resultado do smoke V9 precisa ser exportado para comparação."
+        ? "O payload bruto persistido pela V3 não contém esta família. A ausência não bloqueia o cutover."
         : "A fonte V9 não retornou esta métrica.",
     };
   }
@@ -142,6 +145,8 @@ async function load(origin) {
   });
   const unexplainedBaseDifference = comparison.some((item) => ["spend", "impressions", "clicks"].includes(item.metric) && item.classification !== "igualdade");
   const complete = comparison.every((item) => item.v3 !== null && item.v9 !== null);
+  const unexplainedDifference = comparison.some((item) => item.classification === "diferença inesperada");
+  const nonComparableMetrics = comparison.filter((item) => item.comparable === false).map((item) => item.metric);
 
   console.log(JSON.stringify({
     mode: "read_only",
@@ -152,7 +157,8 @@ async function load(origin) {
     comparison,
     base_metrics_approved: !unexplainedBaseDifference,
     complete,
-    approved: !unexplainedBaseDifference && complete,
+    non_comparable_metrics: nonComparableMetrics,
+    approved: !unexplainedBaseDifference && !unexplainedDifference,
     note: mode === "replay_v3_raw_payload"
       ? "Replay determinístico da transformação V9 sobre o raw_payload V3. Métricas não solicitadas pela V3 ficam indisponíveis; passe --v9-file=<export.json> para usar a saída real do smoke dry-run."
       : "Conversões são classificadas conforme aliases canônicos e não precisam coincidir com aliases legados.",

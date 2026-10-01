@@ -8,6 +8,7 @@ const endpoint = fs.readFileSync("app/api/ads/traffic-foundation/route.ts", "utf
 const workflow = JSON.parse(fs.readFileSync("modules/ads/Instagram Ads Daily Collector_V9_Traffic_Foundation.json", "utf8"));
 const migration = fs.readFileSync("supabase/migrations/20260928123000_traffic_foundation_v1_zumbido_references.sql", "utf8");
 const v9Migration = fs.readFileSync("supabase/migrations/20260929143000_meta_ads_v9_configuration_foundation.sql", "utf8");
+const rowKeyMigration = fs.readFileSync("supabase/migrations/20261001133739_harmonize_instagram_ads_row_key_v9.sql", "utf8");
 const docs = fs.readFileSync("docs/traffic/data-foundation.md", "utf8");
 const workflowText = JSON.stringify(workflow);
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
@@ -73,6 +74,12 @@ const adsUpsert = workflow.nodes.find((node) => node.name === "Upsert Supabase A
 const snapshotsUpsert = workflow.nodes.find((node) => node.name === "Upsert Snapshots de Configuracao");
 assert.equal(adsUpsert.parameters.url, "={{ $('Configuracao V9').first().json.supabase_url.replace(/\\/+$/, '') + '/rest/v1/instagram_ads_daily?on_conflict=tenant_id,row_key' }}");
 assert.equal(snapshotsUpsert.parameters.url, "={{ $('Configuracao V9').first().json.supabase_url.replace(/\\/+$/, '') + '/rest/v1/instagram_ads_config_snapshots?on_conflict=tenant_id,entity_type,entity_id,config_hash' }}");
+assert.match(rowKeyMigration, /existing\.campaign_id = btrim\(new\.campaign_id\)/, "database compatibility must reuse an existing row by Meta IDs");
+assert.match(rowKeyMigration, /existing\.row_key = legacy_row_key/, "database compatibility must reuse the V3 legacy row key");
+assert.match(rowKeyMigration, /if tg_op = 'UPDATE'[\s\S]*new\.row_key := old\.row_key/, "upsert updates must preserve the historical row key");
+assert.match(rowKeyMigration, /case when has_meta_ids then md5\(identity_value\) else legacy_row_key end/, "new rows must prefer the canonical Meta ID key");
+assert.match(rowKeyMigration, /set search_path = pg_catalog/, "trigger function must use a fixed search path");
+assert.doesNotMatch(rowKeyMigration, /\b(update|delete|truncate)\s+public\.instagram_ads_daily\b/i, "row-key migration must not rewrite historical Ads rows");
 assert.ok(!adsUpsert.parameters.url.startsWith("=="));
 assert.ok(!snapshotsUpsert.parameters.url.startsWith("=="));
 
@@ -117,9 +124,19 @@ assert.match(docs, /Venda confirmada/);
     unique_outbound_clicks: [{ action_type: "outbound_click", value: "43" }], purchase_roas: [{ action_type: "offsite_conversion.fb_pixel_purchase", value: "3.94" }],
     _norwyn_mode: "smoke_manual", _norwyn_smoke_persist: false,
   } }];
-  const transform = new AsyncFunction("items", "$items", transformNode.parameters.jsCode);
-  const normalized = await transform(input, $items);
+  const transform = new AsyncFunction("items", "$items", "require", transformNode.parameters.jsCode);
+  const normalized = await transform(input, $items, require);
+  const repeated = await transform(input, $items, require);
+  const renamed = await transform([{ json: { ...input[0].json, campaign_name: "Campaign renamed", adset_name: "Ad Set renamed", ad_name: "Ad renamed" } }], $items, require);
   assert.equal(normalized[0].json.performance_status, "SEM_CLASSIFICACAO_AUTOMATICA");
+  assert.equal(normalized[0].json.row_key, repeated[0].json.row_key, "reexecution must keep the same row_key");
+  assert.equal(normalized[0].json.row_key, renamed[0].json.row_key, "names cannot change identity when Meta IDs are stable");
+  assert.equal(normalized[0].json.raw_payload._norwyn_foundation.idempotency.row_key_strategy, "date_meta_ids_v1");
+  const legacyInput = [{ json: { ...input[0].json, campaign_id: null, adset_id: null, ad_id: null } }];
+  const legacy = await transform(legacyInput, $items, require);
+  const expectedLegacyKey = crypto.createHash("md5").update("2026-09-28|Campaign|Ad Set|Ad").digest("hex");
+  assert.equal(legacy[0].json.row_key, expectedLegacyKey, "rows without IDs must retain the V3 legacy identity");
+  assert.equal(legacy[0].json.raw_payload._norwyn_foundation.idempotency.row_key_strategy, "date_legacy_names_v1");
   assert.equal(normalized[0].json.link_clicks, 50);
   assert.equal(normalized[0].json.cost_per_landing_page_view, 2.5);
   assert.equal(normalized[0].json.cost_per_checkout, 20);
@@ -213,6 +230,7 @@ assert.match(docs, /Venda confirmada/);
   assert.match(consolidated[0].json._audience.targeting_summary, /Advantage ativo/);
   assert.equal(consolidated[0].json._audience.audience_type, "Misto");
   assert.doesNotMatch(transformNode.parameters.jsCode, /complete_registration/i);
-  assert.match(transformNode.parameters.jsCode, /persisted_row_key: 'date\|campaign_name\|adset_name\|ad_name'/);
+  assert.match(transformNode.parameters.jsCode, /date_meta_ids_v1/);
+  assert.match(transformNode.parameters.jsCode, /date_legacy_names_v1/);
   console.log("Traffic Data Foundation V1 n8n Cloud credential regression PASS");
 })().catch((error) => { console.error(error); process.exit(1); });

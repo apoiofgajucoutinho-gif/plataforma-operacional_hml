@@ -28,7 +28,7 @@ All 15 contain entity type/id, hash, config JSON, parent IDs, source, Graph vers
 
 ## V3 and V9 coexistence risk
 
-V3 and V9 use the same unique key `(tenant_id,row_key)`. Therefore they do not create parallel rows for the same ad/day: the last writer replaces the logical row. In the smoke period, all 7 matching rows currently show V9 as origin, so a direct persisted V3-versus-V9 row comparison for that exact period is no longer available.
+V3 and V9 use the same unique constraint `(tenant_id,row_key)`, but older V9 exports sent a textual key while the database trigger recalculated the legacy MD5 by names. The harmonized contract now uses MD5 of date plus Meta IDs, with the V3 name-based MD5 only as fallback. Existing history remains untouched, and V3/V9 persistence must not overlap during cutover.
 
 Delivery metrics keep the same Meta fields for spend, impressions, reach and clicks. V9 adds canonical alias selection for link click, LPV, checkout and Meta Purchase, and explicitly excludes `complete_registration` from Purchase. Hotmart confirmed sales are not part of this comparison.
 

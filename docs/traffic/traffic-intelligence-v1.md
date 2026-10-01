@@ -32,7 +32,7 @@ Os dois nós `Append Google Sheets` da V3 estão desativados e documentados como
 
 ## Comparativo V3 x V9
 
-Execute `node scripts/norwyn-ads-v3-v9-compare.cjs`. A rotina é somente leitura e compara gasto, impressões, cliques, link clicks, outbound clicks, LPV, checkout e Purchase Meta nas datas presentes nas duas origens. Se não houver interseção, informa que o comparativo válido deve usar dry-run V9 contra a última coleta V3, pois ambas compartilham `tenant_id,row_key`.
+Execute `node scripts/norwyn-ads-v3-v9-compare.cjs --date=AAAA-MM-DD`. A rotina é somente leitura e compara gasto, impressões, cliques, link clicks, outbound clicks, LPV, checkout e Purchase Meta. A saída real de um dry-run não persistido também pode ser informada com `--v9-file=<export.json>`.
 
 ## Cutover controlado
 
