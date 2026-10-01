@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { collectSupabasePages } from "@/lib/supabase/pagination";
 import { aggregateTrafficAd, resolveLanding, type TrafficFoundationDailyRow } from "@/modules/ads/services/traffic-data-foundation";
 
 export const dynamic = "force-dynamic";
@@ -31,13 +32,14 @@ export async function GET(request: Request) {
   const adName = url.searchParams.get("ad_name")?.trim();
   if (!adId && !adName) return NextResponse.json({ error: "Informe ad_id ou ad_name." }, { status: 400 });
 
-  let adsQuery = auth.dataClient.from("instagram_ads_daily")
-    .select("data_referencia,campaign_id,adset_id,ad_id,creative_id,creative_name,campanha,conjunto,anuncio,valor_gasto,impressoes,destination_url,destination_domain,url_tags,landing_key,raw_payload")
-    .eq("tenant_id", auth.tenantId).order("data_referencia", { ascending: false }).limit(500);
-  adsQuery = adId ? adsQuery.eq("ad_id", adId) : adsQuery.eq("anuncio", adName);
-
   const [{ data: rows, error }, { data: landings }, { data: campaigns }] = await Promise.all([
-    adsQuery,
+    collectSupabasePages<any>((from, to) => {
+      let query = auth.dataClient.from("instagram_ads_daily")
+        .select("data_referencia,campaign_id,adset_id,ad_id,creative_id,creative_name,campanha,conjunto,anuncio,valor_gasto,impressoes,destination_url,destination_domain,url_tags,landing_key,raw_payload")
+        .eq("tenant_id", auth.tenantId).order("data_referencia", { ascending: false }).range(from, to);
+      query = adId ? query.eq("ad_id", adId) : query.eq("anuncio", adName);
+      return query;
+    }),
     auth.dataClient.from("norwyn_landing_registry").select("landing_key,url,product_id,campaign_key,hotmart_product_id,metadata").eq("tenant_id", auth.tenantId),
     auth.dataClient.from("campaigns").select("id,name,product_id,plan_json").eq("tenant_id", auth.tenantId),
   ]);

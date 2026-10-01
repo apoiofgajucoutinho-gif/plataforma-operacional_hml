@@ -3,6 +3,7 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { collectSupabasePages } from "@/lib/supabase/pagination";
 import { adoptionModuleLabels, getAdoptionDirectory } from "@/modules/adocao/services/adoption-analytics";
 import type { RelatorioAgendamento, RelatorioBlocoConfig, RelatorioBlocoKey, RelatorioDestinatario, RelatorioEnvio, RelatorioFiltros, RelatorioPeriodo, RelatoriosContext, RelatorioTipoResumo } from "@/modules/relatorios/types";
 import { renderTelegramReport } from "@/modules/relatorios/utils/telegram-format";
@@ -129,6 +130,15 @@ async function source<T>(query: PromiseLike<{ data: T | null; error: unknown }>,
     return { status: "error", data: fallback, error: errorMessage(error) };
   }
 }
+async function pagedSource<T>(loadPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<SourceResult<T[]>> {
+  try {
+    const result = await collectSupabasePages<T>(loadPage);
+    if (result.error) return { status: "error", data: result.data, error: errorMessage(result.error) };
+    return { status: result.data.length ? "success" : "empty", data: result.data };
+  } catch (error) {
+    return { status: "error", data: [], error: errorMessage(error) };
+  }
+}
 async function sourceCount(query: PromiseLike<{ count: number | null; error: unknown }>): Promise<SourceResult<number>> {
   try {
     const { count, error } = await query;
@@ -248,15 +258,15 @@ async function adsBlock(client: AnyClient, tenantId: string, period: RelatorioPe
   const r = range(period);
   const title = "📣 Marketing · Ads";
   const sourceName = "instagram_ads_daily";
-  const result = await source<any[]>(client.from(sourceName).select("date, spend, reach, impressions, clicks, campaign_name").eq("tenant_id", tenantId).gte("date", r.from).lte("date", r.to).limit(500), []);
+  const result = await pagedSource<any>((from, to) => client.from(sourceName).select("data_referencia, valor_gasto, alcance, impressoes, cliques, campanha").eq("tenant_id", tenantId).gte("data_referencia", r.from).lte("data_referencia", r.to).order("data_referencia", { ascending: false }).range(from, to));
   if (result.status === "error") return blockError("marketing_ads", title, sourceName, result.error, r.label);
   const rows = result.data;
   if (!rows.length) return blockEmpty("marketing_ads", title, sourceName, "Sem dados de Ads em " + r.label.toLowerCase() + ".", r.label);
-  const spend = rows.reduce((sum, row) => sum + n(row.spend), 0);
-  const reach = rows.reduce((sum, row) => sum + n(row.reach), 0);
-  const clicks = rows.reduce((sum, row) => sum + n(row.clicks), 0);
-  const campaigns = new Set(rows.map((row) => row.campaign_name).filter(Boolean)).size;
-  return { key: "marketing_ads", title, source: sourceName, period: r.label, status: "success", empty: "Sem dados de Ads em " + r.label.toLowerCase() + ".", lines: ["Período: " + r.label, "Investimento: " + money(spend), "Alcance: " + reach.toLocaleString("pt-BR") + " · Cliques: " + clicks.toLocaleString("pt-BR"), "Campanhas: " + campaigns] };
+  const spend = rows.reduce((sum, row) => sum + n(row.valor_gasto), 0);
+  const dailyReachSum = rows.reduce((sum, row) => sum + n(row.alcance), 0);
+  const clicks = rows.reduce((sum, row) => sum + n(row.cliques), 0);
+  const campaigns = new Set(rows.map((row) => row.campanha).filter(Boolean)).size;
+  return { key: "marketing_ads", title, source: sourceName, period: r.label, status: "success", empty: "Sem dados de Ads em " + r.label.toLowerCase() + ".", lines: ["Período: " + r.label, "Investimento: " + money(spend), "Alcance diário acumulado: " + dailyReachSum.toLocaleString("pt-BR") + " · Cliques: " + clicks.toLocaleString("pt-BR"), "Campanhas: " + campaigns] };
 }
 async function comercialBlock(client: AnyClient, tenantId: string, period: RelatorioPeriodo): Promise<Block> {
   const r = range(period);

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { collectSupabasePages } from "@/lib/supabase/pagination";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -190,19 +191,26 @@ function resolveLanding(value: string, entries: LandingRegistryEntry[]) {
 async function loadMappings(dataClient: SupabaseAny, tenantId: string, entries: LandingRegistryEntry[], requestUrl: URL) {
   const start = param(requestUrl, "start");
   const end = param(requestUrl, "end");
-  let adsQuery = dataClient.from("instagram_ads_daily").select("campanha, anuncio, valor_gasto, impressoes, cliques, link_clicks, landing_page_views, destination_url, url_tags, landing_key, data_referencia").eq("tenant_id", tenantId).limit(1000);
-  if (start) adsQuery = adsQuery.gte("data_referencia", start);
-  if (end) adsQuery = adsQuery.lte("data_referencia", end);
-  let salesQuery = dataClient.from("comercial_vendas").select("transaction_id, hotmart_product_id, source_sck, status_normalizado, valor_bruto, data_compra").eq("tenant_id", tenantId).limit(500);
   const hotmartIds = [...new Set(entries.map((entry) => entry.hotmart_product_id).filter(Boolean).map(String))];
-  if (hotmartIds.length) salesQuery = salesQuery.in("hotmart_product_id", hotmartIds);
-  if (start) salesQuery = salesQuery.gte("data_compra", start);
-  if (end) salesQuery = salesQuery.lte("data_compra", end);
-  const [ads, sales] = await Promise.all([adsQuery, salesQuery]);
-  if (ads.error) throw new Error(ads.error.message);
-  if (sales.error) throw new Error(sales.error.message);
-  const adsRows = ads.data ?? [];
-  const salesRows = sales.data ?? [];
+  const [ads, sales] = await Promise.all([
+    collectSupabasePages<Record<string, unknown>>((from, to) => {
+      let query = dataClient.from("instagram_ads_daily").select("campanha, anuncio, valor_gasto, impressoes, cliques, link_clicks, landing_page_views, destination_url, url_tags, landing_key, data_referencia").eq("tenant_id", tenantId).order("data_referencia", { ascending: false }).range(from, to);
+      if (start) query = query.gte("data_referencia", start);
+      if (end) query = query.lte("data_referencia", end);
+      return query;
+    }),
+    collectSupabasePages<Record<string, unknown>>((from, to) => {
+      let query = dataClient.from("comercial_vendas").select("transaction_id, hotmart_product_id, source_sck, status_normalizado, valor_bruto, data_compra").eq("tenant_id", tenantId).order("data_compra", { ascending: false, nullsFirst: false }).range(from, to);
+      if (hotmartIds.length) query = query.in("hotmart_product_id", hotmartIds);
+      if (start) query = query.gte("data_compra", start);
+      if (end) query = query.lte("data_compra", end);
+      return query;
+    }),
+  ]);
+  if (ads.error) throw new Error(ads.error instanceof Error ? ads.error.message : String(ads.error));
+  if (sales.error) throw new Error(sales.error instanceof Error ? sales.error.message : String(sales.error));
+  const adsRows = ads.data;
+  const salesRows = sales.data;
   const metaMapping = entries.map((entry) => {
     const matches = adsRows.filter((row: Record<string, unknown>) => resolveLanding(`${row.destination_url ?? ""} ${row.url_tags ?? ""} ${row.landing_key ?? ""}`, entries) === entry.landing_key);
     return matches.length ? { landingKey: entry.landing_key, status: "FOUND" as const, evidence: `${matches.length} linhas em instagram_ads_daily contem evidencia da landing.` } : { landingKey: entry.landing_key, status: "LANDING VERSION UNKNOWN" as const, evidence: "Sem destination_url/url_tags/landing_key deterministico." };

@@ -12,6 +12,7 @@ const tests = [
   "scripts/norwyn-landing-pages-v2-test.cjs",
   "scripts/norwyn-landing-health-playbook-v1-test.cjs",
   "scripts/norwyn-traffic-foundation-v1-test.cjs",
+  "scripts/norwyn-traffic-intelligence-v1-test.cjs",
   "scripts/norwyn-hotmart-attribution-bridge-test.cjs",
   "scripts/norwyn-meta-pixel-test.cjs",
   "scripts/norwyn-lp-cors-test.cjs",

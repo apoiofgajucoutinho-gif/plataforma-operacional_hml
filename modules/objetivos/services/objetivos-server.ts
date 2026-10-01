@@ -3,9 +3,19 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { collectSupabasePages } from "@/lib/supabase/pagination";
 import type { ObjetivosContext, ObjetivosMeta } from "@/modules/objetivos/types";
 
 type SupabaseAny = any;
+
+async function fetchObjectiveAds(dataClient: SupabaseAny, tenantId: string) {
+  return collectSupabasePages<any>((from, to) => dataClient
+    .from("instagram_ads_daily")
+    .select("data_referencia, ctr, cpc, cpm, frequencia, valor_gasto, leads, conversoes")
+    .eq("tenant_id", tenantId)
+    .order("data_referencia", { ascending: false })
+    .range(from, to));
+}
 
 async function getMembershipByUserId(userId: string) {
   const admin = createAdminClient();
@@ -191,7 +201,7 @@ export async function getObjetivosContext(): Promise<ObjetivosContext> {
         .from("instagram_posts")
         .select("id, data_postagem, instagram_metrics(alcance, salvos, compartilhamentos, engajamento_classificacao)")
         .eq("tenant_id", membership.tenant_id),
-      dataClient.from("instagram_ads_daily").select("data_referencia, ctr, cpc, cpm, frequencia, valor_gasto, leads, conversoes").eq("tenant_id", membership.tenant_id),
+      fetchObjectiveAds(dataClient, membership.tenant_id),
       dataClient.from("fin_lancamentos").select("tipo, status, valor, data_pagamento, mes_competencia").eq("tenant_id", membership.tenant_id),
       membership.role === "ADMIN"
         ? Promise.resolve({ data: [{ can_write: true }] })

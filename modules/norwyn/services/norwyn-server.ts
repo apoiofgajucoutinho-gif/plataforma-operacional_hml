@@ -3,6 +3,7 @@ import { allModules } from "@/lib/auth/modules";
 import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-bypass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { collectSupabasePages } from "@/lib/supabase/pagination";
 import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
 import type { NorwynContext } from "@/modules/norwyn/types";
 import { getSpecialistLandingApprovalsForHome } from "@/modules/landing-pages/services/landing-pages-server";
@@ -31,6 +32,16 @@ async function fetchCommercialSales(dataClient: any, tenantId: string): Promise<
   }
 
   return { data: rows, error: null, pagination: { pageSize, pages: Math.ceil(rows.length / pageSize), rows: rows.length } };
+}
+
+async function fetchAdsRows(dataClient: any, tenantId: string): Promise<SupabaseResult> {
+  const result = await collectSupabasePages<any>((from, to) => dataClient
+    .from("instagram_ads_daily")
+    .select(adsAnalyticsSelect)
+    .eq("tenant_id", tenantId)
+    .order("data_referencia", { ascending: false })
+    .range(from, to));
+  return { data: result.data, error: result.error, pagination: { pageSize: 1000, pages: Math.ceil(result.data.length / 1000), rows: result.data.length } };
 }
 
 async function getMembershipByUserId(userId: string) {
@@ -259,12 +270,7 @@ export async function getNorwynContext(): Promise<NorwynContext> {
       .eq("tenant_id", membership.tenant_id)
       .limit(800),
     fetchCommercialSales(dataClient, membership.tenant_id),
-    dataClient
-      .from("instagram_ads_daily")
-      .select(adsAnalyticsSelect)
-      .eq("tenant_id", membership.tenant_id)
-      .order("data_referencia", { ascending: false })
-      .limit(5000),
+    fetchAdsRows(dataClient, membership.tenant_id),
     dataClient
       .from("growth_funnel_events")
       .select("id, tenant_id, funnel_session_id, event_type, environment, occurred_at, product_id, campaign_id, meta_campaign_id, meta_adset_id, meta_ad_id, meta_creative_id, campaign_key, audience_key, creative_key, source_sck, utm_source, utm_medium, utm_campaign, utm_content, utm_term, fbclid, click_id, page_url, provider, metadata, created_at")

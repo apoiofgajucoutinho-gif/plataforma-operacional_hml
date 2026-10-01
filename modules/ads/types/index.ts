@@ -1,4 +1,4 @@
-export type AdsPerformanceStatus = "OK" | "CTR BAIXO" | "SATURADO" | "PUBLICO RUIM" | "UNKNOWN";
+export type AdsPerformanceStatus = "OK" | "CTR BAIXO" | "SATURADO" | "PUBLICO RUIM" | "SEM_CLASSIFICACAO_AUTOMATICA" | "UNKNOWN";
 
 export type AdsPeriodKey = "30d" | "90d" | "6m" | "12m" | "custom";
 export type AdsGranularity = "day" | "week" | "month";
@@ -37,17 +37,32 @@ export type AdsDailyRow = {
   campaign_id?: string | null;
   adset_id?: string | null;
   ad_id?: string | null;
+  effective_status?: string | null;
   creative_id?: string | null;
   creative_name?: string | null;
   placement?: string | null;
   publisher_platform?: string | null;
   device_platform?: string | null;
   link_clicks?: number | null;
+  unique_link_clicks?: number | null;
+  unique_link_ctr?: number | null;
+  cost_per_unique_link_click?: number | null;
+  unique_clicks?: number | null;
+  outbound_clicks?: number | null;
+  unique_outbound_clicks?: number | null;
+  unique_ctr?: number | null;
+  cost_per_unique_click?: number | null;
   landing_page_views?: number | null;
+  cost_per_landing_page_view?: number | null;
   initiate_checkouts?: number | null;
+  cost_per_checkout?: number | null;
   meta_purchases?: number | null;
   meta_purchase_value?: number | null;
+  meta_purchase_roas?: number | null;
   cost_per_result?: number | null;
+  quality_ranking?: string | null;
+  engagement_rate_ranking?: string | null;
+  conversion_rate_ranking?: string | null;
   video_views?: number | null;
   video_plays_3s?: number | null;
   video_p25?: number | null;
@@ -62,6 +77,60 @@ export type AdsDailyRow = {
   destination_domain?: string | null;
   url_tags?: string | null;
   landing_key?: string | null;
+  audience_type?: string | null;
+  audience_label?: string | null;
+  targeting_summary?: string | null;
+  audience_confidence?: string | null;
+  audience_evidence?: unknown[] | null;
+  creative_format?: string | null;
+  creative_body?: string | null;
+  creative_headline?: string | null;
+  creative_description?: string | null;
+  creative_cta?: string | null;
+  creative_image_url?: string | null;
+  creative_video_id?: string | null;
+  creative_video_duration_seconds?: number | null;
+  object_story_id?: string | null;
+  instagram_permalink_url?: string | null;
+  config_snapshot_hash?: string | null;
+  origem?: string | null;
+};
+
+export type AdsConfigSnapshot = {
+  id: string;
+  entity_type: "campaign" | "adset" | "ad" | "creative" | "audience" | "video";
+  entity_id: string;
+  entity_name: string | null;
+  parent_ids: Record<string, unknown>;
+  config_hash: string;
+  config_json: Record<string, unknown>;
+  audience_type: string | null;
+  audience_label: string | null;
+  targeting_summary: string | null;
+  audience_confidence: string | null;
+  audience_evidence: unknown[] | null;
+  source: string;
+  graph_version: string;
+  collector_version: string;
+  first_seen_at: string;
+  last_seen_at: string;
+};
+
+export type AdsReconciliationSummary = {
+  norwyn: {
+    sessions: number | null;
+    offerViews: number | null;
+    checkoutClicks: number | null;
+    attributedSessions: number | null;
+    source: string;
+  };
+  hotmart: {
+    confirmedSales: number | null;
+    attributedSales: number | null;
+    confirmedRevenue: number | null;
+    source: string;
+  };
+  note: string;
 };
 
 export type AdsContext = {
@@ -75,4 +144,6 @@ export type AdsContext = {
   diagnostic: string | null;
   allowedModules: string[];
   period: AdsPeriodContext;
+  configSnapshots: AdsConfigSnapshot[];
+  reconciliation: AdsReconciliationSummary;
 };

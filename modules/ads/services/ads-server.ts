@@ -4,7 +4,7 @@ import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-b
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
-import type { AdsContext, AdsDailyRow, AdsGranularity, AdsPeriodContext, AdsPeriodKey } from "@/modules/ads/types";
+import type { AdsConfigSnapshot, AdsContext, AdsDailyRow, AdsGranularity, AdsPeriodContext, AdsPeriodKey } from "@/modules/ads/types";
 
 type SearchLike = Record<string, string | string[] | undefined>;
 
@@ -92,6 +92,12 @@ function emptyContext(overrides: Partial<AdsContext>, period: AdsPeriodContext):
     diagnostic: null,
     allowedModules: [],
     period,
+    configSnapshots: [],
+    reconciliation: {
+      norwyn: { sessions: null, offerViews: null, checkoutClicks: null, attributedSessions: null, source: "landing_page_tracking_events" },
+      hotmart: { confirmedSales: null, attributedSales: null, confirmedRevenue: null, source: "comercial_vendas" },
+      note: "Fontes independentes; os valores não formam necessariamente uma sequência monotônica.",
+    },
     ...overrides,
   };
 }
@@ -157,6 +163,104 @@ async function fetchAdsRows(dataClient: AdsDataClient, tenantId: string, period:
   return { rows, error: null };
 }
 
+async function fetchPeriodRows(
+  dataClient: AdsDataClient,
+  table: string,
+  select: string,
+  tenantId: string,
+  dateField: string,
+  period: AdsPeriodContext,
+  apply?: (query: any) => any,
+) {
+  const rows: any[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let query: any = dataClient
+      .from(table)
+      .select(select)
+      .eq("tenant_id", tenantId)
+      .gte(dateField, `${period.start}T00:00:00`)
+      .lte(dateField, `${period.end}T23:59:59.999`)
+      .order(dateField, { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+    if (apply) query = apply(query);
+    const { data, error } = await query;
+    if (error) return { rows, error };
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) return { rows, error: null };
+  }
+}
+
+async function fetchConfigSnapshots(dataClient: AdsDataClient, tenantId: string) {
+  const rows: AdsConfigSnapshot[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await dataClient
+      .from("instagram_ads_config_snapshots")
+      .select("id,entity_type,entity_id,entity_name,parent_ids,config_hash,config_json,audience_type,audience_label,targeting_summary,audience_confidence,audience_evidence,source,graph_version,collector_version,first_seen_at,last_seen_at")
+      .eq("tenant_id", tenantId)
+      .order("last_seen_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) return { rows, error };
+    rows.push(...((data ?? []) as AdsConfigSnapshot[]));
+    if (!data || data.length < PAGE_SIZE) return { rows, error: null };
+  }
+}
+
+async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: string, period: AdsPeriodContext) {
+  const [snapshotsResult, trackingResult, salesResult] = await Promise.all([
+    fetchConfigSnapshots(dataClient, tenantId),
+    fetchPeriodRows(
+      dataClient,
+      "landing_page_tracking_events",
+      "event_name,session_id,sck,landing_key,source_type,occurred_at",
+      tenantId,
+      "occurred_at",
+      period,
+      (query) => query.eq("source_type", "REAL"),
+    ),
+    fetchPeriodRows(
+      dataClient,
+      "comercial_vendas",
+      "transaction_id,source_sck,status_normalizado,sale_confirmed,revenue_eligible,moeda,valor_bruto,data_compra",
+      tenantId,
+      "data_compra",
+      period,
+    ),
+  ]);
+
+  const trackingAvailable = !trackingResult.error;
+  const salesAvailable = !salesResult.error;
+  const tracking = trackingResult.rows;
+  const sales = salesResult.rows;
+  const realSessions = new Set(tracking.map((row) => row.session_id).filter(Boolean));
+  const sessionsFor = (eventName: string) => new Set(tracking.filter((row) => row.event_name === eventName).map((row) => row.session_id).filter(Boolean)).size;
+  const attributedSessions = new Set(tracking.filter((row) => row.sck).map((row) => row.session_id).filter(Boolean));
+  const confirmed = sales.filter((row) => row.sale_confirmed === true || ["APPROVED", "COMPLETED"].includes(String(row.status_normalizado ?? "").toUpperCase()));
+  const attributed = confirmed.filter((row) => String(row.source_sck ?? "").startsWith("nw_"));
+  const revenue = confirmed
+    .filter((row) => row.revenue_eligible !== false && String(row.moeda ?? "BRL").toUpperCase() === "BRL")
+    .reduce((sum, row) => sum + Number(row.valor_bruto ?? 0), 0);
+
+  return {
+    configSnapshots: snapshotsResult.error ? [] : snapshotsResult.rows,
+    reconciliation: {
+      norwyn: {
+        sessions: trackingAvailable ? realSessions.size : null,
+        offerViews: trackingAvailable ? sessionsFor("offer_view") : null,
+        checkoutClicks: trackingAvailable ? sessionsFor("checkout_click") : null,
+        attributedSessions: trackingAvailable ? attributedSessions.size : null,
+        source: "landing_page_tracking_events · REAL",
+      },
+      hotmart: {
+        confirmedSales: salesAvailable ? confirmed.length : null,
+        attributedSales: salesAvailable ? attributed.length : null,
+        confirmedRevenue: salesAvailable ? revenue : null,
+        source: "comercial_vendas · sale_confirmed",
+      },
+      note: "Meta usa janelas de atribuição; Norwyn mede navegação própria; Hotmart confirma transações. Os números não são equivalentes.",
+    },
+  };
+}
+
 export async function getAdsContext(searchParams?: SearchLike): Promise<AdsContext> {
   const period = resolveAdsPeriod(searchParams);
   const userClient = await createClient();
@@ -200,7 +304,10 @@ export async function getAdsContext(searchParams?: SearchLike): Promise<AdsConte
     .eq("id", membership.tenant_id)
     .maybeSingle();
 
-  const { rows, error } = await fetchAdsRows(dataClient, membership.tenant_id, period);
+  const [{ rows, error }, intelligence] = await Promise.all([
+    fetchAdsRows(dataClient, membership.tenant_id, period),
+    fetchTrafficIntelligence(dataClient, membership.tenant_id, period),
+  ]);
 
   if (error) {
     return emptyContext({
@@ -219,5 +326,7 @@ export async function getAdsContext(searchParams?: SearchLike): Promise<AdsConte
     diagnostic: null,
     allowedModules,
     period,
+    configSnapshots: intelligence.configSnapshots,
+    reconciliation: intelligence.reconciliation,
   };
 }
