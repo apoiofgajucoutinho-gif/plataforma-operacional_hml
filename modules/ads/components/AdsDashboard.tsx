@@ -180,6 +180,11 @@ function truncate(value: string | null | undefined, size: number) {
   return text.length > size ? `${text.slice(0, size)}...` : text;
 }
 
+function adsRowRenderKey(row: AdsDailyRow) {
+  const entityId = row.ad_id || row.creative_id || row.id;
+  return `${entityId}:${row.data_referencia}:${row.id}`;
+}
+
 function aggregate(rows: AdsDailyRow[]) {
   const totSpend = rows.reduce((sum, row) => sum + row.valor_gasto, 0);
   const totImp = rows.reduce((sum, row) => sum + row.impressoes, 0);
@@ -785,7 +790,7 @@ function PerformanceTab({ rows }: { rows: AdsDailyRow[] }) {
         />
         <HorizontalBarChart
           title="Ordenação exploratória pelo score legado"
-          items={topAds.map((row) => ({ label: truncate(row.anuncio, 42), value: row.performance_score }))}
+          items={topAds.map((row) => ({ key: adsRowRenderKey(row), label: truncate(row.anuncio, 42), value: row.performance_score }))}
           formatter={(value) => formatDecimal(value)}
         />
       </div>
@@ -982,7 +987,7 @@ function AnalysisTab({ rows, allRows }: { rows: AdsDailyRow[]; allRows: AdsDaily
       </p>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {lifetime.items.map((item) => (
-          <Card key={item.nome} className="p-4">
+          <Card key={item.identity} className="p-4">
             <p className="text-xs font-bold uppercase text-brand-clay">{item.campanha}</p>
             <h3 className="mt-1 font-bold text-brand-teal">{truncate(item.nome, 52)}</h3>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#F0D6DB]">
@@ -1189,7 +1194,7 @@ function TwoMetricBars({ title, items, labelA, labelB }: { title: string; items:
   );
 }
 
-function HorizontalBarChart({ title, items, formatter }: { title: string; items: Array<{ label: string; value: number }>; formatter: (value: number) => string }) {
+function HorizontalBarChart({ title, items, formatter }: { title: string; items: Array<{ key?: string; label: string; value: number }>; formatter: (value: number) => string }) {
   const max = Math.max(...items.map((item) => Math.abs(item.value)), 1);
 
   return (
@@ -1197,7 +1202,7 @@ function HorizontalBarChart({ title, items, formatter }: { title: string; items:
       <h3 className="font-bold text-brand-teal">{title}</h3>
       <div className="mt-4 space-y-3">
         {items.length ? items.map((item, index) => (
-          <div key={item.label}>
+          <div key={item.key ?? item.label}>
             <div className="mb-1 flex justify-between gap-3 text-sm">
               <span className="truncate font-semibold text-brand-teal/70">{item.label}</span>
               <span className="font-bold text-brand-teal">{formatter(item.value)}</span>
@@ -1442,13 +1447,14 @@ function buildCreativeLifetime(rows: AdsDailyRow[], allRows: AdsDailyRow[]) {
     .filter((days) => days > 0);
   const averageDays = lifetimes.length ? Math.round(lifetimes.reduce((sum, days) => sum + days, 0) / lifetimes.length) : 14;
 
-  const map = new Map<string, { nome: string; campanha: string; min: string; freqSum: number; freqN: number; spend: number }>();
+  const map = new Map<string, { nome: string; campanha: string; min: string; freqSum: number; freqN: number; spend: number; identities: Set<string> }>();
   rows.forEach((row) => {
-    const item = map.get(row.anuncio) ?? { nome: row.anuncio, campanha: row.campanha, min: row.data_referencia, freqSum: 0, freqN: 0, spend: 0 };
+    const item = map.get(row.anuncio) ?? { nome: row.anuncio, campanha: row.campanha, min: row.data_referencia, freqSum: 0, freqN: 0, spend: 0, identities: new Set<string>() };
     if (row.data_referencia < item.min) item.min = row.data_referencia;
     item.freqSum += row.frequencia;
     item.freqN += 1;
     item.spend += row.valor_gasto;
+    item.identities.add(row.ad_id ? `ad:${row.ad_id}` : row.creative_id ? `creative:${row.creative_id}` : `row:${row.id}`);
     map.set(row.anuncio, item);
   });
   const today = new Date();
@@ -1461,6 +1467,7 @@ function buildCreativeLifetime(rows: AdsDailyRow[], allRows: AdsDailyRow[]) {
         const dias = Math.max(0, Math.round((today.getTime() - parseDate(item.min).getTime()) / 86400000));
         const freq = item.freqN ? item.freqSum / item.freqN : 0;
         return {
+          identity: [...item.identities].sort().join("|") || `legacy:${item.campanha}:${item.nome}`,
           nome: item.nome,
           campanha: item.campanha,
           dias,

@@ -1,5 +1,18 @@
 # Cutover V3 para V9
 
+## Estado operacional em 01/10/2026
+
+O estado abaixo foi confirmado manualmente no n8n self-hosted `1.123.2` e prevalece sobre o campo `active` dos JSONs versionados:
+
+- V3 `Instagram Ads Daily Collector_V3`: desativada.
+- V9 `Instagram Ads Daily Collector_V9`: ativa.
+- Schedule V9: diário às 20:30, timezone `America/Sao_Paulo`.
+- Configuração operacional de smoke: `smoke_days=3` e `smoke_persist=false`.
+- Cutover operacional: realizado, sem necessidade de rollback.
+- Primeira coleta V9 persistente após o cutover: pendente de execução e confirmação.
+
+O export versionado permanece deliberadamente com `active=false`, `smoke_days=1` e `smoke_persist=false` como padrão seguro para importação. Esses valores não descrevem o estado vivo do n8n e não devem ser usados para inferi-lo.
+
 ## Row key canônica
 
 Novas escritas usam `md5(data|campaign_id|adset_id|ad_id)` quando os três IDs Meta estão disponíveis. A identidade permanece estável se campanha, conjunto ou anúncio forem renomeados.
@@ -22,30 +35,23 @@ Validação HML em 01/10/2026: `1.571` linhas antes e depois da migration, `1.57
 - Link clicks: V3 persistiu 0; a leitura canônica V9 encontrou 12 `link_click`. Diferença semântica explicada.
 - Outbound, LPV, checkout e Meta Purchase: `não comparável por ausência na coleta V3`. Não bloqueiam o cutover e o comparador mantém `approved: true` quando não existe divergência inesperada nas métricas comparáveis.
 
-## Checklist manual n8n 1.123.2
+## Checklist manual n8n 1.123.2 concluído
 
-- [ ] Registrar ID e nome do workflow V3.
-- [ ] Confirmar que a V3 está ativa.
-- [ ] Registrar última execução, resultado e horário.
-- [ ] Confirmar schedule real da V3.
-- [ ] Registrar ID e nome do workflow V9.
-- [ ] Confirmar que a V9 está inativa.
-- [ ] Confirmar a Credential Meta selecionada nos três nós Graph.
-- [ ] Confirmar a Credential Supabase selecionada nos quatro nós Supabase.
-- [ ] Confirmar que os dois nós Google Sheets da V3 estão desabilitados.
-- [ ] Confirmar que nenhum workflow externo depende da planilha.
+- [x] V3 identificada e desativada após a última execução conhecida de 30/09/2026 23:39.
+- [x] V9 identificada, validada e ativada.
+- [x] Schedule V9 confirmado às 20:30 em `America/Sao_Paulo`.
+- [x] Credentials Meta e Supabase selecionadas no n8n, sem secrets no export.
+- [x] Nós Google Sheets da V3 desabilitados.
+- [x] Nenhuma dependência externa conhecida da planilha.
+- [ ] Executar e validar a primeira coleta V9 persistente pós-cutover.
 
-## Plano final
+## Fechamento após a primeira persistência
 
-1. Registrar a última execução da V3.
-2. Desativar a V3.
-3. Confirmar ausência de execução pendente ou retry.
-4. Ativar a V9.
-5. Executar uma coleta manual incremental.
-6. Validar `instagram_ads_daily`, `row_key`, origem e ausência de duplicidade.
-7. Validar `instagram_ads_config_snapshots`.
-8. Validar o dashboard Ads e consumidores relacionados.
-9. Acompanhar a primeira execução diária das 20:30 em `America/Sao_Paulo`.
-10. Registrar evidências e concluir o cutover.
+1. Executar a primeira coleta V9 com persistência no n8n.
+2. Em modo somente leitura, identificar as novas linhas e `row_key` inseridas ou atualizadas.
+3. Confirmar zero duplicidades em `(tenant_id,row_key)`.
+4. Validar snapshots e `last_seen_at`.
+5. Validar `/ads`, aba Inteligência e consumidores downstream prioritários.
+6. Registrar as evidências e marcar a persistência pós-cutover como concluída.
 
 Rollback: desativar a V9, reativar a V3 e preservar todas as linhas V9 para diagnóstico. Não apagar dados V9.

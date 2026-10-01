@@ -26,9 +26,10 @@ Os dois nós `Append Google Sheets` da V3 estão desativados e documentados como
 
 ## Schedule
 
-- V3 exportada: intervalo de 20 horas no minuto 30; não equivale a 20:30 diário.
-- V9 versionada: diariamente às 20:30, timezone `America/Sao_Paulo`.
-- Nenhum workflow foi ativado ou desativado nesta entrega.
+- Estado operacional confirmado em 01/10/2026: V3 desativada e V9 ativa no n8n self-hosted `1.123.2`.
+- V9 operacional: diariamente às 20:30, timezone `America/Sao_Paulo`, com `smoke_days=3` e `smoke_persist=false`.
+- A primeira persistência V9 após o cutover ainda aguarda execução e validação somente leitura.
+- O JSON versionado continua com `active=false` e defaults conservadores para importação; o export não é fonte de verdade do estado vivo.
 
 ## Comparativo V3 x V9
 

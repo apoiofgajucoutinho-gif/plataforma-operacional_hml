@@ -19,6 +19,9 @@ assert.doesNotMatch(analytics, /actionValue\(payload, purchaseActions\)/);
 
 for (const text of ["Alcance diário acumulado", "Frequência diária ponderada", "Status Meta ACTIVE", "Caminho de sinais", "Meta reported", "Hotmart confirmado", "Traffic Intelligence V1"]) assert.ok(dashboard.includes(text), `missing semantic UI: ${text}`);
 for (const forbidden of ["pessoas únicas\"", "Impressões -> Alcance -> Cliques", "O que a Agência Deveria Ter Feito", "Público Ruim\""]) assert.ok(!dashboard.includes(forbidden), `legacy conclusion still visible: ${forbidden}`);
+assert.match(dashboard, /items=\{topAds\.map\(\(row\) => \(\{ key: adsRowRenderKey\(row\)/, "daily ad ranking must use stable entity identity");
+assert.match(dashboard, /<Card key=\{item\.identity\}/, "creative lifetime cards must not use a display name as React identity");
+assert.doesNotMatch(dashboard, /<Card key=\{item\.nome\}/, "duplicate ad names must not be React keys");
 assert.match(server, /instagram_ads_config_snapshots/);
 assert.match(server, /landing_page_tracking_events/);
 assert.match(server, /comercial_vendas/);
