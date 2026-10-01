@@ -3,7 +3,6 @@
 
   const PIXEL_ID = "1421640192678969";
   const CONSENT_KEY = "norwyn_meta_consent_v1";
-  const TEST_PARAM = "meta_pixel_test";
   const state = {
     enabled: false,
     initialized: false,
@@ -12,15 +11,6 @@
     offerViewSent: false,
     initiateCheckoutSent: false,
   };
-
-  function testMode() {
-    try {
-      const params = new URLSearchParams(root.location.search);
-      return params.get("traffic_type") === "test" && params.get(TEST_PARAM) === "1";
-    } catch {
-      return false;
-    }
-  }
 
   function readConsent() {
     try {
@@ -146,8 +136,7 @@
   }
 
   function initialize() {
-    state.enabled = testMode();
-    if (!state.enabled) return state;
+    state.enabled = true;
     const consent = readConsent();
     if (consent === "granted") installPixel();
     else if (consent !== "denied") showConsentNotice();

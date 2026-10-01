@@ -2,12 +2,7 @@
 
 ## Escopo atual
 
-Esta implementacao prepara o Pixel Meta `1421640192678969` apenas para validacao em HML/preview. O runtime so e habilitado quando a URL contem simultaneamente:
-
-- `traffic_type=test`
-- `meta_pixel_test=1`
-
-Sem esses parametros, nenhum script da Meta e carregado e nenhum evento Meta e enviado. Isso evita ativacao acidental no dominio publico antes da aprovacao.
+O Pixel Meta `1421640192678969` esta habilitado na LP publica da Imersao Zumbido. O runtime nao depende de parametros de teste, mas o script da Meta continua bloqueado ate existir consentimento explicito.
 
 ## Consentimento
 
@@ -43,23 +38,14 @@ O runtime Meta apenas escuta eventos do navegador. Ele nao altera `visitor_id`, 
 5. Confirmar que `Purchase` nao e gerado por clique ou retorno de pagina.
 6. Definir confirmacao de compra via Hotmart antes de ativar `Purchase`.
 7. Validar checkout, `off=lov69pen`, UTMs e `sck` com o Attribution Bridge.
-8. Remover a trava de teste somente em uma entrega de producao autorizada.
+8. Confirmar que o Pixel permanece bloqueado quando o consentimento e recusado.
 9. Alterar URL da campanha apenas depois da publicacao e da validacao final.
 
-## Ativacao publica preparada, nao executada
+## Ativacao publica
 
-Para a futura ativacao publica, a unica mudanca funcional necessaria no runtime e substituir o gate exclusivo de `traffic_type=test&meta_pixel_test=1` por uma flag publica server/build-time explicitamente autorizada. O consentimento continua obrigatorio e deve permanecer como condicao para instalar o Pixel. A ativacao deve preservar o Pixel `1421640192678969`, `PageView`, `ViewContent`, `ViewOffer` e `InitiateCheckout`; `Purchase` continua proibido no cliente.
+A trava exclusiva de `traffic_type=test&meta_pixel_test=1` foi removida em uma entrega publica autorizada. O consentimento continua obrigatorio e permanece como condicao para instalar o Pixel. A ativacao preserva o Pixel `1421640192678969`, `PageView`, `ViewContent`, `ViewOffer` e `InitiateCheckout`; `Purchase` continua proibido no cliente.
 
-Checklist de liberacao:
-
-1. aprovar juridicamente o texto e a persistencia do consentimento;
-2. confirmar o Pixel no Events Manager;
-3. habilitar a flag publica somente no projeto da LP;
-4. validar consentimento concedido e negado em sessao limpa;
-5. confirmar uma unica carga do Pixel e eventos sem duplicidade;
-6. confirmar que tracking Norwyn e checkout continuam independentes;
-7. confirmar que nenhum `Purchase` parte do navegador;
-8. manter rollback pela desativacao da flag.
+O rollback pode ser feito promovendo o deployment anterior da LP. Nenhuma alteracao de campanha Meta, URL de anuncio, checkout ou oferta faz parte desta ativacao.
 
 ## Purchase futuro
 

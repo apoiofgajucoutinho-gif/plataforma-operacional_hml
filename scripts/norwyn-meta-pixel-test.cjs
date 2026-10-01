@@ -6,9 +6,10 @@ const html = fs.readFileSync("apps/imersao-zumbido-hml/index.html", "utf8");
 const build = fs.readFileSync("apps/imersao-zumbido-hml/build.mjs", "utf8");
 
 assert.match(source, /const PIXEL_ID = "1421640192678969"/);
-assert.match(source, /traffic_type/);
-assert.match(source, /meta_pixel_test/);
 assert.match(source, /CONSENT_KEY/);
+assert.match(source, /state\.enabled = true/);
+assert.doesNotMatch(source, /meta_pixel_test/);
+assert.doesNotMatch(source, /params\.get\("traffic_type"\)/);
 assert.match(source, /root\.fbq\("track", "PageView"\)/);
 assert.match(source, /root\.fbq\("track", "ViewContent"/);
 assert.match(source, /root\.fbq\("trackCustom", "ViewOffer"/);
