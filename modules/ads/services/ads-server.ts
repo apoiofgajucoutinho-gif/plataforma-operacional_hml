@@ -4,13 +4,23 @@ import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-b
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
-import type { AdsConfigSnapshot, AdsContext, AdsDailyRow, AdsGranularity, AdsPeriodContext, AdsPeriodKey, AdsReconciliationSummary } from "@/modules/ads/types";
+import type { AdsConfigSnapshot, AdsContext, AdsDailyRow, AdsDecisionConfig, AdsGranularity, AdsPeriodContext, AdsPeriodKey, AdsReconciliationSummary } from "@/modules/ads/types";
 
 type SearchLike = Record<string, string | string[] | undefined>;
 
 type AdsDataClient = Awaited<ReturnType<typeof createClient>>;
 
 const PAGE_SIZE = 1000;
+const DEFAULT_DECISION_CONFIG: AdsDecisionConfig = {
+  minLinkClicksSignal: 8,
+  minLinkClicksDecision: 20,
+  reviewLinkClicksIncrement: 20,
+  reviewHours: 24,
+  minTrendDays: 3,
+  comparableSpendRatio: 0.5,
+  meaningfulSpend: null,
+  targetCpa: null,
+};
 const periodLabels: Record<AdsPeriodKey, string> = {
   "30d": "30 dias",
   "90d": "90 dias",
@@ -94,13 +104,16 @@ function emptyContext(overrides: Partial<AdsContext>, period: AdsPeriodContext):
     period,
     configSnapshots: [],
     reconciliation: {
-      campaignScope: { resolved: false, reason: "A leitura de Norwyn/Hotmart ainda está no escopo do tenant e não pode ser creditada à campanha Meta filtrada." },
+      campaignScope: { resolved: false, reason: "A leitura de Norwyn/Hotmart ainda está no escopo do tenant e não pode ser creditada à campanha Meta filtrada.", campaignId: null, campaignName: null, metaCampaignId: null, landingKey: null, resolution: "unresolved" },
       site: { available: false, visitors: null, sessions: null, engagedSessions: null, averageSessionSeconds: null, source: "Site / Analytics", limitation: "Fonte Site Kit/GA4 ainda não integrada ao contexto Ads." },
       norwyn: { sessions: null, offerViews: null, checkoutClicks: null, attributedSessions: null, paidSocialSessions: null, source: "landing_page_tracking_events" },
-      hotmart: { confirmedSales: null, attributedSales: null, confirmedRevenue: null, unattributedSales: null, attributionStatus: "unavailable", source: "comercial_vendas" },
+      hotmart: { confirmedSales: null, attributedSales: null, confirmedRevenue: null, unattributedSales: null, attributionStatus: "unavailable", source: "comercial_vendas", adAttributionAvailable: false },
+      measurement: { quality: "Fraca", reasons: ["Campanha não resolvida."], trackingCoverage: null },
       note: "Fontes independentes; os valores não formam necessariamente uma sequência monotônica.",
     },
     decisionMemory: [],
+    decisionConfig: DEFAULT_DECISION_CONFIG,
+    campaignProgress: { startsAt: null, endsAt: null, daysElapsed: null, daysRemaining: null, budget: null, spend: 0, budgetUsedPct: null },
     ...overrides,
   };
 }
@@ -208,7 +221,20 @@ async function fetchConfigSnapshots(dataClient: AdsDataClient, tenantId: string)
   }
 }
 
-async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: string, period: AdsPeriodContext) {
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function textArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function numeric(value: unknown, fallback: number | null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: string, period: AdsPeriodContext, metaCampaignIds: string[], spend: number) {
   const [snapshotsResult, trackingResult, salesResult, bridgeResult, learningsResult, campaignsResult] = await Promise.all([
     fetchConfigSnapshots(dataClient, tenantId),
     fetchPeriodRows(
@@ -245,13 +271,36 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
       .limit(20),
     dataClient
       .from("campaigns")
-      .select("id,plan_json")
+      .select("id,name,plan_json,growth_config")
       .eq("tenant_id", tenantId),
   ]);
 
+  const resolvedCampaign = (campaignsResult.data ?? []).map((campaign) => {
+    const plan = object(campaign.plan_json);
+    const foundation = object(plan.traffic_data_foundation);
+    const legacyId = typeof foundation.meta_campaign_id === "string" ? foundation.meta_campaign_id : null;
+    const ids = new Set([...textArray(foundation.meta_campaign_ids), ...(legacyId ? [legacyId] : [])]);
+    const activeId = typeof foundation.active_meta_campaign_id === "string" ? foundation.active_meta_campaign_id : null;
+    const matched = activeId && metaCampaignIds.includes(activeId) ? activeId : metaCampaignIds.find((id) => ids.has(id)) ?? null;
+    return { campaign, foundation, matched };
+  }).find((item) => item.matched) ?? null;
+  const landingKey = resolvedCampaign && typeof resolvedCampaign.foundation.landing_key === "string" ? resolvedCampaign.foundation.landing_key : null;
+  const activeMetaId = resolvedCampaign?.matched ?? null;
+  const campaignSnapshot = snapshotsResult.rows.find((snapshot) => snapshot.entity_type === "campaign" && snapshot.entity_id === activeMetaId);
+  const campaignConfig = object(campaignSnapshot?.config_json);
+  const start = typeof campaignConfig.start_time === "string" ? campaignConfig.start_time : null;
+  const end = typeof campaignConfig.stop_time === "string" ? campaignConfig.stop_time : null;
+  const campaignStartMs = start ? new Date(start).getTime() : Number.NaN;
+
   const trackingAvailable = !trackingResult.error;
   const salesAvailable = !salesResult.error;
-  const tracking = trackingResult.rows;
+  const tracking = resolvedCampaign && landingKey
+    ? trackingResult.rows.filter((row) => {
+      const matchesCampaign = row.landing_key === landingKey || row.utm_campaign === landingKey;
+      const eventMs = new Date(String(row.occurred_at ?? "")).getTime();
+      return matchesCampaign && (Number.isNaN(campaignStartMs) || eventMs >= campaignStartMs);
+    })
+    : [];
   const sales = salesResult.rows;
   const realSessions = new Set(tracking.map((row) => row.session_id).filter(Boolean));
   const sessionsFor = (eventName: string) => new Set(tracking.filter((row) => row.event_name === eventName).map((row) => row.session_id).filter(Boolean)).size;
@@ -261,14 +310,14 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
     const medium = String(row.utm_medium ?? "").toLowerCase();
     return source.includes("meta_ads") || source.includes("facebook_ads") || medium.includes("paid") || medium === "cpc";
   }).map((row) => row.session_id).filter(Boolean));
-  const confirmed = sales.filter((row) => row.sale_confirmed === true || ["APPROVED", "COMPLETED"].includes(String(row.status_normalizado ?? "").toUpperCase()));
   const bridgeAvailable = !bridgeResult.error;
-  const attributed = bridgeAvailable
-    ? bridgeResult.rows.filter((row) => row.sale_confirmed === true && row.hotmart_source_sck && row.norwyn_confidence)
-    : confirmed.filter((row) => String(row.source_sck ?? "").startsWith("nw_"));
-  const revenue = confirmed
-    .filter((row) => row.revenue_eligible !== false && String(row.moeda ?? "BRL").toUpperCase() === "BRL")
-    .reduce((sum, row) => sum + Number(row.valor_bruto ?? 0), 0);
+  const scopedBridge = bridgeAvailable && landingKey ? bridgeResult.rows.filter((row) => {
+    const saleMs = new Date(String(row.data_compra ?? "")).getTime();
+    return row.norwyn_campaign === landingKey && (Number.isNaN(campaignStartMs) || saleMs >= campaignStartMs);
+  }) : [];
+  const confirmed = scopedBridge.filter((row) => row.sale_confirmed === true);
+  const attributed = confirmed.filter((row) => row.hotmart_source_sck && row.norwyn_confidence);
+  const revenue = confirmed.reduce((sum, row) => sum + Number(row.valor_bruto ?? 0), 0);
   const attributionStatus: AdsReconciliationSummary["hotmart"]["attributionStatus"] = !salesAvailable
     ? "unavailable"
     : attributed.length && attributed.length === confirmed.length
@@ -279,14 +328,40 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
           ? "unattributed"
           : "meta_only";
 
+  const today = new Date(`${period.end}T12:00:00-03:00`);
+  const startsAt = start ? new Date(start) : null;
+  const endsAt = end ? new Date(end) : null;
+  const daysElapsed = startsAt && !Number.isNaN(startsAt.getTime()) ? Math.max(0, Math.floor((today.getTime() - startsAt.getTime()) / 86400000) + 1) : null;
+  const daysRemaining = endsAt && !Number.isNaN(endsAt.getTime()) ? Math.max(0, Math.ceil((endsAt.getTime() - today.getTime()) / 86400000)) : null;
+  const dailyBudget = numeric(campaignConfig.daily_budget, null);
+  const budget = dailyBudget != null && startsAt && endsAt ? (dailyBudget / 100) * Math.max(1, Math.ceil((endsAt.getTime() - startsAt.getTime()) / 86400000)) : null;
+  const trackingCoverage = trackingAvailable && realSessions.size > 0 ? paidSocialSessions.size / realSessions.size : null;
+  const measurementReasons: string[] = [];
+  if (!resolvedCampaign) measurementReasons.push("Campaign registry sem ID Meta exato.");
+  if (!attributed.length) measurementReasons.push("Nenhuma venda Hotmart atribuída no recorte.");
+  measurementReasons.push("UTMs não carregam ad_id; venda por anúncio permanece indeterminada.");
+  const measurementQuality: AdsReconciliationSummary["measurement"]["quality"] = !resolvedCampaign ? "Fraca" : attributed.length ? "Parcial" : "Fraca";
+  const engine = object(object(resolvedCampaign?.campaign.growth_config).traffic_decision_engine);
+  const decisionConfig: AdsDecisionConfig = {
+    minLinkClicksSignal: numeric(engine.min_link_clicks_signal, DEFAULT_DECISION_CONFIG.minLinkClicksSignal)!,
+    minLinkClicksDecision: numeric(engine.min_link_clicks_decision, DEFAULT_DECISION_CONFIG.minLinkClicksDecision)!,
+    reviewLinkClicksIncrement: numeric(engine.review_link_clicks_increment, DEFAULT_DECISION_CONFIG.reviewLinkClicksIncrement)!,
+    reviewHours: numeric(engine.review_hours, DEFAULT_DECISION_CONFIG.reviewHours)!,
+    minTrendDays: numeric(engine.min_trend_days, DEFAULT_DECISION_CONFIG.minTrendDays)!,
+    comparableSpendRatio: numeric(engine.comparable_spend_ratio, DEFAULT_DECISION_CONFIG.comparableSpendRatio)!,
+    meaningfulSpend: numeric(engine.meaningful_spend, null),
+    targetCpa: numeric(engine.target_cpa, null),
+  };
+
   return {
     configSnapshots: snapshotsResult.error ? [] : snapshotsResult.rows,
     decisionMemory: learningsResult.error || campaignsResult.error ? [] : (learningsResult.data ?? []).flatMap((row) => {
       const campaign = (campaignsResult.data ?? []).find((item) => item.id === row.campaign_id);
-      const plan = campaign?.plan_json && typeof campaign.plan_json === "object" && !Array.isArray(campaign.plan_json) ? campaign.plan_json as Record<string, unknown> : {};
-      const foundation = plan.traffic_data_foundation && typeof plan.traffic_data_foundation === "object" && !Array.isArray(plan.traffic_data_foundation) ? plan.traffic_data_foundation as Record<string, unknown> : {};
-      const metaCampaignId = typeof foundation.meta_campaign_id === "string" ? foundation.meta_campaign_id : null;
-      if (!metaCampaignId) return [];
+      const plan = object(campaign?.plan_json);
+      const foundation = object(plan.traffic_data_foundation);
+      const ids = textArray(foundation.meta_campaign_ids);
+      const metaCampaignId = activeMetaId && ids.includes(activeMetaId) ? activeMetaId : typeof foundation.meta_campaign_id === "string" ? foundation.meta_campaign_id : null;
+      if (!metaCampaignId || !metaCampaignIds.includes(metaCampaignId)) return [];
       const evidence = row.evidence && typeof row.evidence === "object" && !Array.isArray(row.evidence) ? row.evidence as Record<string, unknown> : {};
       return [{
         id: row.id,
@@ -303,8 +378,15 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
     }),
     reconciliation: {
       campaignScope: {
-        resolved: false,
-        reason: "Os dados Meta do anúncio não possuem landing_key/UTM com ad_id e a campanha Meta atual não está mapeada canonicamente à campanha Norwyn. Totais Norwyn/Hotmart são contexto do tenant, não resultado desta campanha.",
+        resolved: Boolean(resolvedCampaign),
+        reason: resolvedCampaign
+          ? "Campanha resolvida por Meta campaign_id exato. Tracking e Hotmart estão no escopo da Imersão Zumbido; vendas por anúncio seguem indisponíveis sem ad_id na atribuição."
+          : "Nenhum campaign_id Meta do recorte existe no registry canônico. Totais Norwyn/Hotmart não são creditados à campanha.",
+        campaignId: resolvedCampaign?.campaign.id ?? null,
+        campaignName: resolvedCampaign?.campaign.name ?? null,
+        metaCampaignId: activeMetaId,
+        landingKey,
+        resolution: resolvedCampaign ? "exact_meta_id" as const : "unresolved" as const,
       },
       site: {
         available: false,
@@ -330,9 +412,13 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
         unattributedSales: salesAvailable ? Math.max(0, confirmed.length - attributed.length) : null,
         attributionStatus,
         source: bridgeAvailable ? "comercial_vendas + hotmart_attribution_bridge_v" : "comercial_vendas · sale_confirmed",
+        adAttributionAvailable: false,
       },
+      measurement: { quality: measurementQuality, reasons: measurementReasons, trackingCoverage },
       note: "Meta usa janelas de atribuição; Norwyn mede navegação própria; Hotmart confirma transações. Os números não são equivalentes.",
     },
+    decisionConfig,
+    campaignProgress: { startsAt: start, endsAt: end, daysElapsed, daysRemaining, budget, spend, budgetUsedPct: budget ? (spend / budget) * 100 : null },
   };
 }
 
@@ -379,10 +465,7 @@ export async function getAdsContext(searchParams?: SearchLike): Promise<AdsConte
     .eq("id", membership.tenant_id)
     .maybeSingle();
 
-  const [{ rows, error }, intelligence] = await Promise.all([
-    fetchAdsRows(dataClient, membership.tenant_id, period),
-    fetchTrafficIntelligence(dataClient, membership.tenant_id, period),
-  ]);
+  const { rows, error } = await fetchAdsRows(dataClient, membership.tenant_id, period);
 
   if (error) {
     return emptyContext({
@@ -392,6 +475,9 @@ export async function getAdsContext(searchParams?: SearchLike): Promise<AdsConte
       allowedModules,
     }, period);
   }
+
+  const metaCampaignIds = [...new Set(rows.map((row) => row.campaign_id).filter((value): value is string => Boolean(value)))];
+  const intelligence = await fetchTrafficIntelligence(dataClient, membership.tenant_id, period, metaCampaignIds, rows.reduce((sum, row) => sum + row.valor_gasto, 0));
 
   return {
     tenant: tenant ? { id: tenant.id, nome: tenant.nome } : null,
@@ -404,5 +490,7 @@ export async function getAdsContext(searchParams?: SearchLike): Promise<AdsConte
     configSnapshots: intelligence.configSnapshots,
     reconciliation: intelligence.reconciliation,
     decisionMemory: intelligence.decisionMemory,
+    decisionConfig: intelligence.decisionConfig,
+    campaignProgress: intelligence.campaignProgress,
   };
 }

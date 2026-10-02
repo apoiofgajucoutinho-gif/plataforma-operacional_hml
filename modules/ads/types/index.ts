@@ -120,6 +120,11 @@ export type AdsReconciliationSummary = {
   campaignScope: {
     resolved: boolean;
     reason: string;
+    campaignId: string | null;
+    campaignName: string | null;
+    metaCampaignId: string | null;
+    landingKey: string | null;
+    resolution: "exact_meta_id" | "unresolved";
   };
   site: {
     available: boolean;
@@ -145,8 +150,35 @@ export type AdsReconciliationSummary = {
     unattributedSales: number | null;
     attributionStatus: "confirmed" | "partial" | "meta_only" | "unattributed" | "unavailable";
     source: string;
+    adAttributionAvailable: boolean;
+  };
+  measurement: {
+    quality: "Boa" | "Parcial" | "Fraca";
+    reasons: string[];
+    trackingCoverage: number | null;
   };
   note: string;
+};
+
+export type AdsDecisionConfig = {
+  minLinkClicksSignal: number;
+  minLinkClicksDecision: number;
+  reviewLinkClicksIncrement: number;
+  reviewHours: number;
+  minTrendDays: number;
+  comparableSpendRatio: number;
+  meaningfulSpend: number | null;
+  targetCpa: number | null;
+};
+
+export type AdsCampaignProgress = {
+  startsAt: string | null;
+  endsAt: string | null;
+  daysElapsed: number | null;
+  daysRemaining: number | null;
+  budget: number | null;
+  spend: number;
+  budgetUsedPct: number | null;
 };
 
 export type AdsDecisionMemory = {
@@ -176,4 +208,6 @@ export type AdsContext = {
   configSnapshots: AdsConfigSnapshot[];
   reconciliation: AdsReconciliationSummary;
   decisionMemory: AdsDecisionMemory[];
+  decisionConfig: AdsDecisionConfig;
+  campaignProgress: AdsCampaignProgress;
 };
