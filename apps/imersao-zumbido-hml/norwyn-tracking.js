@@ -2,7 +2,10 @@
   "use strict";
 
   const SESSION_TTL_MS = 30 * 60 * 1000;
-  const ATTRIBUTION_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "sck", "src"];
+  const ATTRIBUTION_KEYS = [
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "campaign_id", "adset_id", "ad_id", "fbclid", "sck", "src",
+  ];
   const TRAFFIC_TYPES = new Set(["public", "internal", "test"]);
   const STORAGE = {
     visitor: "norwyn_visitor_id_v1",

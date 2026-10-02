@@ -15,7 +15,7 @@ Static HML build of the approved Imersão Zumbido landing page. It is deployed b
 
 `session_id` is another UUID stored in `localStorage`, which allows tabs on the same origin to share it. Any valid tracking activity refreshes `last_activity_at`; after 30 minutes without activity, the next event creates a new session.
 
-First touch is captured once per visitor and never overwritten. Current touch belongs to the active session and is refreshed when a URL contains a new campaign attribution. Supported parameters are `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `sck`, and `src`.
+First touch is captured once per visitor and never overwritten. Current touch belongs to the active session and is refreshed when a URL contains a new campaign attribution. Supported parameters are `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `campaign_id`, `adset_id`, `ad_id`, `fbclid`, `sck`, and `src`.
 
 ## Checkout
 
@@ -34,6 +34,14 @@ The campaign entry points are temporary redirects configured in `vercel.json`:
 - `/ads` -> Meta / Paid / Ads
 
 The redirect runs before the landing page is rendered, so the destination is the only page that initializes tracking. This prevents an extra `page_view` or `session_start` and keeps the full attribution visible for operational inspection.
+
+The canonical Meta URL Parameters template is:
+
+```text
+utm_source=meta&utm_medium=paid&utm_campaign=imersao_zumbido&utm_content=ads&campaign_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}
+```
+
+Meta appends `fbclid` to real clicks. It must not be replaced by a static value. The `/ads` redirect preserves incoming IDs and `fbclid`; the landing stores them in first/current touch, events, and the attribution bridge. At checkout the opaque `sck` is the Hotmart transport key, and Hotmart returns it as `source_sck` for exact reconciliation.
 
 ### Future evolution
 

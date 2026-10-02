@@ -8,7 +8,15 @@ export const revalidate = 0;
 
 const CANONICAL_CHECKOUT = "https://pay.hotmart.com/B47092539B?off=lov69pen";
 const LANDING_KEY = "imersao_zumbido";
-type LandingRegistry = { tenant_id: string; product_id: string | null; campaign_key: string | null; url: string | null };
+type LandingRegistry = {
+  tenant_id: string;
+  product_id: string | null;
+  campaign_key: string | null;
+  url: string | null;
+  campaign_id: string | null;
+  active_meta_campaign_id: string | null;
+  meta_campaign_ids: string[];
+};
 let registryCache: { value: LandingRegistry; expiresAt: number } | null = null;
 
 function headers(request: Request) {
@@ -28,8 +36,15 @@ function record(value: unknown) {
 
 function safeTouch(value: unknown) {
   const source = record(value);
-  return Object.fromEntries(["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "sck"]
+  return Object.fromEntries([
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "campaign_id", "adset_id", "ad_id", "fbclid", "sck", "src",
+  ]
     .map((key) => [key, clean(source[key])]).filter(([, item]) => item));
+}
+
+function textArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item)) : [];
 }
 
 function globalEnabled() {
@@ -63,7 +78,23 @@ async function landingRegistry(admin: NonNullable<ReturnType<typeof createAdminC
     .select("tenant_id,product_id,campaign_key,url")
     .eq("landing_key", LANDING_KEY).eq("status", "active").limit(1).maybeSingle();
   if (!data?.tenant_id) return null;
-  const value = data as LandingRegistry;
+  const { data: campaignRows } = await admin.from("campaigns")
+    .select("id,plan_json")
+    .eq("tenant_id", data.tenant_id)
+    .eq("product_id", data.product_id)
+    .limit(50);
+  const campaign = (campaignRows ?? []).find((row) => {
+    const foundation = record(record(row.plan_json).traffic_data_foundation);
+    return clean(foundation.landing_key) === LANDING_KEY;
+  });
+  const foundation = record(record(campaign?.plan_json).traffic_data_foundation);
+  const legacyMetaId = clean(foundation.meta_campaign_id);
+  const value: LandingRegistry = {
+    ...(data as Omit<LandingRegistry, "campaign_id" | "active_meta_campaign_id" | "meta_campaign_ids">),
+    campaign_id: clean(campaign?.id),
+    active_meta_campaign_id: clean(foundation.active_meta_campaign_id),
+    meta_campaign_ids: [...new Set([...textArray(foundation.meta_campaign_ids), ...(legacyMetaId ? [legacyMetaId] : [])])],
+  };
   registryCache = { value, expiresAt: Date.now() + 5 * 60 * 1000 };
   return value;
 }
@@ -115,6 +146,11 @@ export async function POST(request: Request) {
 
   const currentTouch = safeTouch(body.current_touch);
   const firstTouch = safeTouch(body.first_touch);
+  const metaCampaignId = clean(currentTouch.campaign_id);
+  const metaAdsetId = clean(currentTouch.adset_id);
+  const metaAdId = clean(currentTouch.ad_id);
+  const fbclid = clean(currentTouch.fbclid, 500);
+  const campaignRecognized = Boolean(metaCampaignId && registry.meta_campaign_ids.includes(metaCampaignId));
   const sck = attributionKey(String(registry.tenant_id), sessionId);
   const checkout = canonicalizeCheckout(fallback);
   const existingSck = checkout.searchParams.get("sck");
@@ -134,10 +170,16 @@ export async function POST(request: Request) {
     traffic_type: isSmoke(body) ? "test" : "public",
     first_touch: firstTouch,
     current_touch: currentTouch,
+    campaign_resolution: {
+      campaign_id: campaignRecognized ? registry.campaign_id : null,
+      meta_campaign_id: metaCampaignId,
+      recognized: campaignRecognized,
+    },
     pii_policy: "anonymous_identifiers_only",
   };
   const payload = {
     tenant_id: registry.tenant_id,
+    campaign_id: campaignRecognized ? registry.campaign_id : null,
     product_id: registry.product_id,
     campaign_key: registry.campaign_key ?? LANDING_KEY,
     product_key: LANDING_KEY,
@@ -147,6 +189,11 @@ export async function POST(request: Request) {
     campaign: clean(currentTouch.utm_campaign) ?? LANDING_KEY,
     content: clean(currentTouch.utm_content),
     term: clean(currentTouch.utm_term),
+    campaign_platform_id: metaCampaignId,
+    adset_id: metaAdsetId,
+    ad_id: metaAdId,
+    fbclid,
+    click_id: fbclid,
     source_sck: sck,
     utm_source: clean(currentTouch.utm_source),
     utm_medium: clean(currentTouch.utm_medium),
@@ -156,7 +203,7 @@ export async function POST(request: Request) {
     landing_url: clean(body.landing_url, 2048) ?? registry.url,
     checkout_url: checkout.toString(),
     tracking_source: "norwyn_attribution_bridge_v1",
-    tracking_confidence: currentTouch.utm_source ? "HIGH" : "MEDIUM",
+    tracking_confidence: campaignRecognized && metaAdsetId && metaAdId ? "HIGH" : currentTouch.utm_source ? "MEDIUM" : "LOW",
     status: "active",
     metadata,
   };
@@ -168,5 +215,18 @@ export async function POST(request: Request) {
     : { error: insertError };
   if (error) return NextResponse.json({ enabled: true, bridged: false, checkout_url: fallback, reason: "persistence_failed" }, { status: 503, headers: responseHeaders });
 
-  return NextResponse.json({ enabled: true, bridged: true, sck, checkout_url: checkout.toString(), confidence: payload.tracking_confidence }, { headers: responseHeaders });
+  return NextResponse.json({
+    enabled: true,
+    bridged: true,
+    sck,
+    checkout_url: checkout.toString(),
+    confidence: payload.tracking_confidence,
+    identifiers: {
+      campaign_id: metaCampaignId,
+      adset_id: metaAdsetId,
+      ad_id: metaAdId,
+      fbclid_preserved: Boolean(fbclid),
+      campaign_recognized: campaignRecognized,
+    },
+  }, { headers: responseHeaders });
 }
