@@ -156,6 +156,7 @@ export type AdsReconciliationSummary = {
     quality: "Boa" | "Parcial" | "Fraca";
     reasons: string[];
     trackingCoverage: number | null;
+    freshnessImpact: string | null;
   };
   note: string;
 };
@@ -179,6 +180,89 @@ export type AdsCampaignProgress = {
   budget: number | null;
   spend: number;
   budgetUsedPct: number | null;
+  periodUsedPct: number | null;
+  averageDailySpend: number | null;
+  expectedDailySpend: number | null;
+  projectedSpend: number | null;
+  pacingState: "dentro do ritmo" | "acima do ritmo" | "abaixo do ritmo" | "orçamento desconhecido";
+  sourceUpdatedAt: string | null;
+};
+
+export type AdsFreshnessState = "Atualizado" | "Aguardando próxima coleta" | "Atrasado" | "Sem coleta recente" | "Não disponível";
+
+export type AdsSourceFreshness = {
+  key: "meta" | "hotmart" | "norwyn" | "ga4";
+  label: string;
+  lastUpdatedAt: string | null;
+  status: AdsFreshnessState;
+  detail: string;
+  nextExpectedAt: string | null;
+  nextExpectedLabel: string | null;
+  ageMinutes: number | null;
+};
+
+export type AdsTrackingHealth = {
+  quality: "Boa" | "Parcial" | "Fraca";
+  reason: string;
+  working: string[];
+  missing: string[];
+  impact: string;
+  nextAction: string;
+};
+
+export type AdsOperationalAlert = {
+  id: string;
+  severity: "Informação" | "Atenção" | "Crítico";
+  title: string;
+  detail: string;
+  review: string;
+};
+
+export type AdsJourneyStage = {
+  key: string;
+  label: string;
+  sessions: number | null;
+  rateFromPrevious: number | null;
+  source: "Norwyn" | "Hotmart";
+};
+
+export type AdsOperations = {
+  freshness: AdsSourceFreshness[];
+  trackingHealth: AdsTrackingHealth;
+  alerts: AdsOperationalAlert[];
+  journey: AdsJourneyStage[];
+  registry: {
+    campaignResolved: boolean;
+    metaCampaignId: string | null;
+    campaignName: string | null;
+    landingKey: string | null;
+    productId: string | null;
+    offerId: string | null;
+    checkoutUrl: string | null;
+    pixelId: string | null;
+    version: string | null;
+  };
+  coverage: {
+    sessions: number;
+    campaignIdSessions: number;
+    adsetIdSessions: number;
+    adIdSessions: number;
+    fbclidSessions: number;
+    sckSessions: number;
+    bridgeKeys: number;
+    bridgeKeysWithAd: number;
+    hotmartWithSourceSck: number;
+  };
+  intradayDelta: {
+    available: boolean;
+    since: string | null;
+    spend: number | null;
+    linkClicks: number | null;
+    checkouts: number | null;
+    metaPurchases: number | null;
+    confirmedSales: number | null;
+    reason: string;
+  };
 };
 
 export type AdsDecisionMemory = {
@@ -210,4 +294,5 @@ export type AdsContext = {
   decisionMemory: AdsDecisionMemory[];
   decisionConfig: AdsDecisionConfig;
   campaignProgress: AdsCampaignProgress;
+  operations: AdsOperations;
 };
