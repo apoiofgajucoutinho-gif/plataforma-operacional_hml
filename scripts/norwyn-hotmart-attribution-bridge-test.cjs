@@ -77,6 +77,8 @@ assert.equal(bridge.isValid("https://pay.hotmart.com/B47092539B?off=changed"), f
   assert.equal(first.currentTouch.adset_id, "120252998912450421");
   assert.equal(first.currentTouch.ad_id, "120253001479350421");
   assert.equal(first.currentTouch.fbclid, "fb_click_test");
+  assert.equal(sandbox.window.norwyn.applyBridgeAttribution("nw_abcdefghijklmnopqrstuvwx"), true);
+  assert.equal(sandbox.window.norwyn.context().currentTouch.sck, "nw_abcdefghijklmnopqrstuvwx", "URL attribution refresh must preserve bridge sck");
   const checkout = new URL(sandbox.window.norwyn.trackedCheckoutUrl());
   assert.equal(checkout.searchParams.get("off"), "lov69pen");
   assert.equal(checkout.searchParams.get("ad_id"), "120253001479350421");

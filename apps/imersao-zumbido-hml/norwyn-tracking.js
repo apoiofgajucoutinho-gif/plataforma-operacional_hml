@@ -81,6 +81,17 @@
     return ATTRIBUTION_KEYS.some((key) => Boolean(touch[key]));
   }
 
+  function mergeTouch(current, incoming) {
+    const merged = { ...(current || {}) };
+    ATTRIBUTION_KEYS.forEach((key) => {
+      if (incoming[key]) merged[key] = incoming[key];
+    });
+    merged.referrer = incoming.referrer;
+    merged.landing_url = incoming.landing_url;
+    merged.captured_at = incoming.captured_at;
+    return merged;
+  }
+
   function currentContext() {
     const now = Date.now();
     const incoming = touchFromLocation();
@@ -101,7 +112,7 @@
       };
     } else {
       session.last_activity_at = now;
-      if (hasCampaign(incoming)) session.current_touch = incoming;
+      if (hasCampaign(incoming)) session.current_touch = mergeTouch(session.current_touch, incoming);
     }
     write(STORAGE.session, session);
     return { visitorId: visitorId(), session, firstTouch, currentTouch: session.current_touch || incoming, isNewSession: expired };
