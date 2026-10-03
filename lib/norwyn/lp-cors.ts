@@ -4,7 +4,6 @@ const exactOrigins = new Set([
   "https://imersaozumbido.fgajulianacoutinho.com.br",
   "https://imersao-zumbido.fgajulianacoutinho.com.br",
   "https://lp-ju-imersao-zumbido.vercel.app",
-  "https://lp-ju-imersao-zumbido-e5sl2xg0m.vercel.app",
   "https://lp-ju-imersao-zumbido-k9h7bd6zl.vercel.app",
   "https://plataf-op-hml.vercel.app",
 ]);
