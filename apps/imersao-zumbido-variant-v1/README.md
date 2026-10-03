@@ -24,3 +24,5 @@ GA4 é opcional. O build lê `NEXT_PUBLIC_GA4_MEASUREMENT_ID`; sem um ID `G-*` v
 ## Segurança
 
 Esta app deve ser ligada somente ao projeto Vercel `lp-ju-imersao-zumbido`. Não executar deploy a partir de `apps/imersao-zumbido-hml` e não vincular o domínio público antes da aprovação de QA.
+
+Preview aprovado para QA: `https://lp-ju-imersao-zumbido-k9h7bd6zl.vercel.app` (protegido por autenticação Vercel).

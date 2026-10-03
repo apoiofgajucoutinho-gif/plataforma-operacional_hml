@@ -4,10 +4,10 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/ads", "destination": "/index.html" },
-    { "source": "/bio", "destination": "/index.html" },
-    { "source": "/stories", "destination": "/index.html" },
-    { "source": "/whats", "destination": "/index.html" }
+    { "source": "/ads", "destination": "/" },
+    { "source": "/bio", "destination": "/" },
+    { "source": "/stories", "destination": "/" },
+    { "source": "/whats", "destination": "/" }
   ],
   "headers": [
     {
