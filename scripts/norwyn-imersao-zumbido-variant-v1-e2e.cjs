@@ -35,6 +35,7 @@ const server = http.createServer((request, response) => {
     ["tablet", { width: 834, height: 1112 }],
     ["mobile", { width: 390, height: 844 }],
   ];
+  const performanceMetrics = [];
 
   for (const [name, viewport] of screenshots) {
     const context = await browser.newContext({ viewport });
@@ -43,6 +44,32 @@ const server = http.createServer((request, response) => {
     await page.route("https://plataf-op-hml.vercel.app/api/norwyn/attribution-bridge**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: '{"enabled":false,"mode":"smoke"}' }));
     await page.goto("http://127.0.0.1:4173/?traffic_type=test", { waitUntil: "networkidle" });
     assert.equal(await page.locator("body").evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true, `${name} has horizontal overflow`);
+    const initialAssets = await page.evaluate(() => performance.getEntriesByType("resource")
+      .filter((entry) => /\/assets\/.+\.(png|jpe?g|webp)$/i.test(entry.name))
+      .map((entry) => ({ name: entry.name.split("/").pop(), bytes: entry.encodedBodySize })));
+    assert.ok(initialAssets.some((asset) => asset.name === "hero.webp"));
+    assert.equal(initialAssets.some((asset) => asset.name === "extra_scene.webp"), false);
+    assert.equal(await page.locator('[data-lazy-background="offer"]').evaluate((node) => node.classList.contains("is-image-loaded")), false);
+    for (const selector of ['[data-lazy-background="science"]', '[data-lazy-background="offer"]', "footer"]) {
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(250);
+    }
+    await page.waitForFunction(() => [...document.images].every((image) => image.complete));
+    assert.equal(await page.locator('[data-lazy-background="science"]').evaluate((node) => node.classList.contains("is-image-loaded")), true);
+    assert.equal(await page.locator('[data-lazy-background="offer"]').evaluate((node) => node.classList.contains("is-image-loaded")), true);
+    const finalAssets = await page.evaluate(() => performance.getEntriesByType("resource")
+      .filter((entry) => /\/assets\/.+\.(png|jpe?g|webp)$/i.test(entry.name))
+      .map((entry) => ({ name: entry.name.split("/").pop(), bytes: entry.encodedBodySize })));
+    for (const asset of ["hero.webp", "ciencia.webp", "extra_scene.webp", "juliana2.webp", "elisa2.webp", "emblema-abelha-laurel-v7.webp", "emblema-zumbido.webp"]) {
+      assert.ok(finalAssets.some((entry) => entry.name === asset), `${name} did not load ${asset}`);
+    }
+    performanceMetrics.push({
+      name,
+      initialBytes: initialAssets.reduce((total, asset) => total + asset.bytes, 0),
+      fullPageBytes: finalAssets.reduce((total, asset) => total + asset.bytes, 0),
+      assets: finalAssets.map((asset) => asset.name),
+    });
+    await page.evaluate(() => scrollTo(0, 0));
     await page.screenshot({ path: path.join(root, "tmp", `imersao-zumbido-variant-v1-${name}.png`), fullPage: true });
     await context.close();
   }
@@ -158,7 +185,7 @@ const server = http.createServer((request, response) => {
   await context.close();
   await browser.close();
   server.close();
-  console.log("Imersao Zumbido variant_v1 browser QA PASS", { events: events.length, sections: sectionEvents.length, screenshots: screenshots.length });
+  console.log("Imersao Zumbido variant_v1 browser QA PASS", { events: events.length, sections: sectionEvents.length, screenshots: screenshots.length, performanceMetrics });
 })().catch(async (error) => {
   server.close();
   console.error(error);

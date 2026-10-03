@@ -112,7 +112,8 @@
     .hero-meta > div:last-child{border-right:0}
     .hero-meta strong{display:block;font-size:2rem;line-height:1;font-family:var(--serif);font-weight:500}
     .hero-note{font-family:var(--serif);font-style:italic;color:#5a625c;margin-top:14px;max-width:640px}
-    .hero-visual{min-height:420px;border-radius:0;overflow:hidden;background:url('assets/hero.png') right center/cover no-repeat}
+    .hero-visual{min-height:420px;border-radius:0;overflow:hidden;background:url('assets/hero.png') right center/cover no-repeat;background-image:image-set(url('assets/hero.webp') type('image/webp') 1x,url('assets/hero.png') type('image/png') 1x)}
+    picture.media-contents{display:contents}
 
     .feature-grid{display:grid;grid-template-columns:.44fr 1.56fr;gap:28px;align-items:start}
     .cards-3,.cards-4{display:grid;gap:0}
@@ -140,7 +141,8 @@
     .module li{margin:4px 0}
 
     .science-grid{display:grid;grid-template-columns:.46fr .54fr;align-items:stretch}
-    .science-photo{min-height:360px;background:url('assets/ciencia.png') center/cover no-repeat}
+    .science-photo{min-height:360px;background-position:center;background-size:cover;background-repeat:no-repeat}
+    .science-photo.is-image-loaded{background-image:url('assets/ciencia.png');background-image:image-set(url('assets/ciencia.webp') type('image/webp') 1x,url('assets/ciencia.png') type('image/png') 1x)}
     .science-copy{padding:52px;display:grid;grid-template-columns:1fr .72fr;gap:36px;align-items:center}
     .checks{display:grid;gap:14px}
     .check{display:flex;gap:12px;align-items:center;font-family:var(--serif);color:#435047}
@@ -149,6 +151,7 @@
     .teachers-grid{display:grid;grid-template-columns:.45fr 1.55fr;gap:28px;align-items:start}
     .teacher-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:0}
     .teacher-card{display:grid;grid-template-columns:140px 1fr;gap:18px;align-items:start}
+    .teacher-card picture.media-contents{display:block;width:140px;height:160px}
     .teacher-card img{width:140px;height:160px;object-fit:cover;border-radius:10px;box-shadow:var(--shadow)}
     .teacher-card h3{font-size:1.6rem;margin-bottom:8px}
 
@@ -162,7 +165,8 @@
     .offer-price{padding:24px 26px;border-left:1px solid var(--line-2);border-right:1px solid var(--line-2)}
     .price{font-family:var(--serif);font-size:3.5rem;line-height:1}
     .offer-meta{display:flex;flex-wrap:wrap;gap:12px 18px;margin:16px 0 18px;font-size:.84rem;color:#465248}
-    .offer-visual{height:258px;border-radius:0;background:url('assets/extra_scene.png') center/cover no-repeat}
+    .offer-visual{height:258px;border-radius:0;background-position:center;background-size:cover;background-repeat:no-repeat}
+    .offer-visual.is-image-loaded{background-image:url('assets/extra_scene.png');background-image:image-set(url('assets/extra_scene.webp') type('image/webp') 1x,url('assets/extra_scene.png') type('image/png') 1x)}
 
     .faq-grid{display:grid;grid-template-columns:.44fr 1.56fr;gap:30px}
     .faq{display:grid;gap:8px}
@@ -207,6 +211,7 @@
       .card-split > article:first-child,.module:first-child,.quote:first-child,.teacher-card:first-child{border-top:0;padding-top:0}
       .teacher-card{grid-template-columns:110px 1fr}
       .teacher-card img{width:110px;height:130px}
+      .teacher-card picture.media-contents{width:110px;height:130px}
       .science-copy{padding:36px 22px}
       .offer-visual{height:220px}
       .footer-in{justify-content:center;text-align:center}
@@ -411,12 +416,16 @@
     }
 
   </style>
+  <noscript><style>.science-photo{background:url('assets/ciencia.png') center/cover no-repeat}.offer-visual{background:url('assets/extra_scene.png') center/cover no-repeat}</style></noscript>
 </head>
 <body>
   <nav class="nav">
     <div class="shell nav-in">
       <div class="brand">
-        <img src="assets/emblema-abelha-laurel-v7.png" alt="Emblema dourado da abelha e laurel" class="nav-emblem">
+        <picture class="media-contents">
+          <source srcset="assets/emblema-abelha-laurel-v7.webp" type="image/webp">
+          <img src="assets/emblema-abelha-laurel-v7.png" alt="Emblema dourado da abelha e laurel" class="nav-emblem" width="1719" height="915" loading="eager" decoding="async">
+        </picture>
         <span>Imersão Zumbido <small>DA AVALIAÇÃO À TERAPIA SONORA</small></span>
       </div>
       <div class="links">
@@ -430,7 +439,10 @@
 
   <section class="brand-intro" aria-label="Imersão Zumbido">
     <div class="shell brand-intro-inner">
-      <img src="assets/emblema-zumbido.png" alt="Emblema Dourado da Imersão Zumbido — Nova Turma">
+      <picture class="media-contents">
+        <source srcset="assets/emblema-zumbido.webp" type="image/webp">
+        <img src="assets/emblema-zumbido.png" alt="Emblema Dourado da Imersão Zumbido — Nova Turma" width="1536" height="1024" loading="eager" decoding="async" fetchpriority="high">
+      </picture>
     </div>
   </section>
 
@@ -635,7 +647,7 @@
     <div class="layer">
       <div class="band">
         <div class="shell science-grid">
-          <div class="science-photo"></div>
+          <div class="science-photo" data-lazy-background="science"></div>
           <div class="science-copy">
             <div>
               <div class="eyebrow premium-kicker">Da aula para a clínica</div>
@@ -665,14 +677,20 @@
           </div>
           <div class="teacher-cards">
             <article class="teacher-card">
-              <img src="assets/juliana2.png" alt="Fga. Juliana Coutinho">
+              <picture class="media-contents">
+                <source srcset="assets/juliana2.webp" type="image/webp">
+                <img src="assets/juliana2.png" alt="Fga. Juliana Coutinho" width="1434" height="1097" loading="lazy" decoding="async">
+              </picture>
               <div>
                 <h3>Fga. Juliana Coutinho</h3>
                 <p>Especialista em audição, referência em ensino clínico, conhecida pela didática clara e pela forma prática de traduzir evidência para a rotina da fonoaudiologia.</p>
               </div>
             </article>
             <article class="teacher-card">
-              <img src="assets/elisa2.png" alt="Fga. Elisa Hopman">
+              <picture class="media-contents">
+                <source srcset="assets/elisa2.webp" type="image/webp">
+                <img src="assets/elisa2.png" alt="Fga. Elisa Hopman" width="1455" height="1081" loading="lazy" decoding="async">
+              </picture>
               <div>
                 <h3>Fga. Elisa Hopman</h3>
                 <p>Parceira nesta imersão, traz sua experiência clínica e visão prática para aprofundar o cuidado ao paciente com zumbido.</p>
@@ -732,7 +750,7 @@
             </div>
             <a class="btn gold" href="https://pay.hotmart.com/B47092539B?off=lov69pen" data-cta-id="offer_primary" data-section-id="offer" data-destination-type="checkout">Quero garantir minha vaga <span aria-hidden="true">→</span></a>
           </div>
-          <div class="offer-visual"></div>
+          <div class="offer-visual" data-lazy-background="offer"></div>
         </div>
       </div>
     </div>
@@ -778,7 +796,10 @@
   <footer class="footer">
     <div class="footer-narrow">
       <div class="premium-footer-mark">
-        <img src="assets/emblema-abelha-laurel-v7.png" alt="Emblema dourado da abelha e laurel">
+        <picture class="media-contents">
+          <source srcset="assets/emblema-abelha-laurel-v7.webp" type="image/webp">
+          <img src="assets/emblema-abelha-laurel-v7.png" alt="Emblema dourado da abelha e laurel" width="1719" height="915" loading="lazy" decoding="async">
+        </picture>
       </div>
       <div class="serif italic footer-premium-text">Formação Clínica Premium · Imersão Zumbido</div>
     </div>

@@ -21,6 +21,17 @@ Aplicação estática isolada da landing page baseline. O visual e o conteúdo v
 
 GA4 é opcional. O build lê `NEXT_PUBLIC_GA4_MEASUREMENT_ID`; sem um ID `G-*` válido nenhum script Google é carregado. Quando configurado, ele só inicializa após consentimento explícito e não envia `purchase`.
 
+## Assets
+
+Os 18 arquivos aprovados permanecem preservados em seus formatos originais (22,22 MiB). A entrega usa sete derivados WebP com fallback para PNG:
+
+- cenas e retratos: WebP Q90, alpha 100 e `sharp_yuv` (PSNR total entre 43,11 e 44,66 dB);
+- emblemas transparentes: WebP lossless;
+- imagens abaixo da primeira dobra: `loading="lazy"` ou background ativado a 600 px do viewport;
+- payload visual referenciado: 15,69 MiB antes e 2,26 MiB depois.
+
+Nenhum original foi removido, redimensionado ou sobrescrito.
+
 ## Segurança
 
 Esta app deve ser ligada somente ao projeto Vercel `lp-ju-imersao-zumbido`. Não executar deploy a partir de `apps/imersao-zumbido-hml` e não vincular o domínio público antes da aprovação de QA.

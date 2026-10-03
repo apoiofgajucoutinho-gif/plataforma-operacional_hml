@@ -8,6 +8,16 @@
   tracking.initialize();
   if (bridge) void bridge.initialize();
 
+  const lazyBackgrounds = [...document.querySelectorAll("[data-lazy-background]")];
+  const lazyBackgroundObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("is-image-loaded");
+      lazyBackgroundObserver.unobserve(entry.target);
+    });
+  }, { rootMargin: "600px 0px", threshold: 0.01 });
+  lazyBackgrounds.forEach((element) => lazyBackgroundObserver.observe(element));
+
   const sections = [...document.querySelectorAll("[data-norwyn-section]")];
   const sectionTimers = new Map();
 

@@ -13,6 +13,7 @@ const bridgeClient = read("hotmart-attribution-bridge.js");
 const eventRoute = fs.readFileSync(path.join(root, "app", "api", "norwyn", "lp-events", "route.ts"), "utf8");
 const bridgeRoute = fs.readFileSync(path.join(root, "app", "api", "norwyn", "attribution-bridge", "route.ts"), "utf8");
 const cors = fs.readFileSync(path.join(root, "lib", "norwyn", "lp-cors.ts"), "utf8");
+const runtime = read("app.js");
 
 const sections = ["hero", "pain", "practice_change", "pillars", "modules", "science", "teachers", "proof", "offer", "faq", "final_cta"];
 for (const section of sections) assert.match(html, new RegExp(`data-norwyn-section=["']${section}["']`), `missing section ${section}`);
@@ -34,5 +35,14 @@ assert.match(pixel, /1421640192678969/);
 assert.doesNotMatch(pixel, /["']Purchase["']/);
 assert.doesNotMatch(ga4, /purchase\s*:/i);
 assert.match(ga4, /NEXT_PUBLIC_GA4_MEASUREMENT_ID|__NORWYN_RUNTIME_CONFIG__/);
+for (const asset of ["hero", "ciencia", "extra_scene", "juliana2", "elisa2", "emblema-abelha-laurel-v7", "emblema-zumbido"]) {
+  assert.equal(fs.existsSync(path.join(appRoot, "assets", `${asset}.webp`)), true, `missing optimized ${asset}.webp`);
+  assert.equal(fs.existsSync(path.join(appRoot, "assets", `${asset}.png`)), true, `missing original ${asset}.png fallback`);
+}
+assert.match(html, /<source[^>]+\.webp[^>]+type=["']image\/webp["']/);
+assert.match(html, /loading=["']lazy["']/);
+assert.match(html, /data-lazy-background=["']science["']/);
+assert.match(html, /data-lazy-background=["']offer["']/);
+assert.match(runtime, /rootMargin:\s*["']600px 0px["']/);
 
 console.log("Imersao Zumbido variant_v1 contract PASS");
