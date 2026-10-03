@@ -7,7 +7,7 @@ const allowedEvents = new Set([
   "scroll_25", "scroll_50", "scroll_75", "scroll_90", "section_view", "offer_view",
   "modules_view", "module_open", "journey_step_view", "video_play", "video_progress",
   "testimonial_view", "testimonial_interaction", "faq_open", "form_start", "form_submit",
-  "checkout_click", "page_error",
+  "checkout_click", "page_error", "lp_section_view", "lp_cta_click", "lp_section_engaged",
 ]);
 
 const allowedEnvironments = new Set(["hml", "dev", "qa"]);
@@ -83,7 +83,9 @@ export async function POST(request: Request) {
     ad_id: textValue(body, "ad_id") ?? nestedText(body, "attribution", "ad_id"),
     fbclid: textValue(body, "fbclid", 500) ?? nestedText(body, "attribution", "fbclid"),
     sck: textValue(body, "sck") ?? nestedText(body, "attribution", "sck"),
+    source_sck: textValue(body, "source_sck") ?? nestedText(body, "attribution", "source_sck"),
     src: textValue(body, "src") ?? nestedText(body, "attribution", "src"),
+    entry_source: textValue(body, "entry_source") ?? nestedText(body, "attribution", "entry_source"),
   };
   const pageId = textValue(body, "page_id") ?? textValue(body, "landing_key");
   const productId = textValue(body, "product_id");
@@ -101,14 +103,16 @@ export async function POST(request: Request) {
   let stored = false;
   let storageError: string | null = null;
   let resolvedLandingId = landingId;
+  let resolvedVersionId = versionId;
   let resolvedTenantId: string | null = null;
 
   if (admin && (landingId || pageId || productId)) {
     if (landingId || pageId) {
-      let query = admin.from("landing_page_definitions").select("id, tenant_id").limit(1);
+      let query = admin.from("landing_page_definitions").select("id, tenant_id, active_version_id").limit(1);
       query = landingId ? query.eq("id", landingId) : query.eq("landing_key", pageId);
       const { data: landingRef } = await query.maybeSingle();
       resolvedLandingId = landingRef?.id ?? landingId;
+      resolvedVersionId = versionId ?? landingRef?.active_version_id ?? null;
       resolvedTenantId = landingRef?.tenant_id ?? null;
     }
 
@@ -147,7 +151,7 @@ export async function POST(request: Request) {
     const { error } = await admin.from("landing_page_tracking_events").insert({
       tenant_id: resolvedTenantId,
       landing_id: resolvedLandingId,
-      version_id: versionId,
+      version_id: resolvedVersionId,
       landing_key: pageId,
       landing_version: textValue(body, "page_version") ?? textValue(body, "landing_version"),
       environment,
@@ -168,7 +172,7 @@ export async function POST(request: Request) {
       meta_adset_id: attribution.adset_id,
       meta_ad_id: attribution.ad_id,
       fbclid: attribution.fbclid,
-      sck: attribution.sck,
+      sck: attribution.sck ?? attribution.source_sck,
       page_url: textValue(body, "url") ?? textValue(body, "page_url"),
       source_type: trafficType === "public" ? "REAL" : "SIMULATED",
       payload: normalizedPayload,

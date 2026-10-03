@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const CANONICAL_CHECKOUT = "https://pay.hotmart.com/B47092539B?off=lov69pen";
-const LANDING_KEY = "imersao_zumbido";
+const DEFAULT_LANDING_KEY = "imersao_zumbido";
+const ALLOWED_LANDING_KEYS = new Set([DEFAULT_LANDING_KEY, "imersao-zumbido"]);
 type LandingRegistry = {
   tenant_id: string;
   product_id: string | null;
@@ -17,7 +18,7 @@ type LandingRegistry = {
   active_meta_campaign_id: string | null;
   meta_campaign_ids: string[];
 };
-let registryCache: { value: LandingRegistry; expiresAt: number } | null = null;
+const registryCache = new Map<string, { value: LandingRegistry; expiresAt: number }>();
 
 function headers(request: Request) {
   return {
@@ -38,9 +39,14 @@ function safeTouch(value: unknown) {
   const source = record(value);
   return Object.fromEntries([
     "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
-    "campaign_id", "adset_id", "ad_id", "fbclid", "sck", "src",
+    "campaign_id", "adset_id", "ad_id", "fbclid", "sck", "source_sck", "src", "entry_source",
   ]
     .map((key) => [key, clean(source[key])]).filter(([, item]) => item));
+}
+
+function landingKey(value: unknown) {
+  const candidate = clean(value, 120) ?? DEFAULT_LANDING_KEY;
+  return ALLOWED_LANDING_KEYS.has(candidate) ? candidate : null;
 }
 
 function textArray(value: unknown) {
@@ -63,8 +69,8 @@ function canonicalizeCheckout(value: unknown) {
   }
 }
 
-function attributionKey(tenantId: string, sessionId: string) {
-  const digest = createHash("sha256").update(`${tenantId}|${LANDING_KEY}|${sessionId}`).digest("base64url").slice(0, 24);
+function attributionKey(tenantId: string, resolvedLandingKey: string, sessionId: string) {
+  const digest = createHash("sha256").update(`${tenantId}|${resolvedLandingKey}|${sessionId}`).digest("base64url").slice(0, 24);
   return `nw_${digest}`;
 }
 
@@ -72,21 +78,34 @@ function isSmoke(body: Record<string, unknown>) {
   return clean(body.traffic_type)?.toLowerCase() === "test" && body.smoke === true;
 }
 
-async function landingRegistry(admin: NonNullable<ReturnType<typeof createAdminClient>>) {
-  if (registryCache && registryCache.expiresAt > Date.now()) return registryCache.value;
+async function landingRegistry(admin: NonNullable<ReturnType<typeof createAdminClient>>, resolvedLandingKey: string) {
+  const cached = registryCache.get(resolvedLandingKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
   const { data } = await admin.from("norwyn_landing_registry")
     .select("tenant_id,product_id,campaign_key,url")
-    .eq("landing_key", LANDING_KEY).eq("status", "active").limit(1).maybeSingle();
+    .eq("landing_key", resolvedLandingKey).eq("status", "active").limit(1).maybeSingle();
   if (!data?.tenant_id) return null;
-  const { data: campaignRows } = await admin.from("campaigns")
-    .select("id,plan_json")
+  const { data: definition } = await admin.from("landing_page_definitions")
+    .select("campaign_id")
     .eq("tenant_id", data.tenant_id)
-    .eq("product_id", data.product_id)
-    .limit(50);
-  const campaign = (campaignRows ?? []).find((row) => {
-    const foundation = record(record(row.plan_json).traffic_data_foundation);
-    return clean(foundation.landing_key) === LANDING_KEY;
-  });
+    .eq("landing_key", resolvedLandingKey)
+    .limit(1)
+    .maybeSingle();
+  const { data: exactCampaign } = definition?.campaign_id
+    ? await admin.from("campaigns").select("id,plan_json").eq("tenant_id", data.tenant_id).eq("id", definition.campaign_id).limit(1).maybeSingle()
+    : { data: null };
+  let campaign = exactCampaign;
+  if (!campaign) {
+    const { data: campaignRows } = await admin.from("campaigns")
+      .select("id,plan_json")
+      .eq("tenant_id", data.tenant_id)
+      .eq("product_id", data.product_id)
+      .limit(50);
+    campaign = (campaignRows ?? []).find((row) => {
+      const foundation = record(record(row.plan_json).traffic_data_foundation);
+      return clean(foundation.landing_key) === resolvedLandingKey;
+    }) ?? null;
+  }
   const foundation = record(record(campaign?.plan_json).traffic_data_foundation);
   const legacyMetaId = clean(foundation.meta_campaign_id);
   const value: LandingRegistry = {
@@ -95,7 +114,7 @@ async function landingRegistry(admin: NonNullable<ReturnType<typeof createAdminC
     active_meta_campaign_id: clean(foundation.active_meta_campaign_id),
     meta_campaign_ids: [...new Set([...textArray(foundation.meta_campaign_ids), ...(legacyMetaId ? [legacyMetaId] : [])])],
   };
-  registryCache = { value, expiresAt: Date.now() + 5 * 60 * 1000 };
+  registryCache.set(resolvedLandingKey, { value, expiresAt: Date.now() + 5 * 60 * 1000 });
   return value;
 }
 
@@ -111,11 +130,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ enabled: false, mode: "forbidden" }, { status: 403, headers: { Vary: "Origin" } });
   }
   const url = new URL(request.url);
+  const resolvedLandingKey = landingKey(url.searchParams.get("landing_key"));
+  if (!resolvedLandingKey) {
+    return NextResponse.json({ enabled: false, mode: "invalid_landing_key" }, { status: 400, headers: headers(request) });
+  }
   const smoke = url.searchParams.get("traffic_type") === "test" && url.searchParams.get("smoke") === "1";
   const enabled = globalEnabled() || smoke;
   if (enabled) {
     const admin = createAdminClient();
-    if (admin) await landingRegistry(admin);
+    if (admin) await landingRegistry(admin, resolvedLandingKey);
   }
   return NextResponse.json({ enabled, mode: globalEnabled() ? "enabled" : smoke ? "smoke" : "disabled" }, { headers: headers(request) });
 }
@@ -128,6 +151,8 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const fallback = canonicalizeCheckout(body?.checkout_url).toString();
   if (!body) return NextResponse.json({ enabled: false, bridged: false, checkout_url: fallback, reason: "invalid_payload" }, { status: 400, headers: responseHeaders });
+  const resolvedLandingKey = landingKey(body.landing_key);
+  if (!resolvedLandingKey) return NextResponse.json({ enabled: false, bridged: false, checkout_url: fallback, reason: "invalid_landing_key" }, { status: 400, headers: responseHeaders });
 
   const enabled = globalEnabled() || isSmoke(body);
   if (!enabled) return NextResponse.json({ enabled: false, bridged: false, checkout_url: fallback, reason: "feature_disabled" }, { headers: responseHeaders });
@@ -141,7 +166,7 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
   if (!admin) return NextResponse.json({ enabled: true, bridged: false, checkout_url: fallback, reason: "storage_unavailable" }, { status: 503, headers: responseHeaders });
 
-  const registry = await landingRegistry(admin);
+  const registry = await landingRegistry(admin, resolvedLandingKey);
   if (!registry?.tenant_id) return NextResponse.json({ enabled: true, bridged: false, checkout_url: fallback, reason: "landing_not_registered" }, { status: 503, headers: responseHeaders });
 
   const currentTouch = safeTouch(body.current_touch);
@@ -151,7 +176,7 @@ export async function POST(request: Request) {
   const metaAdId = clean(currentTouch.ad_id);
   const fbclid = clean(currentTouch.fbclid, 500);
   const campaignRecognized = Boolean(metaCampaignId && registry.meta_campaign_ids.includes(metaCampaignId));
-  const sck = attributionKey(String(registry.tenant_id), sessionId);
+  const sck = attributionKey(String(registry.tenant_id), resolvedLandingKey, sessionId);
   const checkout = canonicalizeCheckout(fallback);
   const existingSck = checkout.searchParams.get("sck");
   if (existingSck && existingSck !== sck) {
@@ -162,7 +187,7 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   const metadata = {
     bridge_version: "v1",
-    landing_key: LANDING_KEY,
+    landing_key: resolvedLandingKey,
     session_id: sessionId,
     visitor_id: visitorId,
     checkout_click: true,
@@ -181,12 +206,12 @@ export async function POST(request: Request) {
     tenant_id: registry.tenant_id,
     campaign_id: campaignRecognized ? registry.campaign_id : null,
     product_id: registry.product_id,
-    campaign_key: registry.campaign_key ?? LANDING_KEY,
-    product_key: LANDING_KEY,
-    funnel_key: LANDING_KEY,
+    campaign_key: registry.campaign_key ?? DEFAULT_LANDING_KEY,
+    product_key: registry.campaign_key ?? DEFAULT_LANDING_KEY,
+    funnel_key: resolvedLandingKey,
     source: clean(currentTouch.utm_source),
     medium: clean(currentTouch.utm_medium),
-    campaign: clean(currentTouch.utm_campaign) ?? LANDING_KEY,
+    campaign: clean(currentTouch.utm_campaign) ?? registry.campaign_key ?? DEFAULT_LANDING_KEY,
     content: clean(currentTouch.utm_content),
     term: clean(currentTouch.utm_term),
     campaign_platform_id: metaCampaignId,
@@ -197,7 +222,7 @@ export async function POST(request: Request) {
     source_sck: sck,
     utm_source: clean(currentTouch.utm_source),
     utm_medium: clean(currentTouch.utm_medium),
-    utm_campaign: clean(currentTouch.utm_campaign) ?? LANDING_KEY,
+    utm_campaign: clean(currentTouch.utm_campaign) ?? registry.campaign_key ?? DEFAULT_LANDING_KEY,
     utm_content: clean(currentTouch.utm_content),
     utm_term: clean(currentTouch.utm_term),
     landing_url: clean(body.landing_url, 2048) ?? registry.url,

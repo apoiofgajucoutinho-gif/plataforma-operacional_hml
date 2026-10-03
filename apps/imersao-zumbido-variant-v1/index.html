@@ -1,0 +1,787 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Imersão Zumbido — da avaliação à terapia sonora</title>
+  <meta name="description" content="Imersão Zumbido: formação clínica da avaliação à terapia sonora.">
+  <link rel="icon" type="image/png" href="assets/favicon-abelha.png">
+  <link rel="stylesheet" href="/meta-pixel.css">
+  <script>window.__NORWYN_RUNTIME_CONFIG__={ga4MeasurementId:"__GA4_MEASUREMENT_ID__"};</script>
+  <script defer src="/hotmart-attribution-bridge.js"></script>
+  <script defer src="/norwyn-tracking.js"></script>
+  <script defer src="/meta-pixel.js"></script>
+  <script defer src="/ga4.js"></script>
+  <script defer src="/app.js"></script>
+  <style>
+    :root{
+      --bg:#f7f1e7;
+      --paper:#fbf7f0;
+      --paper-2:#f4ede0;
+      --paper-3:#ece3d3;
+      --paper-4:#efe7da;
+      --green:#223629;
+      --green-2:#304639;
+      --gold:#b28a4a;
+      --gold-soft:#d5ba82;
+      --gold-card:#dfc790;
+      --ink:#1b231d;
+      --muted:#5d665f;
+      --line:rgba(50,63,51,.14);
+      --line-2:rgba(178,138,74,.32);
+      --shadow:0 14px 40px rgba(68,55,34,.08);
+      --radius:20px;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0;
+      color:var(--ink);
+      font-family:var(--sans);
+      line-height:1.45;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,.65), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(230,220,197,.52), transparent 20%),
+        linear-gradient(180deg,#faf6ee,#f7f1e7 28%,#f5eee1 100%);
+    }
+    img{max-width:100%;display:block}
+    a{text-decoration:none;color:inherit}
+    .shell{width:min(1180px,calc(100% - 40px));margin:auto}
+    .serif{font-family:var(--serif)}
+    .italic{font-style:italic}
+    .gold{color:var(--gold)}
+
+    .nav{
+      position:sticky;top:0;z-index:60;
+      background:rgba(249,245,236,.88);
+      backdrop-filter:blur(12px);
+      border-top:1px solid rgba(178,138,74,.18);
+      border-bottom:1px solid rgba(50,63,51,.1);
+    }
+    .nav-in{height:76px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+    .brand{display:flex;align-items:center;gap:12px;font-size:.9rem;text-transform:uppercase;letter-spacing:.12em;font-weight:700;color:var(--green)}
+    .brand img{width:34px;height:34px;object-fit:contain}
+    .brand span small{display:block;font-size:.66rem;letter-spacing:.22em;color:#677266;margin-top:3px}
+    .links{display:flex;align-items:center;gap:28px;font-size:.83rem;color:#39443a}
+    .links a:not(.btn){position:relative}
+    .links a:not(.btn)::after{content:"";position:absolute;left:0;right:0;bottom:-8px;height:1px;background:transparent;transition:.25s}
+    .links a:not(.btn):hover::after{background:var(--gold)}
+
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:52px;padding:0 24px;border-radius:8px;font-weight:800;letter-spacing:.02em;transition:.2s;box-shadow:var(--shadow)}
+    .btn.green{background:var(--green);color:#fff}
+    .btn.gold{background:linear-gradient(180deg,#dbc58f,#ccb06a);color:#233125;border:1px solid rgba(178,138,74,.35)}
+    .btn:hover{transform:translateY(-1px)}
+
+    .section{position:relative;overflow:hidden;border-top:1px solid rgba(50,63,51,.08)}
+    .section::before{
+      width:430px;height:430px;left:-315px;top:-150px;border-radius:50%;
+      border:1.2px solid rgba(66,78,63,.22);
+    }
+    .section::after{
+      right:-180px;top:34px;width:330px;height:330px;border-radius:50%;
+      border:1px solid rgba(178,138,74,.16);
+    }
+    .layer{position:relative;z-index:1;padding:0}
+    .band{padding:54px 0;background:var(--paper)}
+    .band.alt{background:var(--paper-2)}
+    .band.alt2{background:var(--paper-3)}
+    .band.alt3{background:var(--paper-4)}
+    .band.compact{padding:44px 0}
+    .band.hero-band{padding:34px 0 0}
+    .band + .band{border-top:1px solid rgba(50,63,51,.08)}
+
+    h1,h2,h3{margin:0;font-family:var(--serif);font-weight:500;letter-spacing:-.03em}
+    h1{font-size:clamp(3.3rem,6.4vw,5.6rem);line-height:.92}
+    h2{font-size:clamp(2.3rem,4.3vw,4.2rem);line-height:.98}
+    h3{font-size:1.35rem;line-height:1.12}
+    p{margin:0}
+    .lead{font-family:var(--serif);font-size:1.22rem;line-height:1.35;color:#39433b}
+    .muted{color:var(--muted)}
+    .small{font-size:.88rem}
+    .eyebrow{text-transform:uppercase;letter-spacing:.24em;font-size:.76rem;font-weight:800;color:var(--green);margin-bottom:12px}
+    .eyebrow .premium{color:var(--gold);font-weight:900}
+    .rule{width:56px;height:2px;background:var(--gold);margin:18px 0 0}
+
+    .hero-grid{display:grid;grid-template-columns:1.03fr .97fr;gap:30px;align-items:stretch;padding-bottom:34px}
+    .hero-copy{padding:38px 0 20px}
+    .hero-copy .lead{max-width:650px;margin-top:18px}
+    .hero-meta{display:flex;gap:0;max-width:560px;background:var(--green);color:#fff;margin:24px 0 12px;border-radius:8px;overflow:hidden;box-shadow:var(--shadow)}
+    .hero-meta > div{padding:14px 16px;border-right:1px solid rgba(255,255,255,.2)}
+    .hero-meta > div:last-child{border-right:0}
+    .hero-meta strong{display:block;font-size:2rem;line-height:1;font-family:var(--serif);font-weight:500}
+    .hero-note{font-family:var(--serif);font-style:italic;color:#5a625c;margin-top:14px;max-width:640px}
+    .hero-visual{min-height:420px;border-radius:0;overflow:hidden;background:url('assets/hero.png') right center/cover no-repeat}
+
+    .feature-grid{display:grid;grid-template-columns:.44fr 1.56fr;gap:28px;align-items:start}
+    .cards-3,.cards-4{display:grid;gap:0}
+    .cards-3{grid-template-columns:repeat(3,1fr)}
+    .cards-4{grid-template-columns:repeat(4,1fr)}
+    .card-split > article, .module, .quote, .teacher-card{position:relative;padding:0 22px;border-left:1px solid var(--line-2)}
+    .card-split > article:first-child, .module:first-child, .quote:first-child{border-left:0}
+    .feature-title{padding-right:12px}
+    .feature-title h2{max-width:300px}
+
+    .icon-badge{width:50px;height:50px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(180deg,#ead6a7,#d9bb7a);color:var(--green);box-shadow:0 8px 18px rgba(105,80,35,.14);margin-bottom:14px}
+    .icon-badge svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+    .icon-badge.soft{background:linear-gradient(180deg,#efe2bc,#e1c98d)}
+    .icon-badge.green{background:linear-gradient(180deg,#e6eadf,#cfd8c5)}
+
+    .ident article h3,.transform article h3,.pillar h3{margin-bottom:10px}
+    .ident article p,.transform article p,.pillar p,.module ul,.teacher-card p,.quote blockquote{font-family:var(--serif);color:#4c564e}
+
+    .modules-grid{display:grid;grid-template-columns:.38fr 1.62fr;gap:26px}
+    .modules{display:grid;grid-template-columns:repeat(4,1fr)}
+    .module-no{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#e3d0a0;font-family:var(--serif);font-weight:700;margin-bottom:12px}
+    .module .label{font-family:var(--serif);font-size:1.04rem;font-style:italic;color:#536051}
+    .module h3{font-size:1.2rem;margin:3px 0 12px}
+    .module ul{margin:0;padding-left:18px;font-size:.95rem}
+    .module li{margin:4px 0}
+
+    .science-grid{display:grid;grid-template-columns:.46fr .54fr;align-items:stretch}
+    .science-photo{min-height:360px;background:url('assets/ciencia.png') center/cover no-repeat}
+    .science-copy{padding:52px;display:grid;grid-template-columns:1fr .72fr;gap:36px;align-items:center}
+    .checks{display:grid;gap:14px}
+    .check{display:flex;gap:12px;align-items:center;font-family:var(--serif);color:#435047}
+    .check b{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#dfc994;color:var(--green)}
+
+    .teachers-grid{display:grid;grid-template-columns:.45fr 1.55fr;gap:28px;align-items:start}
+    .teacher-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:0}
+    .teacher-card{display:grid;grid-template-columns:140px 1fr;gap:18px;align-items:start}
+    .teacher-card img{width:140px;height:160px;object-fit:cover;border-radius:10px;box-shadow:var(--shadow)}
+    .teacher-card h3{font-size:1.6rem;margin-bottom:8px}
+
+    .proof-grid{display:grid;grid-template-columns:.42fr 1.58fr;gap:28px}
+    .quotes{display:grid;grid-template-columns:repeat(3,1fr)}
+    .quote .mark{font-size:2rem;line-height:1;color:var(--gold)}
+    .quote blockquote{margin:8px 0 14px;font-size:1.04rem}
+    .quote small{color:#737b74}
+
+    .offer-grid{display:grid;grid-template-columns:.7fr .68fr .62fr;gap:24px;align-items:center}
+    .offer-price{padding:24px 26px;border-left:1px solid var(--line-2);border-right:1px solid var(--line-2)}
+    .price{font-family:var(--serif);font-size:3.5rem;line-height:1}
+    .offer-meta{display:flex;flex-wrap:wrap;gap:12px 18px;margin:16px 0 18px;font-size:.84rem;color:#465248}
+    .offer-visual{height:258px;border-radius:0;background:url('assets/extra_scene.png') center/cover no-repeat}
+
+    .faq-grid{display:grid;grid-template-columns:.44fr 1.56fr;gap:30px}
+    .faq{display:grid;gap:8px}
+    details{background:rgba(255,255,255,.46);border:1px solid #d7cbbb;padding:13px 16px;border-radius:8px}
+    summary{cursor:pointer;font-family:var(--serif);font-size:1rem}
+    details p{margin-top:10px;color:#535c55;font-size:.92rem}
+
+    .final-grid{display:grid;grid-template-columns:.8fr 1.2fr;gap:30px;align-items:center}
+    .final-action{text-align:center}
+
+    .footer{background:#ece3d3;border-top:1px solid rgba(50,63,51,.1)}
+    .footer-in{padding:22px 0;display:flex;align-items:center;justify-content:space-between;gap:22px;flex-wrap:wrap}
+    .footer-brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:.16em}
+    .footer-brand img{width:28px;height:28px;object-fit:contain}
+
+    @media(max-width:1080px){
+      .links a:not(.btn){display:none}
+      .hero-grid,.feature-grid,.modules-grid,.science-grid,.teachers-grid,.proof-grid,.offer-grid,.faq-grid,.final-grid{grid-template-columns:1fr}
+      .science-copy{grid-template-columns:1fr}
+      .cards-3,.cards-4,.modules,.quotes,.teacher-cards{grid-template-columns:1fr 1fr}
+      .card-split > article:nth-child(odd), .module:nth-child(odd), .quote:nth-child(odd){border-left:0}
+      .teacher-card{border-left:0;border-top:1px solid var(--line-2);padding-top:20px}
+      .teacher-card:first-child{border-top:0;padding-top:0}
+      .offer-price{border:0;padding:0}
+      .hero-visual{min-height:380px}
+    }
+    @media(max-width:700px){
+      .shell{width:min(100% - 24px,1180px)}
+      .nav-in{height:68px}
+      .brand span{font-size:.74rem}
+      .brand span small{font-size:.56rem}
+      h1{font-size:3.5rem}
+      h2{font-size:2.7rem}
+      .band{padding:44px 0}
+      .hero-copy{padding-top:0}
+      .hero-grid{gap:18px}
+      .hero-meta{display:grid}
+      .hero-meta>div{border-right:0;border-bottom:1px solid rgba(255,255,255,.18)}
+      .hero-meta>div:last-child{border-bottom:0}
+      .cards-3,.cards-4,.modules,.quotes,.teacher-cards{grid-template-columns:1fr}
+      .card-split > article,.module,.quote,.teacher-card{border-left:0;border-top:1px solid var(--line-2);padding:18px 0 0}
+      .card-split > article:first-child,.module:first-child,.quote:first-child,.teacher-card:first-child{border-top:0;padding-top:0}
+      .teacher-card{grid-template-columns:110px 1fr}
+      .teacher-card img{width:110px;height:130px}
+      .science-copy{padding:36px 22px}
+      .offer-visual{height:220px}
+      .footer-in{justify-content:center;text-align:center}
+      .section::after{width:220px;height:220px;right:-120px}
+    }
+
+    /* V6 — refinamento de identidade */
+    .nav-emblem{
+      width:46px !important;
+      height:38px !important;
+      object-fit:contain;
+      opacity:.88;
+      flex:0 0 auto;
+    }
+    .brand-intro{
+      position:relative;
+      overflow:hidden;
+      background:
+        linear-gradient(rgba(249,245,236,.96),rgba(249,245,236,.96)),
+        radial-gradient(circle at 50% 30%,rgba(219,197,145,.18),transparent 34%);
+      border-bottom:1px solid rgba(178,138,74,.16);
+    }
+    .brand-intro::before,
+    .brand-intro::after{
+      content:"";
+      position:absolute;
+      width:340px;
+      height:340px;
+      border-radius:50%;
+      border:1px solid rgba(71,83,65,.16);
+      pointer-events:none;
+    }
+    .brand-intro::before{left:-250px;top:-205px}
+    .brand-intro::after{right:-260px;bottom:-225px}
+    .brand-intro-inner{
+      min-height:245px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:26px 0 24px;
+    }
+    .brand-intro img{
+      width:min(390px,72vw);
+      max-height:205px;
+      object-fit:contain;
+      position:relative;
+      z-index:1;
+      filter:drop-shadow(0 10px 22px rgba(97,68,25,.08));
+    }
+    .premium-kicker{
+      color:var(--gold) !important;
+      font-weight:900;
+    }
+    .footer-v6{
+      display:grid;
+      grid-template-columns:120px 1fr auto;
+      align-items:center;
+      gap:26px;
+    }
+    .premium-footer-mark img{
+      width:94px;
+      height:66px;
+      object-fit:contain;
+      opacity:.9;
+    }
+    .footer-links{
+      text-align:center;
+    }
+    .footer-premium-text{
+      color:var(--green);
+      white-space:nowrap;
+      font-size:1rem;
+    }
+    @media(max-width:700px){
+      .nav-emblem{
+        width:38px !important;
+        height:32px !important;
+      }
+      .brand-intro-inner{
+        min-height:185px;
+        padding:18px 0;
+      }
+      .brand-intro img{
+        width:min(300px,78vw);
+        max-height:158px;
+      }
+      .footer-v6{
+        grid-template-columns:1fr;
+        justify-items:center;
+        text-align:center;
+      }
+      .footer-premium-text{
+        white-space:normal;
+      }
+    }
+
+
+    /* V7 — cabeçalho e rodapé */
+    .nav-emblem{
+      width:94px !important;
+      height:66px !important;
+      object-fit:contain;
+      opacity:.9;
+      flex:0 0 auto;
+    }
+
+    .footer{
+      background:#ece3d3;
+      border-top:1px solid rgba(50,63,51,.1);
+    }
+    .footer-narrow{
+      width:min(820px, calc(100% - 40px));
+      min-height:96px;
+      margin:auto;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:28px;
+      padding:14px 0;
+    }
+    .premium-footer-mark img{
+      width:94px;
+      height:66px;
+      object-fit:contain;
+      opacity:.9;
+    }
+    .footer-premium-text{
+      color:var(--green);
+      font-size:1rem;
+      text-align:right;
+      white-space:nowrap;
+    }
+
+    @media(max-width:700px){
+      .nav-emblem{
+        width:64px !important;
+        height:48px !important;
+      }
+      .footer-narrow{
+        width:min(100% - 28px, 820px);
+        min-height:88px;
+        gap:18px;
+      }
+      .premium-footer-mark img{
+        width:64px;
+        height:48px;
+      }
+      .footer-premium-text{
+        font-size:.9rem;
+        white-space:normal;
+      }
+    }
+
+
+    /* V8 — transição topo + alinhamento rodapé */
+    .brand-intro{
+      border-bottom:none !important;
+    }
+
+    header.section{
+      border-top:none !important;
+    }
+
+    .footer-narrow{
+      width:min(1180px, calc(100% - 40px)) !important;
+      min-height:74px !important;
+      padding:7px 0 !important;
+      margin:auto;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:24px;
+    }
+
+    .premium-footer-mark img{
+      width:78px !important;
+      height:54px !important;
+      object-fit:contain;
+    }
+
+    .footer-premium-text{
+      font-size:.94rem !important;
+      text-align:right;
+      margin-left:auto;
+    }
+
+    @media(max-width:700px){
+      .footer-narrow{
+        width:min(100% - 24px, 1180px) !important;
+        min-height:68px !important;
+        padding:6px 0 !important;
+      }
+
+      .premium-footer-mark img{
+        width:58px !important;
+        height:42px !important;
+      }
+
+      .footer-premium-text{
+        font-size:.84rem !important;
+      }
+    }
+
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="shell nav-in">
+      <div class="brand">
+        <img src="assets/emblema-abelha-laurel-v7.png" alt="Emblema dourado da abelha e laurel" class="nav-emblem">
+        <span>Imersão Zumbido <small>DA AVALIAÇÃO À TERAPIA SONORA</small></span>
+      </div>
+      <div class="links">
+        <a href="#sobre">Sobre</a>
+        <a href="#para">Para quem é</a>
+        <a href="#conteudo">O que você vai aprender</a>
+        <a href="#oferta" class="btn green" data-cta-id="nav_offer" data-section-id="hero" data-destination-type="anchor">Quero garantir minha vaga</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="brand-intro" aria-label="Imersão Zumbido">
+    <div class="shell brand-intro-inner">
+      <img src="assets/emblema-zumbido.png" alt="Emblema Dourado da Imersão Zumbido — Nova Turma">
+    </div>
+  </section>
+
+
+  <header class="section" id="sobre" data-norwyn-section="hero">
+    <div class="layer">
+      <div class="band hero-band">
+        <div class="shell hero-grid">
+          <div class="hero-copy">
+            <div class="eyebrow">Imersão Zumbido • <span class="premium">Nova Turma</span></div>
+            <h1>Pare de <span class="italic" style="color:#304639">improvisar</span><br>diante do paciente<br>com zumbido</h1>
+            <p class="lead">Aprenda a avaliar, interpretar e conduzir o paciente com mais segurança clínica, evidência e clareza — da avaliação à terapia sonora.</p>
+            <div class="hero-meta">
+              <div><strong>R$ 397</strong></div>
+              <div>2 anos<br>de acesso</div>
+              <div>Aula ao vivo em<br>05/10 às 19h</div>
+            </div>
+            <a class="btn gold" href="#oferta" data-cta-id="hero_offer" data-section-id="hero" data-destination-type="anchor">Quero garantir minha vaga <span aria-hidden="true">→</span></a>
+            <p class="hero-note">Não é sobre ter mais um certificado. É sobre se sentir segura diante do paciente com zumbido e não precisar improvisar.</p>
+          </div>
+          <div class="hero-visual" aria-label="Visual hero da Imersão Zumbido"></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="section ident" id="para" data-norwyn-section="pain">
+    <div class="layer">
+      <div class="band compact">
+        <div class="shell feature-grid">
+          <div class="feature-title">
+            <h2>Se hoje você <span class="italic">sente que...</span></h2>
+            <div class="rule"></div>
+          </div>
+          <div class="cards-3 card-split">
+            <article>
+              <div class="icon-badge soft">
+                <svg viewBox="0 0 24 24"><path d="M10 6a7 7 0 0 1 7 7"></path><path d="M10 10a3 3 0 0 1 3 3"></path><path d="M5 5l14 14"></path><path d="M6 14a6 6 0 0 0 8 5"></path></svg>
+              </div>
+              <h3>Fica insegura</h3>
+              <p>na hora de avaliar e interpretar o zumbido do paciente</p>
+            </article>
+            <article>
+              <div class="icon-badge green">
+                <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2 4 4 0 0 1 7 2c0 5.6-7 10-7 10z"></path></svg>
+              </div>
+              <h3>Quer conduzir melhor</h3>
+              <p>sabe que o paciente sofre, mas nem sempre se sente segura para a conduta</p>
+            </article>
+            <article>
+              <div class="icon-badge">
+                <svg viewBox="0 0 24 24"><path d="M4 9l8-4 8 4-8 4-8-4z"></path><path d="M7 11v4c0 1.6 2.2 3 5 3s5-1.4 5-3v-4"></path></svg>
+              </div>
+              <h3>Procura profundidade</h3>
+              <p>uma formação que una prática clínica, didática e evidência</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section transform" data-norwyn-section="practice_change">
+    <div class="layer">
+      <div class="band alt compact">
+        <div class="shell feature-grid">
+          <div class="feature-title">
+            <h2>O que muda<br>na sua prática</h2>
+            <div class="rule"></div>
+          </div>
+          <div class="cards-3 card-split">
+            <article>
+              <div class="icon-badge">
+                <svg viewBox="0 0 24 24"><path d="M12 21s7-4 7-10V6l-7-3-7 3v5c0 6 7 10 7 10z"></path><path d="M9 12l2 2 4-4"></path></svg>
+              </div>
+              <h3>Mais segurança na acufenometria</h3>
+              <p>Como fazer e interpretar cada exame do zumbido: acufenometria, NMM, inibição residual.</p>
+            </article>
+            <article>
+              <div class="icon-badge soft">
+                <svg viewBox="0 0 24 24"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a6 6 0 0 0-4 10c1.2 1 2 2.2 2 4h4c0-1.8.8-3 2-4a6 6 0 0 0-4-10z"></path></svg>
+              </div>
+              <h3>Mais clareza na terapia sonora</h3>
+              <p>Como orientar o enriquecimento sonoro, como usar gerador de som no AASI e a base dos programas TRT e TAT.</p>
+            </article>
+            <article>
+              <div class="icon-badge green">
+                <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+              </div>
+              <h3>Cuidado personalizado ao paciente</h3>
+              <p>Aconselhamento e acolhimento de acordo com os questionários, e todo baseado em evidência e neurofisiologia.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section pillars-section" data-norwyn-section="pillars">
+    <div class="layer">
+      <div class="band compact">
+        <div class="shell feature-grid">
+          <div class="feature-title">
+            <h2>O que você vai encontrar na Imersão Zumbido</h2>
+            <div class="rule"></div>
+          </div>
+          <div class="cards-4 card-split">
+            <article class="pillar">
+              <div class="icon-badge soft">
+                <svg viewBox="0 0 24 24"><path d="M8 5c-2 0-3 1.4-3 3.2 0 1.3.7 2.5 1.8 3.1-.8.5-1.3 1.4-1.3 2.4 0 1.6 1.2 2.8 2.8 2.8.3 0 .6 0 .8-.1-.1 1.5 1.1 2.7 2.6 2.7 1.1 0 2.1-.7 2.5-1.7.5.8 1.4 1.2 2.4 1.2 1.7 0 3-1.3 3-3 0-.9-.4-1.7-1-2.2 1-.6 1.7-1.7 1.7-3 0-1.8-1.4-3.2-3.2-3.2-.6 0-1.2.2-1.7.5-.5-1.3-1.7-2.2-3.2-2.2-1.1 0-2 .5-2.7 1.2C10 5.5 9.1 5 8 5z"></path></svg>
+              </div>
+              <h3>Neurofisiologia do zumbido</h3>
+              <p>Entenda os mecanismos e as bases científicas que sustentam a prática clínica.</p>
+            </article>
+            <article class="pillar">
+              <div class="icon-badge green">
+                <svg viewBox="0 0 24 24"><path d="M3 12s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>
+              </div>
+              <h3>Avaliação e interpretação</h3>
+              <p>Aprenda a selecionar e interpretar os principais testes, integrando os achados à realidade do paciente.</p>
+            </article>
+            <article class="pillar">
+              <div class="icon-badge">
+                <svg viewBox="0 0 24 24"><path d="M12 3v18"></path><path d="M7 8v8"></path><path d="M17 8v8"></path><path d="M4 11v2"></path><path d="M20 11v2"></path></svg>
+              </div>
+              <h3>Terapia sonora</h3>
+              <p>Conheça as indicações, protocolos e estratégias para uso da terapia sonora na prática clínica.</p>
+            </article>
+            <article class="pillar">
+              <div class="icon-badge soft">
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path></svg>
+              </div>
+              <h3>Aconselhamento e manejo clínico</h3>
+              <p>Saiba como orientar, acolher e construir o plano terapêutico de forma individualizada e efetiva.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section modules-section" id="conteudo" data-norwyn-section="modules">
+    <div class="layer">
+      <div class="band alt3 compact">
+        <div class="shell modules-grid">
+          <div class="feature-title">
+            <h2>O que você vai <span class="italic">aprender</span></h2>
+            <div class="rule"></div>
+          </div>
+          <div class="modules">
+            <article class="module">
+              <div class="module-no">1</div>
+              <div class="label">Módulo 1</div>
+              <h3>Fundamentos do zumbido</h3>
+              <ul>
+                <li>Introdução ao zumbido</li>
+                <li>Classificações</li>
+                <li>Patologias associadas</li>
+                <li>Audição e neurofisiologia</li>
+              </ul>
+            </article>
+            <article class="module">
+              <div class="module-no">2</div>
+              <div class="label">Módulo 2</div>
+              <h3>Avaliação do paciente</h3>
+              <ul>
+                <li>Avaliação clínica</li>
+                <li>Testes auditivos</li>
+                <li>Acufenometria, NMM</li>
+                <li>Inibição residual</li>
+              </ul>
+            </article>
+            <article class="module">
+              <div class="module-no">3</div>
+              <div class="label">Módulo 3</div>
+              <h3>Aconselhamento e tratamento</h3>
+              <ul>
+                <li>Aconselhamento efetivo</li>
+                <li>AASI e IC</li>
+                <li>Terapia sonora</li>
+                <li>Outros tratamentos</li>
+              </ul>
+            </article>
+            <article class="module">
+              <div class="module-no">4</div>
+              <div class="label">Módulo 4</div>
+              <h3>Prática clínica</h3>
+              <ul>
+                <li>Discussão de casos reais</li>
+                <li>Condutas na prática clínica</li>
+                <li>Modelo de folha de exame</li>
+                <li>Integração do conhecimento</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section science" data-norwyn-section="science">
+    <div class="layer">
+      <div class="band">
+        <div class="shell science-grid">
+          <div class="science-photo"></div>
+          <div class="science-copy">
+            <div>
+              <div class="eyebrow premium-kicker">Da aula para a clínica</div>
+              <h2>Ciência e raciocínio clínico <span class="italic">aplicados à prática</span></h2>
+              <div class="rule"></div>
+              <p class="lead" style="margin-top:18px">Uma imersão didática, com conteúdo atualizado, para ajudar você a avaliar, interpretar e conduzir o paciente com zumbido com mais segurança.</p>
+            </div>
+            <div class="checks">
+              <div class="check"><b>✓</b><span>Conteúdo baseado em evidências</span></div>
+              <div class="check"><b>✓</b><span>Raciocínio clínico em foco</span></div>
+              <div class="check"><b>✓</b><span>Aplicação na prática real</span></div>
+              <div class="check"><b>✓</b><span>Discussão de casos</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section teachers-section" data-norwyn-section="teachers">
+    <div class="layer">
+      <div class="band alt compact">
+        <div class="shell teachers-grid">
+          <div class="feature-title">
+            <h2>Com quem você vai <span class="italic">aprender</span></h2>
+            <div class="rule"></div>
+          </div>
+          <div class="teacher-cards">
+            <article class="teacher-card">
+              <img src="assets/juliana2.png" alt="Fga. Juliana Coutinho">
+              <div>
+                <h3>Fga. Juliana Coutinho</h3>
+                <p>Especialista em audição, referência em ensino clínico, conhecida pela didática clara e pela forma prática de traduzir evidência para a rotina da fonoaudiologia.</p>
+              </div>
+            </article>
+            <article class="teacher-card">
+              <img src="assets/elisa2.png" alt="Fga. Elisa Hopman">
+              <div>
+                <h3>Fga. Elisa Hopman</h3>
+                <p>Parceira nesta imersão, traz sua experiência clínica e visão prática para aprofundar o cuidado ao paciente com zumbido.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section proof" data-norwyn-section="proof">
+    <div class="layer">
+      <div class="band compact">
+        <div class="shell proof-grid">
+          <div class="feature-title">
+            <h2>Quando a fono ganha clareza, o paciente <span class="italic">sente a diferença</span></h2>
+            <div class="rule"></div>
+          </div>
+          <div class="quotes">
+            <article class="quote">
+              <div class="mark">“</div>
+              <blockquote>A avaliação e terapia sonora me levaram para outro patamar. Hoje conduzo meus atendimentos com muito mais segurança.</blockquote>
+              <small>Fonoaudióloga • Aluna da Imersão</small>
+            </article>
+            <article class="quote">
+              <div class="mark">“</div>
+              <blockquote>Consegui uma vaga de emprego e vou iniciar minha carreira também no zumbido.</blockquote>
+              <small>Fonoaudióloga • Aluna da Imersão</small>
+            </article>
+            <article class="quote">
+              <div class="mark">“</div>
+              <blockquote>Conhecimento que se transforma em segurança, oportunidade e cuidado com o paciente.</blockquote>
+              <small>Fonoaudióloga • Aluna da Imersão</small>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section offer" id="oferta" data-norwyn-section="offer">
+    <div class="layer">
+      <div class="band alt2 compact">
+        <div class="shell offer-grid">
+          <div>
+            <h2>Se torne a <span class="italic">profissional</span> que esses pacientes estão procurando</h2>
+            <div class="rule"></div>
+            <p class="lead" style="margin-top:18px">Mais segurança, mais clareza e uma atuação baseada em evidências para transformar a vida de quem convive com zumbido.</p>
+          </div>
+          <div class="offer-price">
+            <div class="price">R$ 397</div>
+            <div class="offer-meta">
+              <span>2 anos de acesso</span>
+              <span>Aula ao vivo em 05/10 às 19h</span>
+              <span>Conteúdo aplicado à prática clínica</span>
+            </div>
+            <a class="btn gold" href="https://pay.hotmart.com/B47092539B?off=lov69pen" data-cta-id="offer_primary" data-section-id="offer" data-destination-type="checkout">Quero garantir minha vaga <span aria-hidden="true">→</span></a>
+          </div>
+          <div class="offer-visual"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section faq-section" data-norwyn-section="faq">
+    <div class="layer">
+      <div class="band compact">
+        <div class="shell faq-grid">
+          <div class="feature-title">
+            <h2>Dúvidas <span class="italic">frequentes</span></h2>
+            <div class="rule"></div>
+          </div>
+          <div class="faq">
+            <details data-faq-id="audience"><summary>Para quem é essa imersão?</summary><p>Para fonoaudiólogas que querem mais segurança para avaliar, interpretar e tratar o paciente com zumbido.</p></details>
+            <details data-faq-id="access_duration"><summary>Por quanto tempo terei acesso?</summary><p>Você terá 2 anos de acesso ao conteúdo.</p></details>
+            <details data-faq-id="live_class"><summary>Vai ter aula ao vivo?</summary><p>Sim. Haverá uma aula ao vivo em 05/10 às 19h.</p></details>
+            <details data-faq-id="practical_content"><summary>O conteúdo é prático?</summary><p>Sim. A proposta é unir didática, ciência aplicada e prática clínica.</p></details>
+            <details data-faq-id="certificate"><summary>É mais um certificado?</summary><p>Não. É uma formação pensada para gerar clareza e segurança na atuação clínica.</p></details>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section final" data-norwyn-section="final_cta">
+    <div class="layer">
+      <div class="band alt compact">
+        <div class="shell final-grid">
+          <div>
+            <h2>Agora que você viu a estrutura, <span class="italic">vamos para a prática</span></h2>
+            <div class="rule"></div>
+          </div>
+          <div class="final-action">
+            <a class="btn gold" href="https://pay.hotmart.com/B47092539B?off=lov69pen" data-cta-id="final_primary" data-section-id="final_cta" data-destination-type="checkout">Quero garantir minha vaga <span aria-hidden="true">→</span></a>
+            <p class="small muted" style="margin-top:12px">Nova turma • vagas abertas</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-narrow">
+      <div class="premium-footer-mark">
+        <img src="assets/emblema-abelha-laurel-v7.png" alt="Emblema dourado da abelha e laurel">
+      </div>
+      <div class="serif italic footer-premium-text">Formação Clínica Premium · Imersão Zumbido</div>
+    </div>
+  </footer>
+</body>
+</html>

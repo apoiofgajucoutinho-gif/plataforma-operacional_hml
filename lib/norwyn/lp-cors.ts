@@ -2,15 +2,19 @@ const exactOrigins = new Set([
   "https://v0-zumbidoju.vercel.app",
   "https://lp-ju.vercel.app",
   "https://imersaozumbido.fgajulianacoutinho.com.br",
+  "https://imersao-zumbido.fgajulianacoutinho.com.br",
+  "https://lp-ju-imersao-zumbido.vercel.app",
+  "https://lp-ju-imersao-zumbido-e5sl2xg0m.vercel.app",
   "https://plataf-op-hml.vercel.app",
 ]);
 
 // Vercel preview generated for the authorized LP project under the owning team.
 const authorizedPreviewOrigin = /^https:\/\/lp-[a-z0-9]{6,32}-apoio-fga-ju-coutinho-s-projects\.vercel\.app$/;
+const authorizedVariantPreviewOrigin = /^https:\/\/lp-ju-imersao-zumbido-[a-z0-9]{6,32}-apoio-fga-ju-coutinho-s-projects\.vercel\.app$/;
 
 export function isAllowedNorwynLpOrigin(origin: string | null) {
   if (!origin) return false;
-  return exactOrigins.has(origin) || authorizedPreviewOrigin.test(origin);
+  return exactOrigins.has(origin) || authorizedPreviewOrigin.test(origin) || authorizedVariantPreviewOrigin.test(origin);
 }
 
 export function hasDisallowedNorwynLpOrigin(request: Request) {

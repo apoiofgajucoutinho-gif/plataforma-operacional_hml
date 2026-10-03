@@ -167,7 +167,7 @@ export function buildJourney(events: EventRow[], purchases: number | null) {
       { key: "scroll_25", label: "Chegou a 25% da página", sessions: uniqueSessions(scopedEvents, ["scroll_25"]), events: scopedEvents.filter((row) => row.event_name === "scroll_25").length, note: "Mede profundidade de navegação, sem presumir que seja pré-requisito técnico para outras ações." },
       { key: "offer_view", label: "Oferta vista", sessions: uniqueSessions(scopedEvents, ["offer_view"]), events: scopedEvents.filter((row) => row.event_name === "offer_view").length, note: "O observer pode não registrar a oferta em sessões que ainda clicam no checkout; por isso fica fora da sequência principal." },
       { key: "cta_view", label: "CTA visto", sessions: uniqueSessions(scopedEvents, ["cta_view"]), events: scopedEvents.filter((row) => row.event_name === "cta_view").length, note: "Pode ocorrer em até cinco CTAs diferentes e antes ou depois da oferta; por isso não é uma etapa sequencial." },
-      { key: "cta_click", label: "CTA clicado", sessions: uniqueSessions(scopedEvents, ["cta_click"]), events: scopedEvents.filter((row) => row.event_name === "cta_click").length, note: "Inclui cliques de navegação interna e de checkout. É um sinal de interação, não uma etapa única do funil." },
+      { key: "cta_click", label: "CTA clicado", sessions: uniqueSessions(scopedEvents, ["cta_click", "lp_cta_click"]), events: scopedEvents.filter((row) => ["cta_click", "lp_cta_click"].includes(row.event_name)).length, note: "Inclui cliques de navegação interna e de checkout. É um sinal de interação, não uma etapa única do funil." },
     ],
     highlights: {
       biggestAbsoluteLoss: [...transitions].sort((a, b) => b.loss - a.loss)[0]?.label ?? null,

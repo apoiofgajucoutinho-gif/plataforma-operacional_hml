@@ -21,8 +21,11 @@ const eventLabels: Record<string, string> = {
   offer_view: "Oferta visualizada",
   checkout_click: "Clique no checkout",
   cta_click: "CTA acionado",
+  lp_cta_click: "CTA acionado",
   cta_view: "CTA visualizado",
   section_view: "Seção visualizada",
+  lp_section_view: "Seção visualizada",
+  lp_section_engaged: "Seção com engajamento",
   modules_view: "Módulos visualizados",
   module_open: "Módulo aberto",
   faq_open: "Pergunta aberta",
@@ -35,11 +38,17 @@ const eventLabels: Record<string, string> = {
 const sectionLabels: Record<string, string> = {
   header: "Cabeçalho",
   hero: "Hero",
+  pain: "Dores",
+  practice_change: "Mudança na prática",
+  pillars: "Pilares",
   audience: "Para quem é",
   problem: "Problema",
   method: "Método",
   modules: "Conteúdo",
   authority: "Especialistas",
+  science: "Ciência aplicada",
+  teachers: "Professoras",
+  proof: "Provas",
   testimonials: "Provas",
   offer: "Oferta",
   faq: "Dúvidas",
@@ -433,7 +442,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     dailyMap.set(date, item);
   }
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date)).map((item) => ({ ...item, sessions: item.sessions.size }));
-  const sectionRows = events.filter((row) => row.event_name === "section_view" && row.block_id);
+  const sectionRows = events.filter((row) => ["section_view", "lp_section_view"].includes(row.event_name) && row.block_id);
   const sectionCounts = countBy(sectionRows, (row) => row.block_id);
   const sections = [...sectionCounts.entries()].map(([id, views]) => ({ id, label: sectionLabels[id] ?? id, views, share: sessionCount ? (views / sessionCount) * 100 : null })).sort((a, b) => b.views - a.views);
   const publicSessionCount = eventSessions(publicEvents, ["session_start", ...pageNames]);

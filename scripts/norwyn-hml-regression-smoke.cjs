@@ -20,6 +20,7 @@ const tests = [
   "scripts/norwyn-hotmart-attribution-bridge-test.cjs",
   "scripts/norwyn-meta-pixel-test.cjs",
   "scripts/norwyn-lp-cors-test.cjs",
+  "scripts/norwyn-imersao-zumbido-variant-v1-test.cjs",
   "scripts/norwyn-reports-v3-regression-test.cjs",
   "scripts/norwyn-student360-searchparams-test.cjs",
   "scripts/norwyn-student-enrollment-backfill-tests.cjs",
