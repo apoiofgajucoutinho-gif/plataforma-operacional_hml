@@ -4,6 +4,7 @@ import { getLocalBypassMembership, getLocalBypassUser } from "@/lib/auth/local-b
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { adsAnalyticsSelect, normalizeAdsDailyRow } from "@/modules/ads/services/ads-analytics";
+import { buildIntradayDelta } from "@/modules/ads/analytics/intraday-delta";
 import { metaFreshness, operationalAlerts, sourceFreshness, trackingHealth } from "@/modules/ads/services/traffic-operations";
 import type { AdsConfigSnapshot, AdsContext, AdsDailyRow, AdsDecisionConfig, AdsGranularity, AdsOperations, AdsPeriodContext, AdsPeriodKey, AdsReconciliationSummary } from "@/modules/ads/types";
 
@@ -123,8 +124,10 @@ function emptyContext(overrides: Partial<AdsContext>, period: AdsPeriodContext):
       alerts: [],
       journey: [],
       registry: { campaignResolved: false, metaCampaignId: null, campaignName: null, landingKey: null, productId: null, offerId: null, checkoutUrl: null, pixelId: null, version: null },
+      destination: { metaUrl: null, metaDomain: null, canonicalUrl: null, canonicalDomain: null, diverges: false },
+      journeyHealth: { status: "Aguardando dados", operational: "Aguardando dados", measurement: "Fraca", reasons: ["Sem fontes suficientes para avaliar a jornada."], lastCheckedAt: null },
       coverage: { sessions: 0, campaignIdSessions: 0, adsetIdSessions: 0, adIdSessions: 0, fbclidSessions: 0, sckSessions: 0, bridgeKeys: 0, bridgeKeysWithAd: 0, hotmartWithSourceSck: 0 },
-      intradayDelta: { available: false, since: null, spend: null, linkClicks: null, checkouts: null, metaPurchases: null, confirmedSales: null, reason: "Aguardando histórico métrico entre coletas." },
+      intradayDelta: { available: false, since: null, spend: null, linkClicks: null, checkouts: null, metaPurchases: null, confirmedSales: null, reason: "Aguardando histórico métrico entre coletas.", collectedAt: null, perAd: [] },
     },
     ...overrides,
   };
@@ -255,6 +258,11 @@ function ratio(numerator: number, denominator: number) {
   return denominator > 0 ? (numerator / denominator) * 100 : null;
 }
 
+function domainOf(value: unknown) {
+  if (typeof value !== "string" || !value) return null;
+  try { return new URL(value).hostname.toLowerCase(); } catch { return null; }
+}
+
 async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: string, period: AdsPeriodContext, metaCampaignIds: string[], adsRows: AdsDailyRow[]) {
   const [snapshotsResult, trackingResult, salesResult, bridgeResult, trackingKeysResult, learningsResult, campaignsResult, registryResult] = await Promise.all([
     fetchConfigSnapshots(dataClient, tenantId),
@@ -332,6 +340,22 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
   const start = typeof campaignConfig.start_time === "string" ? campaignConfig.start_time : null;
   const end = typeof campaignConfig.stop_time === "string" ? campaignConfig.stop_time : null;
   const campaignStartMs = start ? new Date(start).getTime() : Number.NaN;
+  let intradayQuery: any = dataClient
+    .from("instagram_ads_intraday_snapshots")
+    .select("collected_at,data_referencia,row_key,campaign_id,adset_id,ad_id,anuncio,valor_gasto,impressoes,cliques,link_clicks,outbound_clicks,landing_page_views,initiate_checkouts,meta_purchases")
+    .eq("tenant_id", tenantId)
+    .eq("data_referencia", period.end)
+    .order("collected_at", { ascending: false });
+  if (activeMetaId) intradayQuery = intradayQuery.eq("campaign_id", activeMetaId);
+  const intradayResult = await intradayQuery.limit(500);
+
+  const assetsResult = landingKey
+    ? await dataClient.from("digital_assets").select("id,metadata,url").eq("tenant_id", tenantId).contains("metadata", { landing_key: landingKey })
+    : { data: [], error: null };
+  const assetIds = (assetsResult.data ?? []).map((asset: any) => asset.id);
+  const checksResult = assetIds.length
+    ? await dataClient.from("presence_checks").select("asset_id,status,checked_at,http_status,error_message").eq("tenant_id", tenantId).in("asset_id", assetIds).order("checked_at", { ascending: false }).limit(100)
+    : { data: [], error: null };
 
   const trackingAvailable = !trackingResult.error;
   const salesAvailable = !salesResult.error;
@@ -472,6 +496,55 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
     adIdSessions,
     sourceSckSessions: sckSessions,
   });
+  const metaDestinationUrl = adsRows.find((row) => row.destination_url)?.destination_url ?? null;
+  const metaDestinationDomain = adsRows.find((row) => row.destination_domain)?.destination_domain ?? domainOf(metaDestinationUrl);
+  const canonicalUrl = typeof registry?.url === "string" ? registry.url : null;
+  const canonicalDomain = domainOf(canonicalUrl);
+  const destinationDiverges = Boolean(metaDestinationDomain && canonicalDomain && metaDestinationDomain !== canonicalDomain);
+  if (destinationDiverges) alerts.push({
+    id: "meta-destination-divergence", severity: "Atenção", title: "Destino Meta diverge da LP registrada",
+    detail: `A Meta reporta ${metaDestinationDomain}; a LP canônica da campanha é ${canonicalDomain}. Nenhuma URL foi alterada.`,
+    review: "Revisar antes de qualquer decisão sobre pós-clique ou mudança de anúncio.",
+  });
+
+  const latestCheckByAsset = new Map<string, any>();
+  for (const check of checksResult.data ?? []) if (!latestCheckByAsset.has(String(check.asset_id))) latestCheckByAsset.set(String(check.asset_id), check);
+  const componentCheck = (component: string) => {
+    const asset = (assetsResult.data ?? []).find((item: any) => item.metadata?.component === component);
+    return asset ? latestCheckByAsset.get(String(asset.id)) ?? null : null;
+  };
+  const pageCheck = componentCheck("page");
+  const checkoutCheck = componentCheck("checkout");
+  const healthState = (check: any) => check?.status === "healthy" ? "Saudável" : check?.status === "critical" ? "Crítico" : check?.status === "warning" ? "Atenção" : "Aguardando dados";
+  const operationalStates = [healthState(pageCheck), healthState(checkoutCheck)];
+  const operational = operationalStates.includes("Crítico") ? "Crítico" as const
+    : operationalStates.includes("Atenção") ? "Atenção" as const
+      : operationalStates.every((item) => item === "Saudável") ? "Saudável" as const : "Aguardando dados" as const;
+  const journeyReasons: string[] = [];
+  if (operational !== "Saudável") journeyReasons.push(`Saúde operacional: ${operational.toLowerCase()}.`);
+  if (health.quality !== "Boa") journeyReasons.push(`Saúde da mensuração: ${health.quality.toLowerCase()}.`);
+  if (!norwynLastEventAt) journeyReasons.push("Sem evento Norwyn recente no recorte.");
+  if (!hotmartLastUpdatedAt) journeyReasons.push("Sem atualização Hotmart identificada no recorte.");
+  const journeyStatus = operational === "Crítico" ? "Crítico" as const
+    : operational === "Atenção" || operational === "Aguardando dados" || health.quality !== "Boa" ? "Atenção" as const : "Saudável" as const;
+  if (healthState(pageCheck) === "Crítico") alerts.push({
+    id: "landing-page-unavailable", severity: "Crítico", title: "Landing Page indisponível",
+    detail: "O último check operacional da página falhou. Isso limita qualquer leitura de desempenho pós-clique.",
+    review: "Revisar após uma nova verificação saudável da página.",
+  });
+  if (healthState(checkoutCheck) === "Crítico") alerts.push({
+    id: "checkout-unavailable", severity: "Crítico", title: "Checkout indisponível",
+    detail: "O último check operacional do checkout falhou. Não interpretar queda comercial como problema de anúncio enquanto persistir.",
+    review: "Revisar após uma nova verificação saudável do checkout.",
+  });
+  const intraday = intradayResult.error ? {
+    available: false, since: null, spend: null, linkClicks: null, checkouts: null, metaPurchases: null, confirmedSales: null,
+    reason: "Histórico intradiário ainda não está disponível neste ambiente.", collectedAt: null, perAd: [],
+  } : buildIntradayDelta(intradayResult.data ?? []);
+  if (activeCampaign && !intradayResult.error && !(intradayResult.data ?? []).length) alerts.push({
+    id: "intraday-snapshot-missing", severity: "Atenção", title: "Snapshot intradiário ainda não registrado",
+    detail: "A campanha está ativa, mas não há snapshot para a data selecionada.", review: "Revisar após a próxima janela da V9.",
+  });
   const operations: AdsOperations = {
     freshness,
     trackingHealth: health,
@@ -488,6 +561,14 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
       pixelId,
       version: registry?.landing_version ?? null,
     },
+    destination: { metaUrl: metaDestinationUrl, metaDomain: metaDestinationDomain, canonicalUrl, canonicalDomain, diverges: destinationDiverges },
+    journeyHealth: {
+      status: journeyStatus,
+      operational,
+      measurement: health.quality,
+      reasons: journeyReasons.length ? journeyReasons : ["LP, checkout e mensuração estão dentro dos critérios operacionais disponíveis."],
+      lastCheckedAt: latestIso((checksResult.data ?? []) as Array<Record<string, any>>, ["checked_at"]),
+    },
     coverage: {
       sessions: realSessions.size,
       campaignIdSessions,
@@ -499,16 +580,7 @@ async function fetchTrafficIntelligence(dataClient: AdsDataClient, tenantId: str
       bridgeKeysWithAd: trackingKeys.filter((row) => row.ad_id).length,
       hotmartWithSourceSck,
     },
-    intradayDelta: {
-      available: false,
-      since: null,
-      spend: null,
-      linkClicks: null,
-      checkouts: null,
-      metaPurchases: null,
-      confirmedSales: null,
-      reason: "A V9 atual faz upsert do acumulado diário e não mantém snapshot métrico por execução. Comparar duas coletas intradiárias exigiria histórico adicional no coletor, fora deste escopo.",
-    },
+    intradayDelta: intraday,
   };
 
   return {

@@ -16,6 +16,7 @@ const tests = [
   "scripts/norwyn-traffic-intelligence-v2-test.cjs",
   "scripts/norwyn-traffic-intelligence-v21-test.cjs",
   "scripts/norwyn-traffic-operations-test.cjs",
+  "scripts/norwyn-traffic-lp-operations-v22-test.cjs",
   "scripts/norwyn-hotmart-attribution-bridge-test.cjs",
   "scripts/norwyn-meta-pixel-test.cjs",
   "scripts/norwyn-lp-cors-test.cjs",

@@ -42,7 +42,7 @@ assert.match(service, /payload\?\.visitor_id/);
 assert.match(service, /isKnownTestTraffic/);
 assert.match(service, /operational_visibility === "archived"/);
 assert.match(service, /Instagram · Stories/);
-for (const source of ["Instagram · Stories", "Instagram · Link da bio", "WhatsApp · Grupo", "Site Juliana", "Meta Ads", "Direto \/ sem identificação"]) {
+for (const source of ["Instagram · Stories", "Instagram · Link da bio", "WhatsApp · Grupo", "Site Juliana", "Meta Ads", "Direto", "Origem não identificada"]) {
   assert.match(service, new RegExp(source), `missing official attribution source: ${source}`);
 }
 assert.match(insights, /sessionShare: totalSessions > 0/);
@@ -51,9 +51,9 @@ assert.match(service, /sessionOrigins/);
 assert.match(component, /% das sessões/);
 assert.match(component, /Taxa de checkout/);
 assert.match(component, /% dos checkouts/);
-assert.match(component, /Sessões em que a origem não pôde ser identificada/);
-assert.match(component, /Compra atribuída/);
-assert.match(component, /Aguardando atribuição/);
+assert.match(component, /Direto × origem não identificada/);
+assert.match(component, /Hotmart confirmada \+ origem/);
+assert.match(component, /Hotmart sem origem/);
 assert.match(component, /Uma compra sem atribuição nunca é somada a Direto/);
 assert.doesNotMatch(component, /context\.attribution\.slice\(/, "official attribution rows must not be truncated");
 assert.match(attributionFunction, /checkoutSessions\.add/);
@@ -127,7 +127,7 @@ assert.equal(insightsModule.exports.journeyExecutiveRates(0, 0, 0, 0).attributio
 assert.match(service, /sale_confirmed.*true/);
 assert.match(service, /attributedPurchasesByOrigin/);
 assert.match(service, /trackingKeyIdSet\.has/);
-assert.doesNotMatch(service, /attributedPurchasesByOrigin\.set\("Direto \/ sem identificação"/, "unattributed purchases must never be assigned to Direct");
+assert.doesNotMatch(service, /attributedPurchasesByOrigin\.set\("Direto"/, "unattributed purchases must never be assigned to Direct");
 const lowSampleInsights = insightsModule.exports.buildInsights({ journey: sampleJourney, previousJourney: emptyJourney, criteria: insightsModule.exports.defaultLandingCriteria, maturity: insightsModule.exports.defaultLandingMaturity });
 assert.equal(lowSampleInsights.some((item) => item.id === "minimum_sample"), true, "low sample must be explicit");
 assert.equal(lowSampleInsights.find((item) => item.id === "minimum_sample").confidence, null, "confidence must not be shown before Insight maturity");

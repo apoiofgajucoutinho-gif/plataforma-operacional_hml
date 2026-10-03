@@ -38,6 +38,11 @@ assert.ok(result.actions.length <= 3);
 assert.ok(result.decisions.every((item) => item.review && item.confidenceReason && item.impact));
 assert.ok(result.decisions.every((item) => !["pause", "budget", "targeting"].includes(item.action)));
 
+const operationalFailure = buildTrafficDecisions(ads, config, reconciliation, null, { status: "Crítico" });
+assert.ok(operationalFailure.decisions.every((item) => item.action === "investigar pós-clique"));
+assert.ok(operationalFailure.decisions.every((item) => item.confidence === "Baixa"));
+assert.ok(operationalFailure.decisions.every((item) => /LP ou checkout/.test(item.why)));
+
 const component = fs.readFileSync("modules/ads/components/TrafficIntelligenceV2.tsx", "utf8");
 const server = fs.readFileSync("modules/ads/services/ads-server.ts", "utf8");
 const migration = fs.readFileSync("supabase/migrations/20261002002626_traffic_intelligence_v21_campaign_resolution.sql", "utf8");

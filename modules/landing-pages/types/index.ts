@@ -183,7 +183,7 @@ export type LandingDashboardContext = {
   allowedModules: string[];
   diagnostic: string | null;
   period: { key: string; label: string; start: string; end: string; comparisonAvailable: boolean };
-  traffic: { includesTest: boolean; excludedEvents: number };
+  traffic: { includesTest: boolean; excludedEvents: number; technicalAudit: Array<{ reason: string; events: number; sessions: number }> };
   filters: { products: string[]; campaigns: string[]; environments: string[]; statuses: string[]; domains: string[] };
   landings: LandingDashboardItem[];
   selected: LandingDashboardItem | null;
@@ -210,6 +210,13 @@ export type LandingDashboardContext = {
       confirmed: number;
       attributed: number;
       unattributed: number;
+      originDetermined: number;
+      campaignDetermined: number;
+      adDetermined: number;
+      trackedByNorwyn: number;
+      confirmedRevenue: number;
+      trackedRevenue: number;
+      metaReported: number | null;
     };
     behavioral: Array<{ key: string; label: string; sessions: number; events: number; note: string }>;
     highlights: {
@@ -247,6 +254,7 @@ export type LandingDashboardContext = {
     purchaseRate: number | null;
     revenue: number | null;
     revenuePerSession: number | null;
+    attributionConfidence: string | null;
   }>;
   acquisition: {
     totalSessions: number;
@@ -254,6 +262,30 @@ export type LandingDashboardContext = {
     maturity: LandingInsight["maturity"];
     reading: string[];
     purchasesAvailable: boolean;
+  };
+  confirmedSalesBySource: Array<{
+    source: string;
+    sessions: number;
+    checkouts: number;
+    sales: number;
+    revenue: number;
+    sessionToSaleRate: number | null;
+    confidence: string;
+  }>;
+  attributionQuality: {
+    confirmed: number;
+    originDetermined: number;
+    campaignDetermined: number;
+    adDetermined: number;
+    unknown: number;
+    originCoverage: number | null;
+    reasons: Array<{ reason: string; sales: number }>;
+  };
+  journeyHealth: {
+    status: "Saudável" | "Atenção" | "Crítico" | "Aguardando dados";
+    operational: "Saudável" | "Atenção" | "Crítico" | "Aguardando dados";
+    measurement: "Boa" | "Parcial" | "Fraca";
+    reasons: string[];
   };
   recentEvents: Array<{ id: string; name: string; label: string; occurredAt: string; section: string | null; source: string }>;
   content: {

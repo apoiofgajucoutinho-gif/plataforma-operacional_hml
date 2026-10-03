@@ -404,7 +404,7 @@ export function AdsDashboard({ context, basePath = "/ads", searchParams }: { con
 
       <PeriodSummary rows={filteredRows} totalRows={context.rows.length} period={context.period} />
 
-      <ExecutiveTrafficOverview rows={filteredRows} snapshots={context.configSnapshots} />
+      <ExecutiveTrafficOverview rows={filteredRows} snapshots={context.configSnapshots} operations={context.operations} />
 
       {activeTab === "overview" ? <OverviewTab rows={filteredRows} granularity={granularity} /> : null}
       {activeTab === "performance" ? <PerformanceTab rows={filteredRows} /> : null}
@@ -577,12 +577,12 @@ function PeriodSummary({
   );
 }
 
-function ExecutiveTrafficOverview({ rows, snapshots }: { rows: AdsDailyRow[]; snapshots: AdsContext["configSnapshots"] }) {
+function ExecutiveTrafficOverview({ rows, snapshots, operations }: { rows: AdsDailyRow[]; snapshots: AdsContext["configSnapshots"]; operations: AdsContext["operations"] }) {
   const metrics = aggregate(rows);
   const enriched = rows.filter((row) => row.creative_id || row.targeting_summary || row.destination_url);
   const audience = enriched.find((row) => row.targeting_summary)?.targeting_summary;
   const creatives = new Set(enriched.map((row) => row.creative_id).filter(Boolean)).size;
-  const destination = enriched.find((row) => row.destination_domain)?.destination_domain;
+  const destination = operations.destination.metaDomain ?? enriched.find((row) => row.destination_domain)?.destination_domain;
   const attention = metrics.totSpend > 0 && metrics.metaCheckouts === 0
     ? "Investimento registrado sem checkout Meta no recorte"
     : metrics.metaLinkClicks > 0 && metrics.metaLpv === 0
@@ -590,22 +590,23 @@ function ExecutiveTrafficOverview({ rows, snapshots }: { rows: AdsDailyRow[]; sn
       : "Nenhum sinal crítico automático";
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-6">
       <ExecutiveAnswer icon={<CircleDollarSign />} label="Quanto investimos?" value={formatMoney(metrics.totSpend)} detail={`${rows.length} registros no recorte`} />
       <ExecutiveAnswer icon={<Users />} label="Quem impactamos?" value={audience ? truncate(audience.replaceAll(" | ", " · "), 72) : "Não disponível para este período"} detail={audience ? "Configuração real retornada pela Meta" : "Histórico anterior ao enriquecimento V9"} />
       <ExecutiveAnswer icon={<ImageIcon />} label="O que mostramos?" value={creatives ? `${creatives} criativo${creatives === 1 ? "" : "s"}` : "Não disponível"} detail={creatives ? "IDs e peças enriquecidos pela V9" : "Creative ID ausente no legado"} />
-      <ExecutiveAnswer icon={<MapPin />} label="Para onde levamos?" value={destination ?? "Não disponível"} detail={destination ? "Destino configurado no Meta" : "Destino não coletado no período"} />
-      <ExecutiveAnswer icon={<ShieldCheck />} label="O que merece atenção?" value={attention} detail={`${snapshots.length} snapshot${snapshots.length === 1 ? "" : "s"} de configuração disponível${snapshots.length === 1 ? "" : "is"}`} />
+      <ExecutiveAnswer icon={<MapPin />} label="Destino reportado pela Meta" value={destination ?? "Não disponível"} detail={destination ? "Fonte: destination_url coletada pela V9" : "Destino não coletado no período"} />
+      <ExecutiveAnswer icon={<MapPin />} label="LP canônica da campanha" value={operations.destination.canonicalDomain ?? "Não disponível"} detail={operations.destination.diverges ? "Atenção: diverge do destino reportado pela Meta" : "Fonte: registro canônico da Norwyn"} />
+      <ExecutiveAnswer icon={<ShieldCheck />} label="O que merece atenção?" value={attention} detail={`${snapshots.length} snapshot${snapshots.length === 1 ? "" : "s"} de configuração ${snapshots.length === 1 ? "disponível" : "disponíveis"}`} />
     </div>
   );
 }
 
 function ExecutiveAnswer({ icon, label, value, detail }: { icon: ReactNode; label: string; value: string; detail: string }) {
   return (
-    <Card className="min-h-40 p-4">
+    <Card className="min-h-40 min-w-0 p-4">
       <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 [&_svg]:h-5 [&_svg]:w-5">{icon}</div>
       <p className="mt-3 text-xs font-bold uppercase text-brand-clay">{label}</p>
-      <p className="mt-2 text-lg font-semibold leading-6 text-brand-teal">{value}</p>
+      <p className="mt-2 break-words text-lg font-semibold leading-6 text-brand-teal">{value}</p>
       <p className="mt-2 text-xs leading-5 text-brand-teal/55">{detail}</p>
     </Card>
   );

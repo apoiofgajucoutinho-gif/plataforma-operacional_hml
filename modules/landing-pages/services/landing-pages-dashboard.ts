@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { functionalRoleFor } from "@/lib/auth/roles";
 import { getLandingAccess } from "@/modules/landing-pages/services/landing-pages-server";
 import { attributionRates, buildInsights, buildJourney, journeyExecutiveRates, maturityForSample, mergeLandingCriteria, mergeLandingMaturity } from "@/modules/landing-pages/analytics/landing-insights";
+import { eventOrigin, humanOrigin, isKnownTestTraffic, technicalTrafficReason } from "@/modules/landing-pages/analytics/traffic-classification";
 import type { LandingDashboardContext, LandingDashboardItem, LandingMetric } from "@/modules/landing-pages/types";
 import { normalizeProductIdentity } from "@/modules/norwyn/services/product-identity";
 
@@ -109,32 +110,6 @@ function isArchived(row: any) {
   return row?.metadata?.operational_visibility === "archived";
 }
 
-function isKnownTestTraffic(row: any) {
-  const campaign = String(row.utm_campaign ?? "").toLowerCase();
-  const source = String(row.utm_source ?? "").toLowerCase();
-  const sck = String(row.sck ?? "").toLowerCase();
-  const trafficType = String(row.payload?.traffic_type ?? "").toLowerCase();
-  const host = domainOf(row.page_url);
-  return trafficType === "test" || trafficType === "internal"
-    || source === "codex_qa"
-    || campaign.startsWith("codex_hml_qa_")
-    || sck === "teste123" || sck === "qa_endpoint" || sck.startsWith("codex_")
-    || host === "lp-ju.vercel.app" || host === "v0-zumbidoju.vercel.app";
-}
-
-function humanOrigin(sourceValue: string | null | undefined, mediumValue: string | null | undefined, contentValue: string | null | undefined) {
-  const source = String(sourceValue ?? "").toLowerCase();
-  const medium = String(mediumValue ?? "").toLowerCase();
-  const content = String(contentValue ?? "").toLowerCase();
-  if (source === "instagram" && content === "stories") return "Instagram · Stories";
-  if (source === "instagram" && content === "bio") return "Instagram · Link da bio";
-  if (source === "whatsapp" && (medium === "group" || content === "grupo_whatsapp")) return "WhatsApp · Grupo";
-  if (source === "site" && content === "site_juliana") return "Site Juliana";
-  if (source === "meta" && medium === "paid") return "Meta Ads";
-  if (!source) return "Direto / sem identificação";
-  return source.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 type OfficialAttributionSource = {
   source: string;
   medium: string;
@@ -152,11 +127,12 @@ const officialAttributionSourcesByLanding: Record<string, OfficialAttributionSou
     { source: "whatsapp", medium: "group", content: "grupo_whatsapp", displayName: "WhatsApp · Grupo", campaign: "Imersão Zumbido", sortOrder: 3, active: true },
     { source: "site", medium: "owned", content: "site_juliana", displayName: "Site Juliana", campaign: "Imersão Zumbido", sortOrder: 4, active: true },
     { source: "meta", medium: "paid", content: "ads", displayName: "Meta Ads", campaign: "Imersão Zumbido", sortOrder: 5, active: true },
-    { source: "", medium: "", content: "", displayName: "Direto / sem identificação", campaign: "Sem campanha identificada", sortOrder: 6, active: true },
+    { source: "", medium: "", content: "", displayName: "Direto", campaign: "Sem campanha", sortOrder: 6, active: true },
+    { source: "", medium: "", content: "", displayName: "Origem não identificada", campaign: "Contexto de aquisição incompleto", sortOrder: 7, active: true },
   ],
 };
 
-function attributionRows(landingKey: string, rows: any[], totalSessions: number, maturityConfig: LandingDashboardContext["insightMaturity"]) {
+function attributionRows(landingKey: string, rows: any[], totalSessions: number, maturityConfig: LandingDashboardContext["insightMaturity"]): LandingDashboardContext["attribution"] {
   const officialSources = (officialAttributionSourcesByLanding[landingKey] ?? []).filter((item) => item.active);
   const officialByName = new Map(officialSources.map((item) => [item.displayName, item]));
   const attributionMap = new Map<string, { source: string; campaign: string; sessions: Set<string>; checkoutSessions: Set<string>; sortOrder: number }>();
@@ -174,7 +150,7 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number,
   }
 
   function originFor(row: any) {
-    const source = humanOrigin(row.utm_source, row.utm_medium, row.utm_content);
+    const source = eventOrigin(row);
     const official = officialByName.get(source);
     const campaign = official?.campaign ?? row.utm_campaign ?? row.campaign_key ?? "Sem campanha identificada";
     const key = official ? `official:${official.sortOrder}` : `extra:${source}::${campaign}`;
@@ -197,7 +173,7 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number,
   for (const row of rows) {
     if (!row.session_id || !eligibleSessionIds.has(row.session_id)) continue;
     const origin = originFor(row);
-    const identified = origin.source !== "Direto / sem identificação";
+    const identified = !["Direto", "Origem não identificada"].includes(origin.source);
     const entryEvent = row.event_name === "session_start" ? 2 : ["page_view", "landing_view"].includes(row.event_name) ? 1 : 0;
     const score = (identified ? 10 : 0) + entryEvent;
     const current = sessionOrigins.get(row.session_id);
@@ -242,14 +218,16 @@ function attributionRows(landingKey: string, rows: any[], totalSessions: number,
       purchaseRate: null,
       revenue: null,
       revenuePerSession: null,
+      attributionConfidence: null,
     };
   });
 }
 
 function buildAcquisitionReading(attribution: LandingDashboardContext["attribution"], totalSessions: number, maturityConfig: LandingDashboardContext["insightMaturity"]): LandingDashboardContext["acquisition"] {
   const totalCheckouts = attribution.reduce((sum, item) => sum + item.checkoutClicks, 0);
-  const direct = attribution.find((item) => item.source === "Direto / sem identificação");
-  const identifiedWithCheckout = attribution.filter((item) => item.source !== "Direto / sem identificação" && item.checkoutClicks > 0);
+  const direct = attribution.find((item) => item.source === "Direto");
+  const unknown = attribution.find((item) => item.source === "Origem não identificada");
+  const identifiedWithCheckout = attribution.filter((item) => !["Direto", "Origem não identificada"].includes(item.source) && item.checkoutClicks > 0);
   const withoutCheckout = attribution.filter((item) => item.sessions > 0 && item.checkoutClicks === 0);
   const reading: string[] = [];
   if (totalCheckouts > 0) {
@@ -258,7 +236,8 @@ function buildAcquisitionReading(attribution: LandingDashboardContext["attributi
       ? new Intl.ListFormat("pt-BR", { style: "long", type: "conjunction" }).format(identifiedWithCheckout.map((item) => item.source))
       : "As origens identificadas";
     if (identifiedCheckouts > 0) reading.push(`${names} somaram ${identifiedCheckouts.toLocaleString("pt-BR")} dos ${totalCheckouts.toLocaleString("pt-BR")} checkouts do período.`);
-    if (direct?.sessions) reading.push(`Direto / sem identificação representou ${direct.sessionShare.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% das sessões e ${(direct.checkoutShare ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% dos checkouts.`);
+    if (direct?.sessions) reading.push(`Direto representou ${direct.sessionShare.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% das sessões e ${(direct.checkoutShare ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% dos checkouts.`);
+    if (unknown?.sessions) reading.push(`A origem não pôde ser determinada em ${unknown.sessions.toLocaleString("pt-BR")} sessões (${unknown.sessionShare.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%).`);
   } else {
     reading.push("Nenhuma sessão do período registrou intenção de checkout.");
   }
@@ -286,7 +265,7 @@ function buildJourneyBreakdowns(
   if (dimension === "origin") return attribution.map((item) => ({
     label: item.source,
     sessions: item.sessions,
-    offerViews: eventSessions(rows.filter((row) => humanOrigin(row.utm_source, row.utm_medium, row.utm_content) === item.source), ["offer_view"]),
+    offerViews: eventSessions(rows.filter((row) => eventOrigin(row) === item.source), ["offer_view"]),
     checkoutClicks: item.checkoutClicks,
     purchases: attributedPurchasesByOrigin.get(item.source) ?? 0,
     checkoutRate: item.sessions ? (item.checkoutClicks / item.sessions) * 100 : null,
@@ -408,7 +387,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const criteriaHistoryStart = new Date(period.end.getTime() - maxCriterionWindow * 2 * 24 * 60 * 60 * 1000);
   const analysisStart = new Date(Math.min(previousStart.getTime(), criteriaHistoryStart.getTime()));
   const rawAnalysisEvents = await readAll((from, to) => client.from("landing_page_tracking_events")
-    .select("id,event_name,session_id,utm_source,utm_medium,utm_campaign,utm_content,sck,campaign_key,landing_key,landing_version,block_id,cta_id,page_url,payload,source_type,occurred_at")
+    .select("id,event_name,session_id,utm_source,utm_medium,utm_campaign,utm_content,sck,campaign_key,landing_key,landing_version,block_id,cta_id,page_url,payload,source_type,occurred_at,fbclid,meta_campaign_id,meta_adset_id,meta_ad_id")
     .eq("tenant_id", tenantId).eq("landing_key", selected.landingKey)
     .gte("occurred_at", analysisStart.toISOString()).lte("occurred_at", period.end.toISOString())
     .order("occurred_at", { ascending: false }).range(from, to));
@@ -418,6 +397,16 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const events = includeTest ? rawEvents : publicEvents;
   const previousEvents = includeTest ? rawPreviousEvents : rawPreviousEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
   const excludedEvents = rawEvents.length - events.length;
+  const technicalAuditMap = new Map<string, { events: number; sessions: Set<string> }>();
+  for (const row of rawEvents) {
+    const reason = row.source_type !== "REAL" ? `Evento classificado como ${row.source_type}` : technicalTrafficReason(row);
+    if (!reason) continue;
+    const current = technicalAuditMap.get(reason) ?? { events: 0, sessions: new Set<string>() };
+    current.events += 1;
+    if (row.session_id) current.sessions.add(row.session_id);
+    technicalAuditMap.set(reason, current);
+  }
+  const technicalAudit = [...technicalAuditMap.entries()].map(([reason, value]) => ({ reason, events: value.events, sessions: value.sessions.size })).sort((a, b) => b.events - a.events);
 
   const pageNames = ["page_view", "landing_view"];
   const visitorCount = unique(events.filter((row) => pageNames.includes(row.event_name)), (row) => row.payload?.visitor_id);
@@ -449,15 +438,15 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const sections = [...sectionCounts.entries()].map(([id, views]) => ({ id, label: sectionLabels[id] ?? id, views, share: sessionCount ? (views / sessionCount) * 100 : null })).sort((a, b) => b.views - a.views);
   const publicSessionCount = eventSessions(publicEvents, ["session_start", ...pageNames]);
   const attribution = attributionRows(selected.landingKey, publicEvents, publicSessionCount, insightMaturity);
-  const acquisition = buildAcquisitionReading(attribution, publicSessionCount, insightMaturity);
+  let acquisition = buildAcquisitionReading(attribution, publicSessionCount, insightMaturity);
 
   const [trackingKeysResult, commercialProductsResult, periodSales] = await Promise.all([
-    client.from("growth_tracking_keys").select("id")
+    client.from("growth_tracking_keys").select("id,source_sck,source,medium,content,utm_source,utm_medium,utm_campaign,utm_content,campaign_id,adset_id,ad_id,tracking_confidence,metadata")
       .eq("tenant_id", tenantId)
       .or(`campaign_key.eq.${selected.landingKey},utm_campaign.eq.${selected.landingKey}`),
     client.from("comercial_produtos").select("id,hotmart_product_id,nome,ativo").eq("tenant_id", tenantId),
     readAll((from, to) => client.from("comercial_vendas")
-      .select("id,transaction_id,produto_id,hotmart_product_id,produto_nome,status_normalizado,sale_confirmed,data_compra,source_sck")
+      .select("id,transaction_id,produto_id,hotmart_product_id,produto_nome,status_normalizado,sale_confirmed,data_compra,source_sck,valor_bruto")
       .eq("tenant_id", tenantId).eq("sale_confirmed", true)
       .gte("data_compra", period.start.toISOString()).lte("data_compra", period.end.toISOString())
       .order("data_compra", { ascending: false }).range(from, to)),
@@ -476,21 +465,55 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   );
   const confirmedSaleIds = confirmedSales.map((sale: any) => sale.id);
   const bridgeResult = confirmedSaleIds.length
-    ? await client.from("hotmart_attribution_bridge_v").select("sale_id,sale_confirmed,data_compra,norwyn_source,norwyn_channel,norwyn_campaign,norwyn_entry,tracking_key_id")
+    ? await client.from("hotmart_attribution_bridge_v").select("sale_id,sale_confirmed,data_compra,valor_bruto,hotmart_source_sck,norwyn_source,norwyn_channel,norwyn_campaign,norwyn_entry,norwyn_confidence,tracking_key_id")
       .eq("tenant_id", tenantId).in("sale_id", confirmedSaleIds)
     : { data: [], error: null };
   if (bridgeResult.error) throw new Error(bridgeResult.error.message);
   const reconciledSales = bridgeResult.data ?? [];
   const trackingKeyIdSet = new Set(trackingKeyIds.map(String));
+  const trackingKeyById = new Map<string, any>((trackingKeysResult.data ?? []).map((item: any) => [String(item.id), item]));
   const attributedSales = reconciledSales.filter((item: any) => item.sale_confirmed && item.tracking_key_id && trackingKeyIdSet.has(String(item.tracking_key_id)));
   const confirmedPurchases = new Set(confirmedSales.map((sale: any) => sale.id)).size;
-  const attributedPurchases = new Set(attributedSales.map((sale: any) => sale.sale_id)).size;
-  const unattributedPurchases = Math.max(0, confirmedPurchases - attributedPurchases);
   const attributedPurchasesByOrigin = new Map<string, number>();
+  const salesByOrigin = new Map<string, { sales: Set<string>; revenue: number; confidence: string }>();
   for (const sale of attributedSales) {
     const origin = humanOrigin(sale.norwyn_source, sale.norwyn_channel, sale.norwyn_entry);
-    attributedPurchasesByOrigin.set(origin, (attributedPurchasesByOrigin.get(origin) ?? 0) + 1);
+    if (origin === "Direto") continue;
+    const item = salesByOrigin.get(origin) ?? { sales: new Set<string>(), revenue: 0, confidence: String(sale.norwyn_confidence ?? "Determinística") };
+    if (!item.sales.has(String(sale.sale_id))) {
+      item.sales.add(String(sale.sale_id));
+      item.revenue += Number(sale.valor_bruto ?? 0);
+    }
+    salesByOrigin.set(origin, item);
   }
+  for (const [origin, item] of salesByOrigin) attributedPurchasesByOrigin.set(origin, item.sales.size);
+  const originDetermined = [...salesByOrigin.values()].reduce((sum, item) => sum + item.sales.size, 0);
+  const attributedPurchases = originDetermined;
+  const unattributedPurchases = Math.max(0, confirmedPurchases - originDetermined);
+  const campaignDetermined = new Set(attributedSales.filter((sale: any) => Boolean(sale.norwyn_campaign)).map((sale: any) => sale.sale_id)).size;
+  const adDetermined = new Set(attributedSales.filter((sale: any) => trackingKeyById.get(String(sale.tracking_key_id))?.ad_id).map((sale: any) => sale.sale_id)).size;
+  const confirmedRevenue = confirmedSales.reduce((sum: number, sale: any) => sum + Number(sale.valor_bruto ?? 0), 0);
+  const trackedRevenue = [...salesByOrigin.values()].reduce((sum, item) => sum + item.revenue, 0);
+  for (const item of attribution) {
+    const sales = salesByOrigin.get(item.source);
+    if (!sales) continue;
+    item.purchases = sales.sales.size;
+    item.revenue = sales.revenue;
+    item.purchaseRate = item.sessions > 0 ? (sales.sales.size / item.sessions) * 100 : null;
+    item.revenuePerSession = item.sessions > 0 ? sales.revenue / item.sessions : null;
+    item.attributionConfidence = sales.confidence;
+  }
+  const confirmedSalesBySource = attribution.filter((item) => (item.purchases ?? 0) > 0).map((item) => ({
+    source: item.source, sessions: item.sessions, checkouts: item.checkoutClicks, sales: item.purchases ?? 0, revenue: item.revenue ?? 0,
+    sessionToSaleRate: item.purchaseRate, confidence: item.attributionConfidence ?? "Determinística",
+  }));
+  const unresolvedSourceSck = confirmedSales.filter((sale: any) => sale.source_sck && !attributedSales.some((item: any) => item.sale_id === sale.id)).length;
+  const withoutSourceSck = confirmedSales.filter((sale: any) => !sale.source_sck).length;
+  const attributionReasons = [
+    ...(withoutSourceSck ? [{ reason: "Venda sem source_sck", sales: withoutSourceSck }] : []),
+    ...(unresolvedSourceSck ? [{ reason: "source_sck sem chave Norwyn resolvida", sales: unresolvedSourceSck }] : []),
+  ];
+  acquisition = { ...buildAcquisitionReading(attribution, publicSessionCount, insightMaturity), purchasesAvailable: originDetermined > 0 };
   const journeyBase = buildJourney(events, confirmedPurchases);
   const executiveRates = journeyExecutiveRates(sessionCount, checkoutSessions, confirmedPurchases, attributedPurchases);
   const insightPool = includeTest ? rawAnalysisEvents : rawAnalysisEvents.filter((row) => row.source_type === "REAL" && !isKnownTestTraffic(row));
@@ -537,6 +560,20 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
   const pageDiagnostic = healthView.diagnostics.find((item) => item.key === "page") ?? null;
   const checkoutDiagnostic = healthView.diagnostics.find((item) => item.key === "checkout") ?? null;
   const latestHealthCheckAt = healthView.components.map((item) => item.lastCheckedAt).filter(Boolean).sort().at(-1) ?? null;
+  const operational = healthView.overallStatus === "healthy" ? "Saudável" as const
+    : healthView.overallStatus === "critical" ? "Crítico" as const
+      : healthView.overallStatus === "warning" ? "Atenção" as const : "Aguardando dados" as const;
+  const trackingCoverage = confirmedPurchases > 0 ? (originDetermined / confirmedPurchases) * 100 : null;
+  const measurement = !events.length ? "Fraca" as const
+    : trackingCoverage !== null && trackingCoverage >= 80 ? "Boa" as const
+      : trackingCoverage !== null && trackingCoverage >= 40 ? "Parcial" as const : "Fraca" as const;
+  const journeyHealthStatus = operational === "Crítico" ? "Crítico" as const
+    : operational !== "Saudável" || measurement !== "Boa" ? "Atenção" as const : "Saudável" as const;
+  const journeyHealthReasons = [
+    `Saúde operacional: ${operational.toLowerCase()}.`,
+    `Saúde da mensuração: ${measurement.toLowerCase()}.`,
+    ...(unattributedPurchases ? [`${unattributedPurchases} ${unattributedPurchases === 1 ? "venda confirmada ainda está" : "vendas confirmadas ainda estão"} sem origem determinada.`] : []),
+  ];
 
   return {
     role: access.role,
@@ -544,7 +581,7 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     allowedModules: access.allowedModules.includes("landing-pages") ? access.allowedModules : [...access.allowedModules, "landing-pages"],
     diagnostic: null,
     period: { key: period.key, label: period.label, start: period.start.toISOString(), end: period.end.toISOString(), comparisonAvailable: previousEvents.length > 0 },
-    traffic: { includesTest: includeTest, excludedEvents },
+    traffic: { includesTest: includeTest, excludedEvents, technicalAudit },
     filters: {
       products: [...new Set(landings.map((item) => item.productName))].sort(), campaigns: [...new Set(landings.map((item) => item.campaign))].sort(),
       environments: [...new Set(landings.map((item) => item.environment))].sort(), statuses: [...new Set(landings.map((item) => item.status))].sort(),
@@ -573,6 +610,13 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
         confirmed: confirmedPurchases,
         attributed: attributedPurchases,
         unattributed: unattributedPurchases,
+        originDetermined,
+        campaignDetermined,
+        adDetermined,
+        trackedByNorwyn: originDetermined,
+        confirmedRevenue,
+        trackedRevenue,
+        metaReported: null,
       },
       breakdowns,
       availableDimensions: {
@@ -594,7 +638,18 @@ export async function getLandingDashboardContext(params: Params): Promise<Landin
     sections,
     attribution,
     acquisition,
-    recentEvents: events.slice(0, 50).map((row) => ({ id: row.id, name: row.event_name, label: eventLabels[row.event_name] ?? row.event_name, occurredAt: row.occurred_at, section: row.block_id ? sectionLabels[row.block_id] ?? row.block_id : null, source: humanOrigin(row.utm_source, row.utm_medium, row.utm_content) })),
+    confirmedSalesBySource,
+    attributionQuality: {
+      confirmed: confirmedPurchases,
+      originDetermined,
+      campaignDetermined,
+      adDetermined,
+      unknown: Math.max(0, confirmedPurchases - originDetermined),
+      originCoverage: trackingCoverage,
+      reasons: attributionReasons,
+    },
+    journeyHealth: { status: journeyHealthStatus, operational, measurement, reasons: journeyHealthReasons },
+    recentEvents: events.slice(0, 50).map((row) => ({ id: row.id, name: row.event_name, label: eventLabels[row.event_name] ?? row.event_name, occurredAt: row.occurred_at, section: row.block_id ? sectionLabels[row.block_id] ?? row.block_id : null, source: eventOrigin(row) })),
     content: {
       title: selected.name,
       summary: selected.landingKey === "imersao_zumbido" ? "Página da Imersão Zumbido com oferta clínica, módulos, especialistas, provas, checkout e dúvidas frequentes." : String(definition?.metadata?.change_summary ?? extracted?.headline?.value ?? "Aguardando conteúdo estruturado."),
@@ -721,20 +776,22 @@ function emptyContext(role: string | null, allowedModules: string[], diagnostic:
   const emptyMetric = metric(null, null);
   return {
     role, roleMode: functionalRoleFor(role) === "ADMIN" ? "ADMIN" : "ESPECIALISTA", allowedModules, diagnostic,
-    period: { key: "30d", label: "Últimos 30 dias", start: new Date().toISOString(), end: new Date().toISOString(), comparisonAvailable: false }, traffic: { includesTest: false, excludedEvents: 0 },
+    period: { key: "30d", label: "Últimos 30 dias", start: new Date().toISOString(), end: new Date().toISOString(), comparisonAvailable: false }, traffic: { includesTest: false, excludedEvents: 0, technicalAudit: [] },
     filters: { products: [], campaigns: [], environments: [], statuses: [], domains: [] }, landings: [], selected: null,
     metrics: { visitors: emptyMetric, sessions: emptyMetric, pageViews: emptyMetric, offerViews: emptyMetric, checkoutClicks: emptyMetric, conversionRate: emptyMetric },
     daily: [], funnel: [],
     journey: {
       detailed: [], executive: [], behavioral: [],
       executiveRates: { checkoutRate: null, checkoutToPurchaseRate: null, landingConversionRate: null, attributionCoverage: null },
-      purchases: { confirmed: 0, attributed: 0, unattributed: 0 },
+      purchases: { confirmed: 0, attributed: 0, unattributed: 0, originDetermined: 0, campaignDetermined: 0, adDetermined: 0, trackedByNorwyn: 0, confirmedRevenue: 0, trackedRevenue: 0, metaReported: null },
       highlights: { biggestAbsoluteLoss: null, biggestPercentageLoss: null, bestProgress: null, lowestProgress: null },
       breakdowns: [],
       availableDimensions: { origin: false, campaign: false, landingKey: false, version: false, device: false, trafficType: false },
       purchaseLimitation: null,
     },
-    insights: [], insightMaturity: mergeLandingMaturity(null), criteria: [], topEvents: [], sections: [], attribution: [], acquisition: { totalSessions: 0, totalCheckouts: 0, maturity: null, reading: [], purchasesAvailable: false }, recentEvents: [],
+    insights: [], insightMaturity: mergeLandingMaturity(null), criteria: [], topEvents: [], sections: [], attribution: [], acquisition: { totalSessions: 0, totalCheckouts: 0, maturity: null, reading: [], purchasesAvailable: false },
+    confirmedSalesBySource: [], attributionQuality: { confirmed: 0, originDetermined: 0, campaignDetermined: 0, adDetermined: 0, unknown: 0, originCoverage: null, reasons: [] },
+    journeyHealth: { status: "Aguardando dados", operational: "Aguardando dados", measurement: "Fraca", reasons: ["Sem dados suficientes para avaliar a jornada."] }, recentEvents: [],
     content: { title: "Landing Pages", summary: "Aguardando dados", checkoutUrl: null, hotmartProductId: null, hotmartOfferId: null, previewUrl: null },
     health: { overallStatus: "unknown", overallLabel: "Aguardando dados", guidance: null, availability: "Aguardando dados", httpStatus: null, lastCheckedAt: null, domain: "Não disponível", checkout: "Aguardando dados", checkoutCheckedAt: null, links: "Aguardando dados", images: "Aguardando dados", tracking: "Aguardando dados", recentEventAt: null, errors: null, seo: "Não disponível", technicalPerformance: "Não disponível", publishedIntegrity: "Aguardando dados", components: [], diagnostics: [], divergences: [], alerts: [] },
     versions: [], qa: [], approvals: [],

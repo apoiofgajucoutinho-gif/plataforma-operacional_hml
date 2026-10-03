@@ -242,6 +242,20 @@ export type AdsOperations = {
     pixelId: string | null;
     version: string | null;
   };
+  destination: {
+    metaUrl: string | null;
+    metaDomain: string | null;
+    canonicalUrl: string | null;
+    canonicalDomain: string | null;
+    diverges: boolean;
+  };
+  journeyHealth: {
+    status: "Saudável" | "Atenção" | "Crítico" | "Aguardando dados";
+    operational: "Saudável" | "Atenção" | "Crítico" | "Aguardando dados";
+    measurement: "Boa" | "Parcial" | "Fraca";
+    reasons: string[];
+    lastCheckedAt: string | null;
+  };
   coverage: {
     sessions: number;
     campaignIdSessions: number;
@@ -262,6 +276,19 @@ export type AdsOperations = {
     metaPurchases: number | null;
     confirmedSales: number | null;
     reason: string;
+    collectedAt: string | null;
+    perAd: Array<{
+      adId: string | null;
+      adName: string;
+      spend: number;
+      impressions: number;
+      clicks: number;
+      linkClicks: number;
+      outbound: number;
+      lpv: number;
+      checkouts: number;
+      metaPurchases: number;
+    }>;
   };
 };
 

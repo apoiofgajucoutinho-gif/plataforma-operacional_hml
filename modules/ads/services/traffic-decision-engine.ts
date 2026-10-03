@@ -59,7 +59,13 @@ function confidenceFor(ad: DecisionAd, measurement: AdsReconciliationSummary["me
   return { confidence: "Média" as const, reason: `Há ${ad.linkClicks} link clicks, mas a mensuração ainda é ${measurement.quality.toLowerCase()}.` };
 }
 
-export function buildTrafficDecisions(ads: DecisionAd[], config: AdsDecisionConfig, reconciliation: AdsReconciliationSummary, nextMetaCollection?: string | null) {
+export function buildTrafficDecisions(
+  ads: DecisionAd[],
+  config: AdsDecisionConfig,
+  reconciliation: AdsReconciliationSummary,
+  nextMetaCollection?: string | null,
+  operational?: { status: "Saudável" | "Atenção" | "Crítico" | "Aguardando dados" },
+) {
   const maturePeers = ads.filter((ad) => ad.linkClicks >= config.minLinkClicksDecision);
   const comparable = maturePeers.length ? maturePeers : ads.filter((ad) => ad.linkClicks >= config.minLinkClicksSignal);
   const medianCtr = median(comparable.map((ad) => ad.linkCtr ?? 0));
@@ -73,6 +79,22 @@ export function buildTrafficDecisions(ads: DecisionAd[], config: AdsDecisionConf
     const progressed = ad.checkouts > 0 || ad.lpv > 0;
     const trackingDivergence = ad.linkClicks >= config.minLinkClicksSignal && ad.lpv < ad.linkClicks * 0.25;
     const meaningfulSpend = config.meaningfulSpend != null ? ad.spend >= config.meaningfulSpend : enough;
+
+    if (operational?.status === "Crítico") {
+      return {
+        adKey: ad.key,
+        adName: ad.name,
+        state: "Sinal de atenção",
+        action: "investigar pós-clique",
+        why: "LP ou checkout apresenta indisponibilidade operacional. O resultado comercial não deve ser atribuído ao anúncio antes de normalizar a jornada.",
+        evidence: `${ad.linkClicks} link clicks · ${ad.lpv} LPVs · ${ad.checkouts} checkout.`,
+        confidence: "Baixa",
+        confidenceReason: "A indisponibilidade operacional limita a interpretação do desempenho comercial.",
+        impact: "Separar falha da jornada de uma hipótese de mídia antes de alterar criativo, público ou orçamento.",
+        review: "Após nova verificação saudável da LP e do checkout.",
+        priority: 0,
+      };
+    }
 
     if (commercial && !reconciliation.hotmart.adAttributionAvailable) {
       return { adKey: ad.key, adName: ad.name, state: goodTraffic || ad.checkouts > 0 ? "Sinal comercial inicial" : "Resultado contraditório", action: "observar", why: "A Meta atribuiu compra, mas a Hotmart ainda não determina o anúncio.", evidence: `${ad.metaPurchases} Meta Purchase · ${ad.checkouts} checkout · ${ad.linkClicks} link clicks · R$ ${ad.spend.toFixed(2).replace(".", ",")}.`, confidence: confidence.confidence, confidenceReason: confidence.reason, impact: "Preservar o sinal comercial sem confundi-lo com venda confirmada.", review: reviewFor(ad, config, true, nextMetaCollection), priority: 1 };
