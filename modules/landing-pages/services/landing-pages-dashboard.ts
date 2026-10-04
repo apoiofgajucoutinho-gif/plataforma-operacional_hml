@@ -87,12 +87,20 @@ function resolvePeriod(params: Params) {
 
 async function readAll(build: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: { message: string } | null }>) {
   const rows: any[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await build(from, from + PAGE_SIZE - 1);
-    if (error) throw new Error(error.message);
-    const page = data ?? [];
-    rows.push(...page);
-    if (page.length < PAGE_SIZE) break;
+  const batchSize = 4;
+  for (let batchStart = 0; ; batchStart += PAGE_SIZE * batchSize) {
+    const pages = await Promise.all(
+      Array.from({ length: batchSize }, (_, index) => batchStart + index * PAGE_SIZE)
+        .map((from) => build(from, from + PAGE_SIZE - 1)),
+    );
+    let reachedEnd = false;
+    for (const { data, error } of pages) {
+      if (error) throw new Error(error.message);
+      const page = data ?? [];
+      rows.push(...page);
+      if (page.length < PAGE_SIZE) reachedEnd = true;
+    }
+    if (reachedEnd) break;
   }
   return rows;
 }

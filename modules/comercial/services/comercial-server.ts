@@ -17,7 +17,7 @@ import type {
 
 type SupabaseAny = any;
 
-const COMERCIAL_VENDAS_SELECT = "id, tenant_id, transaction_id, aluno_id, produto_id, hotmart_product_id, produto_nome, comprador_nome, comprador_email, status, status_original, status_normalizado, grupo_comercial, commercial_transaction, sale_confirmed, revenue_eligible, student_eligible, sale_comparable, event_class, eligibility_reason, forma_pagamento, parcelas, moeda, valor_bruto, valor_liquido, taxas, coproducao, data_compra, data_aprovacao, data_reembolso, data_chargeback, expected_payment_date, source_sck, origem, raw_id, last_event_at, imported_at, data_lacunas, metadata, created_at, updated_at";
+const COMERCIAL_VENDAS_SELECT = "id, tenant_id, transaction_id, aluno_id, produto_id, hotmart_product_id, produto_nome, comprador_nome, comprador_email, status, status_original, status_normalizado, grupo_comercial, commercial_transaction, sale_confirmed, revenue_eligible, student_eligible, sale_comparable, event_class, eligibility_reason, forma_pagamento, parcelas, moeda, valor_bruto, valor_liquido, taxas, coproducao, data_compra, data_aprovacao, data_reembolso, data_chargeback, expected_payment_date, source_sck, origem, raw_id, last_event_at, imported_at, data_lacunas, metadata_product_id:metadata->>product_id, metadata_hotmart_product_id:metadata->>hotmart_product_id, metadata_product_name:metadata->>product_name, metadata_product:metadata->>product, created_at, updated_at";
 const COMERCIAL_RECEBIVEIS_SELECT = "id, tenant_id, venda_id, transaction_id, parcela_numero, total_parcelas, status, data_prevista, data_recebimento, valor_bruto, valor_liquido, fonte_previsao, created_at, updated_at";
 const COMERCIAL_ALUNOS_SELECT = "id, tenant_id, nome, email, telefone, origem, primeira_compra_at, ultima_compra_at, status_acesso, acesso_expira_em, ultimo_acesso_at, created_at, updated_at";
 
@@ -65,6 +65,25 @@ function asNumberRows<T extends Record<string, unknown>>(rows: T[] | null | unde
   });
 }
 
+function normalizeVendaRows(rows: Array<Record<string, unknown>>) {
+  return asNumberRows(rows).map((row) => {
+    const normalized: Record<string, unknown> = {
+      ...row,
+      metadata: {
+        product_id: row.metadata_product_id,
+        hotmart_product_id: row.metadata_hotmart_product_id,
+        product_name: row.metadata_product_name,
+        product: row.metadata_product,
+      },
+    };
+    delete normalized.metadata_product_id;
+    delete normalized.metadata_hotmart_product_id;
+    delete normalized.metadata_product_name;
+    delete normalized.metadata_product;
+    return normalized;
+  });
+}
+
 function latestDate(rows: Array<{ updated_at?: string | null; created_at?: string | null }>) {
   return rows
     .map((row) => row.updated_at ?? row.created_at ?? null)
@@ -96,29 +115,26 @@ async function fetchTenantRows({
   const rows: Array<Record<string, unknown>> = [];
   const buildQuery = (from: number) => client
     .from(table)
-    .select(select, { count: from === 0 ? "exact" : undefined })
+    .select(select)
     .eq("tenant_id", tenantId)
     .order(orderColumn, { ascending, nullsFirst })
     .range(from, from + pageSize - 1);
 
-  const first = await buildQuery(0);
-  if (first.error) throw new Error(first.error.message);
-  rows.push(...(first.data ?? []));
-  const total = Math.min(first.count ?? rows.length, maxRows);
-  if (!first.data || first.data.length < pageSize || total <= pageSize) return rows;
-
-  const ranges: number[] = [];
-  for (let from = pageSize; from < total; from += pageSize) ranges.push(from);
   const batchSize = 4;
-  for (let index = 0; index < ranges.length; index += batchSize) {
-    const batch = await Promise.all(ranges.slice(index, index + batchSize).map((from) => buildQuery(from)));
+  for (let batchStart = 0; batchStart < maxRows; batchStart += pageSize * batchSize) {
+    const ranges = Array.from({ length: batchSize }, (_, index) => batchStart + index * pageSize)
+      .filter((from) => from < maxRows);
+    const batch = await Promise.all(ranges.map((from) => buildQuery(from)));
+    let reachedEnd = false;
     for (const page of batch) {
       if (page.error) throw new Error(page.error.message);
       rows.push(...(page.data ?? []));
+      if (!page.data || page.data.length < pageSize) reachedEnd = true;
     }
+    if (reachedEnd) break;
   }
 
-  return rows;
+  return rows.slice(0, maxRows);
 }
 
 export async function getComercialContext(): Promise<ComercialContext> {
@@ -233,7 +249,7 @@ export async function getComercialContext(): Promise<ComercialContext> {
     if (produtosResult.error) throw new Error(produtosResult.error.message);
     if (rawImportsResult.error) throw new Error(rawImportsResult.error.message);
 
-    const vendas = asNumberRows(vendasResult) as ComercialVenda[];
+    const vendas = normalizeVendaRows(vendasResult) as unknown as ComercialVenda[];
     const recebiveis = asNumberRows(recebiveisResult) as ComercialRecebivel[];
     const alunos = alunosResult as ComercialAluno[];
     const produtos = produtosResult.data as ComercialProduto[];
@@ -259,8 +275,13 @@ export async function getComercialContext(): Promise<ComercialContext> {
       rawImports,
     };
   } catch (error) {
+    console.error("comercial.context.load_failed", {
+      tenantId: membership.tenant_id,
+      role: membership.role,
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
     return {
-      ...emptyContext(error instanceof Error ? error.message : "Nao foi possivel carregar Comercial."),
+      ...emptyContext("Nao foi possivel carregar os dados do Comercial agora. Tente novamente em instantes."),
       allowedModules,
       canWrite,
     };

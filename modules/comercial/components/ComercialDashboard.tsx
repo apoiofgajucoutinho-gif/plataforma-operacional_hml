@@ -1763,7 +1763,7 @@ export function ComercialDashboard({ context }: { context: ComercialContext }) {
           <h2 className="text-xl font-black text-brand-teal">Comercial indisponivel</h2>
           <p className="mt-3 text-brand-teal/70">{context.diagnostic}</p>
           <p className="mt-4 text-sm font-bold text-brand-teal/55">
-            Se estiver testando local, aplique a migration `0037_comercial_module.sql` no Supabase usado pelo `.env.local`.
+            Se o problema continuar, tente novamente mais tarde ou acione o suporte.
           </p>
         </Card>
       </section>

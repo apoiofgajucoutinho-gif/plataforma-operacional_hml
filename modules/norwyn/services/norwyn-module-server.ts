@@ -617,8 +617,8 @@ export async function getNorwynModuleContext(module: NorwynModuleKey, searchPara
   }
 
   if (module === "marketing") {
-    const instagram = await fetchInstagram(dataClient, membership.tenant_id);
-    const [adsRows, campaigns, contentCaptures, qaReviews] = await Promise.all([
+    const [instagram, adsRows, campaigns, contentCaptures, qaReviews] = await Promise.all([
+      fetchInstagram(dataClient, membership.tenant_id),
       fetchTenantRowsPaged(dataClient, "instagram_ads_daily", adsAnalyticsSelect, membership.tenant_id, { order: "data_referencia", maxRows: 50000 }),
       safeRows(dataClient, "campaigns", "id, tenant_id, name, type, objective_id, mission_external_key, product_id, status, starts_at, ends_at, target_sales, target_revenue, plan_json, created_at, updated_at", membership.tenant_id, { order: "updated_at", limit: 120 }),
       safeRows(dataClient, "content_capture", "id, tenant_id, title, capture_type, status, product_id, mission_id, campaign_id, summary, topics, cta, created_at, updated_at", membership.tenant_id, { order: "updated_at", limit: 120 }),
@@ -629,8 +629,8 @@ export async function getNorwynModuleContext(module: NorwynModuleKey, searchPara
   }
 
   if (module === "resultados") {
-    const instagram = await fetchInstagram(dataClient, membership.tenant_id);
-    const [adsRows, commercialSales, financeLancamentos, objetivos] = await Promise.all([
+    const [instagram, adsRows, commercialSales, financeLancamentos, objetivos] = await Promise.all([
+      fetchInstagram(dataClient, membership.tenant_id),
       fetchTenantRowsPaged(dataClient, "instagram_ads_daily", adsAnalyticsSelect, membership.tenant_id, { order: "data_referencia", maxRows: 50000 }),
       fetchCommercialSales(dataClient, membership.tenant_id, 1400),
       safeRows(dataClient, "fin_lancamentos", "id, tenant_id, data_pagamento, mes_competencia, tipo, status, descricao, valor, origem, updated_at", membership.tenant_id, { order: "data_pagamento", limit: 600 }),

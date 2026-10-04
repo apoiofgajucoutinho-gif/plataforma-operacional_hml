@@ -242,7 +242,7 @@ async function fetchRowsPaged(client: SupabaseAny, table: string, select: string
   const maxRows = options?.maxRows ?? 20000;
   const rows: any[] = [];
   const buildQuery = (from: number) => {
-    let query = client.from(table).select(select, { count: from === 0 ? "exact" : undefined }).eq("tenant_id", tenantId);
+    let query = client.from(table).select(select).eq("tenant_id", tenantId);
     for (const [column, value] of Object.entries(options?.eq ?? {})) {
       query = value === null ? query.is(column, null) : query.eq(column, value);
     }
@@ -251,23 +251,20 @@ async function fetchRowsPaged(client: SupabaseAny, table: string, select: string
     return query;
   };
 
-  const first = await buildQuery(0);
-  if (first.error) return { data: rows, error: first.error.message };
-  rows.push(...(first.data ?? []));
-  const total = Math.min(first.count ?? rows.length, maxRows);
-  if (!first.data || first.data.length < pageSize || total <= pageSize) return { data: rows, error: null };
-
-  const ranges: number[] = [];
-  for (let from = pageSize; from < total; from += pageSize) ranges.push(from);
   const batchSize = 4;
-  for (let index = 0; index < ranges.length; index += batchSize) {
-    const batch = await Promise.all(ranges.slice(index, index + batchSize).map((from) => buildQuery(from)));
+  for (let batchStart = 0; batchStart < maxRows; batchStart += pageSize * batchSize) {
+    const ranges = Array.from({ length: batchSize }, (_, index) => batchStart + index * pageSize)
+      .filter((from) => from < maxRows);
+    const batch = await Promise.all(ranges.map((from) => buildQuery(from)));
+    let reachedEnd = false;
     for (const page of batch) {
       if (page.error) return { data: rows, error: page.error.message };
       rows.push(...(page.data ?? []));
+      if (!page.data || page.data.length < pageSize) reachedEnd = true;
     }
+    if (reachedEnd) break;
   }
-  return { data: rows, error: null };
+  return { data: rows.slice(0, maxRows), error: null };
 }
 
 async function countRows(client: SupabaseAny, table: string, tenantId: string) {
@@ -365,12 +362,12 @@ export async function getValidationContext(tab: ValidationTab = "hotmart") {
   const uploadRows = uploads.data as any[];
   const latestHotmartUpload = uploadRows.filter((row) => row.validation_type === "HOTMART").sort((a, b) => String(b.uploaded_at).localeCompare(String(a.uploaded_at)))[0] ?? null;
   const comparisonSummarySelect = "id, tenant_id, upload_id, transaction_id, normalized_transaction_id, match_status, sale_comparable, difference_types, created_at, official_purchase_date:official_snapshot->>purchase_date, official_raw_status:official_snapshot->>raw_status, official_canonical_status:official_snapshot->>canonical_status, official_hotmart_product_id:official_snapshot->>hotmart_product_id, official_hotmart_product_name:official_snapshot->>hotmart_product_name, official_normalized_value:official_snapshot->>normalized_value, official_currency:official_snapshot->>currency, norwyn_hotmart_product_id:norwyn_snapshot->>hotmart_product_id, norwyn_produto_nome:norwyn_snapshot->>produto_nome";
-  const comparisons = shouldLoadHotmartValidation && latestHotmartUpload
-    ? await fetchRowsPaged(client, "norwyn_hotmart_validation_comparisons", comparisonSummarySelect, auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 20000, eq: { upload_id: latestHotmartUpload.id } })
-    : { data: [], error: null };
-  const comparisonDetails = shouldLoadHotmartValidation && latestHotmartUpload
-    ? await fetchRowsPaged(client, "norwyn_hotmart_validation_comparisons", "id, tenant_id, upload_id, transaction_id, normalized_transaction_id, match_status, sale_comparable, official_snapshot, norwyn_snapshot, difference_types, created_at", auth.tenantId, { order: "created_at", pageSize: 250, maxRows: 250, eq: { upload_id: latestHotmartUpload.id } })
-    : { data: [], error: null };
+  const [comparisons, comparisonDetails] = shouldLoadHotmartValidation && latestHotmartUpload
+    ? await Promise.all([
+        fetchRowsPaged(client, "norwyn_hotmart_validation_comparisons", comparisonSummarySelect, auth.tenantId, { order: "created_at", pageSize: 1000, maxRows: 20000, eq: { upload_id: latestHotmartUpload.id } }),
+        fetchRowsPaged(client, "norwyn_hotmart_validation_comparisons", "id, tenant_id, upload_id, transaction_id, normalized_transaction_id, match_status, sale_comparable, official_snapshot, norwyn_snapshot, difference_types, created_at", auth.tenantId, { order: "created_at", pageSize: 250, maxRows: 250, eq: { upload_id: latestHotmartUpload.id } }),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }];
   const comparisonRows = comparisons.data as any[];
   const comparisonDetailRows = comparisonDetails.data as any[];
   const officialComparisonRows = comparisonRows.filter((row) => row.sale_comparable && ["MATCH_EXACT", "MATCH_DIVERGENT", "ONLY_HOTMART"].includes(row.match_status));
